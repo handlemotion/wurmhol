@@ -2,9 +2,12 @@
 // with pipes opened by the real CLI to real local HTTP servers. The network runs its reduced-motion
 // path (nodes hold still), so a press lands where the pill is rather than where it drifted from.
 import { spawn } from "node:child_process";
+import { hostname } from "node:os";
 import { type Browser, type BrowserContext, chromium, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  api,
+  cli,
   cliEnv,
   cliPath,
   createToken,
@@ -210,7 +213,7 @@ describe("the wall in a browser", () => {
       .toBe(true);
   });
 
-  it("creates a pipe from this computer: shows the steps, then the ports it serves, and opens the picked one", async () => {
+  it("creates a pipe from this computer: one copied command, no token, no approval, then its ports and the picked one opens", async () => {
     const local = await localServer((_req, res) =>
       res.writeHead(200, { "content-type": "text/html" }).end("<title>From this computer</title>"),
     );
@@ -218,16 +221,27 @@ describe("the wall in a browser", () => {
     await page.locator("[data-create]").click();
     await page.getByRole("menuitem", { name: "Create from this computer" }).click();
     const card = page.locator("section[data-open]");
+    const run = card.getByRole("button", { name: /^Copy run: npx wurmhol host --code \S+$/ });
     // Catches: the steps opening without the command to run, or in a card of another size.
-    await expect
-      .poll(() => card.getByRole("button", { name: "Copy run: npx wurmhol host" }).count())
-      .toBe(1);
+    await expect.poll(() => run.count()).toBe(1);
     expect((await card.boundingBox())!.width).toBe((await card.boundingBox())!.height);
+    // Catches: a card still asking to approve a link in the terminal.
+    expect(await card.textContent()).not.toContain("Approve");
+    await run.click();
+    const command = await page.evaluate(() => navigator.clipboard.readText());
+    const [npx, binary, ...args] = command.split(" ");
+    expect([npx, binary, args[0], args[1]]).toEqual(["npx", "wurmhol", "host", "--code"]);
 
-    const host = spawn(process.execPath, [cliPath, "host"], {
-      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
-      stdio: "ignore",
+    // A computer that has never logged in: no WURMHOL_TOKEN, nothing saved.
+    const fresh: Record<string, string> = cliEnv(stack, "");
+    delete fresh.WURMHOL_TOKEN;
+    let said = "";
+    const host = spawn(process.execPath, [cliPath, ...args], {
+      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...fresh },
+      stdio: ["ignore", "pipe", "pipe"],
     });
+    host.stdout!.on("data", (chunk: Buffer) => (said += chunk));
+    host.stderr!.on("data", (chunk: Buffer) => (said += chunk));
     try {
       const row = card.getByRole("menuitem", { name: new RegExp(`:${local.port}`) });
       // Catches: the card not hearing that the computer connected, or its ports.
@@ -252,8 +266,27 @@ describe("the wall in a browser", () => {
         .poll(() => page.getByRole("menuitem", { name: "Copy agent prompt" }).isVisible())
         .toBe(true);
       await page.keyboard.press("Escape");
+      // Catches: the CLI printing a device-code prompt to approve instead of logging straight in.
+      expect(said).not.toContain("and enter");
+      expect(said).toContain(`as ${hostname()}`);
+      await stopAll(fresh);
     } finally {
       host.kill();
     }
+
+    // Catches: a setup code that logs in a second computer (it is single use), or a refusal that
+    // does not say where to get a new one.
+    const reused = await cli(args, fresh);
+    expect(reused.code).toBe(1);
+    expect(reused.stderr).toContain("Copy the command again from Create pipe");
+    // Catches: the token named after something other than the computer, or owned by no one.
+    const { body } = await api<{ tokens: { name: string; source: string }[] }>(
+      stack,
+      ada,
+      "/api/tokens",
+    );
+    expect(body.tokens.filter((t) => t.name === hostname() && t.source === "login")).toHaveLength(
+      1,
+    );
   });
 });
