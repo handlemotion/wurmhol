@@ -18,7 +18,8 @@ network drawing that the login carries.
   foci are tagged `container` and `browser`, the two places a pipe joins, and the button sits at
   the centre, on the line between them. The innermost ellipse is a hole the open Create pipe
   card fits inside, so nothing is drawn under the card.
-- **Quiet.** One hairline ink (`text-hairline-line`), no accent, no motion beyond a fade in.
+- **Quiet.** One hairline ink (`text-hairline-line`), no accent. It fades in, and grows 5% about
+  the button while the Create pipe card is open (lines stay 1px). Under reduced motion both happen at once, without animating.
 - **Anchored to the button.** The constellation places the drawing at the anchor's position each
   frame, without the anchor's drift, so the hole stays around the button at any width.
 - **Only while the wall is empty.** Once a pipe is open, its own pills and spokes are the
