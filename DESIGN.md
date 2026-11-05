@@ -28,6 +28,9 @@ it. It holds no values: colors, sizes, and radii live in code, so they cannot dr
   Never hex values, arbitrary colors, or Tailwind palette colors (`gray-200`) in components.
 - **Add a token only when a design uses it.** A new value goes into `styles.css` first, named for
   its role, not its look. Keep the file short.
+- **Sharp.** No rounded corners anywhere: every radius token in `styles.css` is 0, and avatars,
+  badges and icon buttons are square too. Don't add `rounded-*` classes or a radius value; the
+  marketing site (`apps/site`) follows the same rule.
 - **Background vs. surface.** `background` is the app canvas. `surface` is anything raised on it:
   cards, popovers, sidebars.
 - **Brand.** `primary` is the brand color: primary buttons and selected/active components, with
