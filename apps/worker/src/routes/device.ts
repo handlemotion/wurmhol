@@ -1,0 +1,235 @@
+// `wurmhol login`, a device-code flow (ADR 0008, RFC 8628) on Better Auth's device-authorization
+// plugin. The plugin keeps the codes and their state machine; these routes add what Wurmhol needs:
+//
+// - The CLI's two calls, `POST /device/code` and `POST /device/token`, answered on the CLI's host.
+//   The token call redeems the code through the plugin, which makes a full Better Auth session.
+//   The CLI never sees it: the session is revoked in the same request and an ordinary org token
+//   is returned instead.
+// - The console's three calls under `/api/device`, for a signed-in member: look a code up, approve
+//   it for the active org, or deny it. The org is recorded on the code's scope as `org:<id>`.
+//
+// A code's scope is a space-separated list: `name:<computer>` (from the CLI, URI-encoded) and,
+// once approved, `org:<id>`.
+import { zValidator } from "@hono/zod-validator";
+import { APIError, DEVICE_CLIENT_ID } from "@wurmhol/auth";
+import { createToken, findMember, listOrgsForUser, setPendingDeviceScope } from "@wurmhol/db";
+
+import { type Context, Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
+import { z } from "zod";
+import { type AppEnv, requireMember } from "../context.ts";
+import { checkRateLimit, clientIp, limitPerMember, tooManyRequests } from "../rate-limiter.ts";
+
+const GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
+
+/** `wurmhol login` tokens open pipes and expire after 90 days (ADR 0008). */
+const LOGIN_TOKEN_MS = 90 * 24 * 60 * 60 * 1000;
+
+interface Scope {
+  name: string | null;
+  orgId: string | null;
+}
+
+function parseScope(scope: string | null | undefined): Scope {
+  const parts = (scope ?? "").split(" ");
+  const value = (prefix: string) => {
+    const part = parts.find((p) => p.startsWith(prefix));
+    return part ? decodeURIComponent(part.slice(prefix.length)) : null;
+  };
+  return { name: value("name:"), orgId: value("org:") };
+}
+
+function formatScope(scope: Scope) {
+  return [
+    scope.name !== null ? `name:${encodeURIComponent(scope.name)}` : null,
+    scope.orgId !== null ? `org:${encodeURIComponent(scope.orgId)}` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** `ABCD1234`, `abcd-1234` and `ABCD 1234` are the same code; stored as `ABCD1234`. */
+function normalizeUserCode(code: string) {
+  return code.replace(/[^a-z0-9]/gi, "").toUpperCase();
+}
+
+/** `ABCD1234` as people read it: `ABCD-1234`. */
+function displayUserCode(code: string) {
+  return code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+}
+
+/** The plugin's RFC 8628 error (`{ error, error_description }`), or null for anything else. */
+function oauthError(error: unknown) {
+  if (!(error instanceof APIError)) return null;
+  const body = error.body as { error?: string; error_description?: string } | undefined;
+  if (!body?.error) return null;
+  return { status: error.statusCode, error: body.error, description: body.error_description };
+}
+
+/** What the CLI prints when the flow cannot go on: one line that says what to do. */
+const FIXES: Record<string, string> = {
+  access_denied: "The login was denied. Run wurmhol login to try again.",
+  expired_token: "The code expired. Run wurmhol login again.",
+  invalid_grant: "That login is unknown or was already used. Run wurmhol login again.",
+};
+
+async function limitPerIp(c: Context<AppEnv>) {
+  const wait = await checkRateLimit(c.env, c.var.config, "auth", clientIp(c.req.raw));
+  return wait ? tooManyRequests(wait) : null;
+}
+
+const codeBody = z.object({ name: z.string().trim().min(1).max(80) });
+const tokenBody = z.object({ device_code: z.string().min(1).max(200) });
+
+/** The CLI's calls: no session, no token; the device code is the credential. */
+export const deviceFlow = new Hono<AppEnv>()
+  .post("/code", zValidator("json", codeBody), async (c) => {
+    const limited = await limitPerIp(c);
+    if (limited) return limited;
+    const { name } = c.req.valid("json");
+    const issued = await c.var.auth.api.deviceCode({
+      body: { client_id: DEVICE_CLIENT_ID, scope: formatScope({ name, orgId: null }) },
+    });
+    const verificationUri = new URL("/device", c.var.config.auth.baseURL);
+    const complete = new URL(verificationUri);
+    complete.searchParams.set("code", displayUserCode(issued.user_code));
+    c.header("cache-control", "no-store");
+    return c.json({
+      device_code: issued.device_code,
+      user_code: displayUserCode(issued.user_code),
+      verification_uri: verificationUri.toString(),
+      verification_uri_complete: complete.toString(),
+      expires_in: issued.expires_in,
+      interval: issued.interval,
+    });
+  })
+  .post("/token", zValidator("json", tokenBody), async (c) => {
+    const limited = await limitPerIp(c);
+    if (limited) return limited;
+    c.header("cache-control", "no-store");
+    let redeemed;
+    try {
+      redeemed = await c.var.auth.api.deviceToken({
+        body: {
+          grant_type: GRANT_TYPE,
+          device_code: c.req.valid("json").device_code,
+          client_id: DEVICE_CLIENT_ID,
+        },
+      });
+    } catch (error) {
+      const refused = oauthError(error);
+      if (!refused) throw error;
+      const fix = FIXES[refused.error];
+      return c.json(
+        { error: refused.error, error_description: refused.description, ...(fix ? { fix } : {}) },
+        400,
+      );
+    }
+    // The plugin made a session for the approver. Read who it is for, then end it before
+    // anything else can fail: the CLI must never be able to use it.
+    const context = await c.var.auth.$context;
+    const session = await context.internalAdapter.findSession(redeemed.access_token);
+    await context.internalAdapter.deleteSession(redeemed.access_token);
+    if (!session) throw new Error("device login: the plugin's session is missing");
+    const { name, orgId } = parseScope(redeemed.scope);
+    const member = orgId ? await findMember(c.var.db, session.user.id, orgId) : null;
+    if (!member || !name) {
+      c.var.log.info("device.refused", { orgId: orgId ?? undefined });
+      return c.json(
+        {
+          error: "access_denied",
+          error_description: "the approver is not a member of that org",
+          fix: "Whoever approved is no longer in that org. Run wurmhol login again.",
+        },
+        403,
+      );
+    }
+    const token = await createToken(c.var.db, {
+      orgId: member.orgId,
+      name,
+      scope: "pipes",
+      expiresAt: new Date(Date.now() + LOGIN_TOKEN_MS),
+      createdBy: session.user.id,
+    });
+    const orgs = await listOrgsForUser(c.var.db, session.user.id);
+    c.var.log.info("device.token", { orgId: member.orgId });
+    return c.json({
+      token: token.token,
+      org: { id: member.orgId, name: orgs.find((o) => o.id === member.orgId)?.name ?? null },
+      name,
+    });
+  });
+
+const userCodeBody = z.object({ code: z.string().trim().min(1).max(40) });
+
+/**
+ * Claims the code for the signed-in user (the plugin's verify step), as only its claimant may
+ * see or decide it. 404 for a code that does not exist, expired, or someone else claimed.
+ */
+async function claim(c: Context<AppEnv>, code: string) {
+  const userCode = normalizeUserCode(code);
+  let verified;
+  try {
+    verified = await c.var.auth.api.deviceVerify({
+      query: { user_code: userCode },
+      headers: c.req.raw.headers,
+    });
+  } catch (error) {
+    if (!oauthError(error)) throw error;
+    throw new HTTPException(404, { message: "This code is wrong or has expired." });
+  }
+  // The plugin includes the client only for the code's claimant.
+  const review = verified as { client_id?: string | null; scope?: string | null };
+  if (!review.client_id) {
+    throw new HTTPException(404, { message: "This code is wrong or has expired." });
+  }
+  return { userCode, status: verified.status, scope: parseScope(review.scope) };
+}
+
+/** The console's calls, as a member of the active org (`/device`, apps/web). */
+export const deviceApproval = new Hono<AppEnv>()
+  .use(requireMember)
+  .get("/", async (c) => {
+    const code = c.req.query("code") ?? "";
+    if (!code) throw new HTTPException(400, { message: "Enter the code your terminal shows." });
+    const claimed = await claim(c, code);
+    const orgs = await listOrgsForUser(c.var.db, c.var.user.id);
+    const org = orgs.find((o) => o.id === c.var.member.orgId);
+    return c.json({
+      code: displayUserCode(claimed.userCode),
+      name: claimed.scope.name,
+      status: claimed.status,
+      org: { id: c.var.member.orgId, name: org?.name ?? null },
+    });
+  })
+  .post("/approve", limitPerMember("manage"), zValidator("json", userCodeBody), async (c) => {
+    const claimed = await claim(c, c.req.valid("json").code);
+    if (claimed.status !== "pending") {
+      throw new HTTPException(409, { message: "This code was already used." });
+    }
+    // The org goes on the code first: approval is what the CLI's next poll redeems.
+    const scope = formatScope({ name: claimed.scope.name, orgId: c.var.member.orgId });
+    const set = await setPendingDeviceScope(c.var.db, {
+      userCode: claimed.userCode,
+      userId: c.var.user.id,
+      scope,
+    });
+    if (!set) throw new HTTPException(409, { message: "This code was already used." });
+    await c.var.auth.api.deviceApprove({
+      body: { userCode: claimed.userCode },
+      headers: c.req.raw.headers,
+    });
+    c.var.log.info("device.approved", { orgId: c.var.member.orgId });
+    return c.json({ ok: true });
+  })
+  .post("/deny", limitPerMember("manage"), zValidator("json", userCodeBody), async (c) => {
+    const claimed = await claim(c, c.req.valid("json").code);
+    if (claimed.status !== "pending") {
+      throw new HTTPException(409, { message: "This code was already used." });
+    }
+    await c.var.auth.api.deviceDeny({
+      body: { userCode: claimed.userCode },
+      headers: c.req.raw.headers,
+    });
+    return c.json({ ok: true });
+  });

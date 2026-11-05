@@ -139,7 +139,8 @@ Leave `STRIPE_SECRET_KEY` empty and every org shares without a plan. To bill:
 ## 5. Limits
 
 Per org, enforced by the Durable Objects: `LIMIT_ACTIVE_SHARES` (5), `LIMIT_MONTHLY_BYTES`
-(100 GB), `LIMIT_SHARE_SECONDS` (12 h). Rate limits: `RATE_LIMIT_AUTH`, `RATE_LIMIT_CONNECT`,
+(100 GB), `LIMIT_SHARE_SECONDS` (12 h), the longest a pipe may ask for with `--ttl`. A pipe that
+asks for no lifetime lasts `DEFAULT_SHARE_SECONDS` (4 h), capped at `LIMIT_SHARE_SECONDS`. Rate limits: `RATE_LIMIT_AUTH`, `RATE_LIMIT_CONNECT`,
 `RATE_LIMIT_MANAGE` as `<count>/<seconds>` or `off`.
 
 ## 6. Using it
@@ -147,6 +148,10 @@ Per org, enforced by the Durable Objects: `LIMIT_ACTIVE_SHARES` (5), `LIMIT_MONT
 ```bash
 WURMHOL_URL=https://api.example.com WURMHOL_TOKEN=wh_… npx wurmhol 8787
 ```
+
+Or `WURMHOL_URL=https://api.example.com npx wurmhol login`: it prints a code to approve at
+`<BETTER_AUTH_URL>/device` and stores the token in `~/.wurmhol/credentials.json`. Both of its
+calls go to the CLI's host, so nothing else needs allowlisting.
 
 In a sandbox with a Limited network policy, allowlist `api.example.com` (the only host the CLI
 dials). The console's Tokens dialog shows all three after you create a token: `WURMHOL_TOKEN`,

@@ -13,6 +13,7 @@ import {
   localServer,
   type Person,
   share,
+  shareStates,
   signIn,
   type Stack,
   startStack,
@@ -129,7 +130,7 @@ describe("the wall and Terminate", () => {
     });
     expect(missing.code).toBe(1);
     expect(missing.stderr).toBe(
-      `wurmhol: Set WURMHOL_TOKEN to a token from ${stack.url} (menu → Tokens).\n`,
+      `wurmhol: Run wurmhol login, or set WURMHOL_TOKEN to a token from ${stack.url} (menu → Tokens).\n`,
     );
     const wrong = await cli(["8080"], { ...env, WURMHOL_TOKEN: "wh_not-a-real-token" });
     expect(wrong.code).toBe(1);
@@ -152,22 +153,6 @@ describe("fair-use limits", () => {
       await cli(["stop", String(local.port)], env);
       expect((await cli([String(local.port)], env)).code).toBe(0);
       await stopAll(env);
-      await local.close();
-    } finally {
-      await stack.stop();
-    }
-  });
-
-  it("ends a share at its maximum age", async () => {
-    const stack = await startStack({ LIMIT_SHARE_SECONDS: "3" });
-    try {
-      const ada = await signIn(stack);
-      const env = cliEnv(stack, (await createToken(stack, ada)).token);
-      const local = await localServer((_req, res) => res.end("ok"));
-      const started = await share(stack, env, local.port);
-      const pid = pidOf(env, started.id);
-      await waitFor(() => !alive(pid), { timeoutMs: 10_000, what: "the share to expire" });
-      expect((await browserFetch(`${started.url}/`)).status).toBe(410);
       await local.close();
     } finally {
       await stack.stop();
@@ -199,5 +184,74 @@ describe("fair-use limits", () => {
     } finally {
       await stack.stop();
     }
+  });
+});
+
+describe("a pipe's lifetime", () => {
+  let stack: Stack;
+  let env: Record<string, string>;
+
+  beforeAll(async () => {
+    stack = await startStack({ DEFAULT_SHARE_SECONDS: "6", LIMIT_SHARE_SECONDS: "3600" });
+    const ada = await signIn(stack);
+    env = cliEnv(stack, (await createToken(stack, ada)).token);
+  });
+  afterAll(async () => {
+    await stopAll(env);
+    await stack.stop();
+  });
+
+  function endsAt(id: string) {
+    return cli(["ls", "--json"], env).then((run) => {
+      const pipes = JSON.parse(run.stdout) as { id: string; endsAt: string }[];
+      return Date.parse(pipes.find((p) => p.id === id)!.endsAt);
+    });
+  }
+
+  it("lasts DEFAULT_SHARE_SECONDS without --ttl, and ls says when it ends", async () => {
+    const local = await localServer((_req, res) => res.end("ok"));
+    const before = Date.now();
+    const started = await share(stack, env, local.port);
+    // Catches: the default not applied (the pipe would run to the 1 h limit), or `ls` showing an
+    // end the relay doesn't enforce.
+    expect(Math.abs((await endsAt(started.id)) - before - 6000)).toBeLessThan(3000);
+    const pid = pidOf(env, started.id);
+    await waitFor(() => !alive(pid), { timeoutMs: 15_000, what: "the default lifetime to end it" });
+    expect((await browserFetch(`${started.url}/`)).status).toBe(410);
+    await local.close();
+  });
+
+  it("ends at a shorter --ttl, with reason expired", async () => {
+    const local = await localServer((_req, res) => res.end("ok"));
+    const before = Date.now();
+    const result = await cli([String(local.port), "--ttl", "2s", "--json"], env);
+    expect(result.code).toBe(0);
+    const started = JSON.parse(result.stdout) as { id: string; url: string; endsAt: string };
+    expect(Math.abs(Date.parse(started.endsAt) - before - 2000)).toBeLessThan(2000);
+    const pid = pidOf(env, started.id);
+    await waitFor(() => !alive(pid), { timeoutMs: 4000, what: "--ttl 2s to end the pipe" });
+    const db = stack.db();
+    try {
+      expect(db.prepare("select end_reason from shares where id = ?").get(started.id)).toEqual({
+        end_reason: "expired",
+      });
+    } finally {
+      db.close();
+    }
+    const page = await browserFetch(`${started.url}/`);
+    expect(page.status).toBe(410);
+    expect(await page.text()).toContain("This pipe has ended.");
+    await local.close();
+  });
+
+  it("refuses a --ttl over the limit, or one it can't read, with a one-line fix", async () => {
+    const over = await cli(["8787", "--ttl", "2h"], env);
+    expect(over.code).toBe(1);
+    expect(over.stderr).toBe("wurmhol: Pipes last at most 1h. Pass --ttl 1h or less.\n");
+    // Catches: `--ttl 90` (no unit) silently opening a pipe for the default lifetime.
+    const unreadable = await cli(["8787", "--ttl", "90"], env);
+    expect(unreadable.code).toBe(1);
+    expect(unreadable.stderr).toContain("--ttl 90m");
+    expect(shareStates(env)).toEqual([]);
   });
 });

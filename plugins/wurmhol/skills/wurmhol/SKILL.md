@@ -22,9 +22,11 @@ signed-in members of the token's org can open.
 Every failure is one line on stderr that names the fix. Do what it says, then run the same
 command again:
 
-- **Token missing or revoked:** the user makes a token in the console (menu → Tokens) and sets
-  `WURMHOL_TOKEN` where you run; in a Claude Code cloud environment, under Environment
-  variables, which takes effect in a new session. Tell the user that, and stop there.
+- **Token missing or revoked:** in a Claude Code cloud environment, the user makes a token in the
+  console (menu → Tokens) and sets `WURMHOL_TOKEN` under Environment variables, which takes
+  effect in a new session. On a machine that keeps its files (a laptop, SSH, a VM), run
+  `npx wurmhol login` and send the user the URL and code it prints to approve. Tell the user
+  which applies, and stop there.
 - **Proxy refused the connection:** the sandbox only reaches listed hosts. The error names the
   host; the user adds it to the environment's Allowed domains (Network access).
 - **TLS verification failed:** set `NODE_EXTRA_CA_CERTS` to the sandbox's CA bundle and retry.

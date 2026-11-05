@@ -4,20 +4,28 @@ A private HTTPS URL for a local dev server, from inside sandboxed cloud containe
 cloud and similar) where ngrok and Cloudflare Tunnel can't connect.
 
 ```bash
-export WURMHOL_TOKEN=wh_…        # from https://dirt.wurmhol.com (menu → Tokens)
+npx wurmhol login                # approve this computer in the browser; stores a token
 npx wurmhol 8787                 # prints https://<id>.wurmhol.dev, then returns
 ```
+
+In a cloud environment, set `WURMHOL_TOKEN=wh_…` instead (from https://dirt.wurmhol.com, menu →
+Tokens): the stored token dies with the container. `WURMHOL_TOKEN` wins when both are there.
 
 Only signed-in members of the token's org can open the URL. One outbound WebSocket on 443,
 dialed through `HTTPS_PROXY` when set; `NODE_EXTRA_CA_CERTS` adds a proxy's CA. In a sandbox
 that only reaches listed hosts, allow `api.wurmhol.com`: it is the only host the CLI dials.
 
-| Command                   | Does                                                     |
-| ------------------------- | -------------------------------------------------------- |
-| `wurmhol <port> [--json]` | Open a pipe to a port. `--json` prints `{url, port, id}` |
-| `wurmhol ls [--json]`     | List open pipes                                          |
-| `wurmhol stop <port\|id>` | End one (`--all` ends every one)                         |
-| `wurmhol init [--skill]`  | Tell this repo's agents how to share (see below)         |
+| Command                              | Does                                                             |
+| ------------------------------------ | ---------------------------------------------------------------- |
+| `wurmhol <port> [--ttl 8h] [--json]` | Open a pipe to a port. `--json` prints `{url, port, id, endsAt}` |
+| `wurmhol ls [--json]`                | List open pipes and when each ends                               |
+| `wurmhol stop <port\|id>`            | End one (`--all` ends every one)                                 |
+| `wurmhol init [--skill]`             | Tell this repo's agents how to share (see below)                 |
+| `wurmhol login`                      | Approve this computer; stores `~/.wurmhol/credentials.json`      |
+| `wurmhol logout`                     | Delete the stored token                                          |
+
+A pipe ends after 4 hours. `--ttl` asks for another lifetime, like `90m` or `8h`, up to 12 hours
+on wurmhol.com.
 
 `WURMHOL_URL` points at a self-hosted install. Node 20+. MIT.
 
@@ -36,15 +44,16 @@ await pipe.close();
 ```
 
 Options: `server` (a self-hosted install), `host` (where the dev server listens, default
-`127.0.0.1`) and `signal` (an `AbortSignal` that closes the pipe). `openPipe` rejects with a
+`127.0.0.1`), `ttl` (seconds, or a duration like `"8h"`; `pipe.endsAt` says when it ends) and
+`signal` (an `AbortSignal` that closes the pipe). `openPipe` rejects with a
 `FixError` whose message is the one-line fix the CLI prints.
 
 ## Teach your agent
 
 `wurmhol init`, run in a project, appends one line to `AGENTS.md` (or `CLAUDE.md` if that is
 the file you have) with the dev server's port, read from `package.json`: Next 3000, Astro 4321,
-Vite 5173, anything else 8787. It also says whether `WURMHOL_TOKEN` is set and, if not, where to
-set it. `--skill` writes the `wurmhol` skill to `.claude/skills/wurmhol/SKILL.md` as well.
+Vite 5173, anything else 8787. It also says whether a token is set (`WURMHOL_TOKEN`, or one from
+`wurmhol login`) and, if not, how to get one. `--skill` writes the `wurmhol` skill to `.claude/skills/wurmhol/SKILL.md` as well.
 
 For Claude Code, the same skill comes as a plugin from this repository's marketplace:
 
@@ -60,6 +69,6 @@ when you are done), to follow the fix each error names, and to keep the token ou
 
 ## Claude Code cloud environments
 
-The console shows both values after you create a token, each copied in one click. In the
+The console shows these values after you create a token, each copied in one click. In the
 environment's settings, put `WURMHOL_TOKEN=wh_…` under Environment variables and `api.wurmhol.com`
 under Allowed domains (Network access). New sessions pick them up.

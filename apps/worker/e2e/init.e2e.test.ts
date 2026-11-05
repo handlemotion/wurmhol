@@ -19,7 +19,12 @@ function init(dir: string, args: string[] = [], env: Record<string, string> = {}
   const result = spawnSync(process.execPath, [cliPath, "init", ...args], {
     cwd: dir,
     encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
+    env: {
+      PATH: process.env.PATH ?? "",
+      HOME: process.env.HOME ?? "",
+      WURMHOL_HOME: mkdtempSync(join(tmpdir(), "wurmhol-home-")),
+      ...env,
+    },
   });
   expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: "" });
   return result.stdout;
@@ -35,7 +40,7 @@ it("in a Vite project, appends the line with 5173 to CLAUDE.md once, and says th
   );
   const first = init(dir);
   expect(first).toContain("Added a line to CLAUDE.md (port 5173");
-  expect(first).toContain("WURMHOL_TOKEN is not set");
+  expect(first).toContain("No token. On this computer, run wurmhol login.");
   expect(first).toContain("api.wurmhol.com under Allowed domains");
   expect(init(dir)).toContain("CLAUDE.md already mentions wurmhol");
   expect(readFileSync(join(dir, "CLAUDE.md"), "utf8")).toBe(`# Rules\n\n${line(5173)}\n`);
@@ -69,4 +74,21 @@ it("--skill writes the plugin's skill, and a set token is reported without print
   expect(readFileSync(join(dir, ".claude/skills/wurmhol/SKILL.md"), "utf8")).toBe(
     readFileSync(join(workerRoot, "../../plugins/wurmhol/skills/wurmhol/SKILL.md"), "utf8"),
   );
+});
+
+it("a token from wurmhol login counts as set, but only for the server it belongs to", () => {
+  const home = mkdtempSync(join(tmpdir(), "wurmhol-home-"));
+  const stored = { token: "wh_e2e_stored", org: "Acme", name: "laptop" };
+  writeFileSync(
+    join(home, "credentials.json"),
+    JSON.stringify({ ...stored, server: "https://api.wurmhol.com" }),
+  );
+  const out = init(project(null), [], { WURMHOL_HOME: home });
+  expect(out).toContain(`Logged in: wurmhol uses the token in ${join(home, "credentials.json")}.`);
+  expect(out).not.toContain(stored.token);
+  const elsewhere = init(project(null), [], {
+    WURMHOL_HOME: home,
+    WURMHOL_URL: "https://wurmhol.example.com",
+  });
+  expect(elsewhere).toContain("No token.");
 });

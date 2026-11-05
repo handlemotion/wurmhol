@@ -39,7 +39,7 @@ const faq = [
   },
   {
     q: "How does a pipe end?",
-    a: "When the agent runs wurmhol stop, when anyone in the org ends it from the wall, or after 12 hours. The URL is never reused.",
+    a: "When the agent runs wurmhol stop, when anyone in the org ends it from the wall, or when its time is up: 4 hours unless the agent asks for another length with --ttl, up to 12 hours. The URL is never reused.",
   },
   {
     q: "Can I run it myself?",
@@ -195,7 +195,7 @@ const faq = [
             <dl>
               <div><dt>Open pipes</dt><dd>5 at a time</dd></div>
               <div><dt>Traffic</dt><dd>100 GB a month</dd></div>
-              <div><dt>Pipe length</dt><dd>12 hours</dd></div>
+              <div><dt>Pipe length</dt><dd>4 hours, up to 12</dd></div>
             </dl>
           </div>
           <a class="button button-primary" href={SIGN_IN}>Subscribe</a>
