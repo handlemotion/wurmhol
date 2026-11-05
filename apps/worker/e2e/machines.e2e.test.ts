@@ -7,11 +7,13 @@ import {
   api,
   browserFetch,
   browserSocket,
+  cli,
   cliEnv,
   cliPath,
   createToken,
   localServer,
   type Person,
+  share,
   signIn,
   type Stack,
   startStack,
@@ -42,15 +44,30 @@ function watch(stack: Stack, person: Person) {
   return state;
 }
 
+/** The real `wurmhol host`, with what it printed and how it exited (undefined while it runs). */
+function startHost(env: Record<string, string>) {
+  const state: { process: ChildProcess; output: string; exited: number | null | undefined } = {
+    process: spawn(process.execPath, [cliPath, "host"], {
+      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
+      stdio: ["ignore", "pipe", "pipe"],
+    }),
+    output: "",
+    exited: undefined,
+  };
+  state.process.stdout!.on("data", (chunk: Buffer) => (state.output += chunk));
+  state.process.stderr!.on("data", (chunk: Buffer) => (state.output += chunk));
+  state.process.on("exit", (code) => (state.exited = code));
+  return state;
+}
+
 describe("a computer running wurmhol host", () => {
   let stack: Stack;
   let ada: Person;
   let bea: Person;
+  let cy: Person;
   let token: { id: string; token: string };
   let env: Record<string, string>;
-  let host: ChildProcess;
-  let output = "";
-  let exited: number | null | undefined;
+  let host: ReturnType<typeof startHost>;
   let local: Awaited<ReturnType<typeof localServer>>;
   let hits = 0;
   // What else answers on a dev machine: an API with no root route, a Node-style inspector, and a
@@ -63,11 +80,14 @@ describe("a computer running wurmhol host", () => {
     stack = await startStack();
     ada = await signIn(stack);
     bea = await signIn(stack);
-    const { body: invite } = await api<{ url: string }>(stack, ada, "/api/invites", {
-      method: "POST",
-    });
-    const code = invite.url.split("/join/")[1]!;
-    await api(stack, bea, `/api/invites/${code}/accept`, { method: "POST" });
+    cy = await signIn(stack);
+    for (const person of [bea, cy]) {
+      const { body: invite } = await api<{ url: string }>(stack, ada, "/api/invites", {
+        method: "POST",
+      });
+      const code = invite.url.split("/join/")[1]!;
+      await api(stack, person, `/api/invites/${code}/accept`, { method: "POST" });
+    }
     local = await localServer((_req, res) => {
       hits++;
       res.writeHead(200, { "content-type": "text/html" }).end("<title>Machine &amp; test</title>");
@@ -86,17 +106,11 @@ describe("a computer running wurmhol host", () => {
     });
     token = await createToken(stack, ada, "laptop");
     env = cliEnv(stack, token.token, { WURMHOL_HOST_IGNORE: `9229, ${ignored.port}` });
-    host = spawn(process.execPath, [cliPath, "host"], {
-      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    host.stdout!.on("data", (chunk: Buffer) => (output += chunk));
-    host.stderr!.on("data", (chunk: Buffer) => (output += chunk));
-    host.on("exit", (code) => (exited = code));
+    host = startHost(env);
   });
 
   afterAll(async () => {
-    host?.kill();
+    host?.process.kill();
     await stopAll(env);
     await Promise.all([local, apiServer, inspector, ignored].map((server) => server?.close()));
     await stack?.stop();
@@ -188,9 +202,72 @@ describe("a computer running wurmhol host", () => {
     );
     // Catches: a revoked token's computer still listed, and still able to open pipes.
     await waitFor(() => adas.machines?.length === 0, { what: "the machine gone" });
-    await waitFor(() => exited !== undefined, { timeoutMs: 15_000, what: "the CLI to exit" });
-    expect(exited).toBe(1);
-    expect(output).toContain("token");
+    await waitFor(() => host.exited !== undefined, { timeoutMs: 15_000, what: "the CLI to exit" });
+    expect(host.exited).toBe(1);
+    expect(host.output).toContain("token");
     adas.socket.close();
+  });
+
+  /**
+   * `person` runs `wurmhol host` and a pipe in ada's org, then `go` takes them out of it. Their
+   * tokens there are revoked (ADR 0019), so both stop and neither can come back.
+   */
+  async function leavesTheOrg(person: Person, go: () => Promise<void>) {
+    const theirEnv = cliEnv(stack, (await createToken(stack, person, "their laptop")).token);
+    const theirHost = startHost(theirEnv);
+    try {
+      const feed = watch(stack, person);
+      await waitFor(() => feed.machines?.length === 1, {
+        timeoutMs: 15_000,
+        what: "their machine",
+      });
+      const pipe = await share(stack, theirEnv, local.port);
+      await go();
+      // Catches: a departed member's computer staying connected to the org, reporting its ports.
+      await waitFor(() => feed.machines?.length === 0, { what: "their machine gone" });
+      // Catches: `/host` taking their token back on reconnect, or refusing it with a status the
+      // CLI retries forever.
+      await waitFor(() => theirHost.exited !== undefined, {
+        timeoutMs: 15_000,
+        what: "their wurmhol host to exit",
+      });
+      expect(theirHost.exited).toBe(1);
+      expect(theirHost.output).toContain("Create a new token");
+      // Catches: their open pipe still on the org's wall, served from a computer the org let go.
+      await waitFor(
+        async () => {
+          const { body } = await api<{ shares: { url: string }[] }>(stack, ada, "/api/shares");
+          return !body.shares.some((s) => s.url === pipe.url);
+        },
+        { what: "their pipe ended" },
+      );
+      // Catches: their token still opening new pipes into the org.
+      const again = await cli([String(local.port)], theirEnv);
+      expect(again.code).toBe(1);
+      expect(again.stderr).toContain("Create a new token");
+      feed.socket.close();
+    } finally {
+      theirHost.process.kill();
+      await stopAll(theirEnv);
+    }
+  }
+
+  it("disconnects a member's computer and ends their pipes when an owner removes them", async () => {
+    const { body } = await api<{ members: { id: string; email: string }[] }>(
+      stack,
+      ada,
+      "/api/members",
+    );
+    const member = body.members.find((m) => m.email === bea.email)!;
+    await leavesTheOrg(bea, async () => {
+      const removed = await api(stack, ada, `/api/members/${member.id}`, { method: "DELETE" });
+      expect(removed.status).toBe(200);
+    });
+  });
+
+  it("disconnects a member's computer and ends their pipes when they leave", async () => {
+    await leavesTheOrg(cy, async () => {
+      expect((await api(stack, cy, "/api/org/leave", { method: "POST" })).status).toBe(200);
+    });
   });
 });

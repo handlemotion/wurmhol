@@ -22,7 +22,7 @@ export const machineConnect = new Hono<AppEnv>().get("/", async (c) => {
   if (token instanceof Response) return token;
   if (!token.createdBy) {
     return refuse(
-      403,
+      401,
       "token has no owner",
       `Whoever made this token has left. Run wurmhol login, or make a token at ${c.var.config.auth.baseURL} (menu → Tokens).`,
     );
