@@ -7,6 +7,7 @@ import {
   IconChevronsUpDown,
   IconCreditCard,
   IconEllipsis,
+  IconArrowUpRight,
   IconCheck,
   IconExternalLink,
   IconLaptop,
@@ -20,6 +21,7 @@ import { ActionItem, ActionList } from "@/components/ui/action-list";
 import { Button } from "@/components/ui/button";
 import { CopyField } from "@/components/ui/copy-field";
 import { SkeletonProvider } from "@/components/ui/skeleton-provider";
+import { Link } from "@/components/ui/link";
 import { Menu, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
 import { Text } from "@/components/ui/text";
 import {
@@ -118,7 +120,7 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
       </MenuTrigger>
       <nav
         aria-label="Org"
-        className="absolute start-1/2 hidden -translate-x-1/2 gap-0.5 sm:flex"
+        className="absolute start-1/2 hidden -translate-x-1/2 gap-2 sm:flex"
         onPointerEnter={prefetchDialogs}
       >
         <Button intent="secondary" onPress={() => onOpen("members")}>
@@ -137,7 +139,7 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
         )}
       </nav>
       <Button
-        intent="secondary"
+        intent="danger"
         className="hidden sm:inline-flex"
         isPending={signOut.isPending}
         onPress={() => signOut.mutate()}
@@ -165,7 +167,7 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
             </MenuItem>
           )}
           <MenuSeparator />
-          <MenuItem onAction={() => signOut.mutate()}>
+          <MenuItem intent="danger" onAction={() => signOut.mutate()}>
             <IconLogOut />
             <MenuLabel>Log out</MenuLabel>
           </MenuItem>
@@ -257,6 +259,8 @@ function Network({ shares }: { shares: Share[] }) {
 }
 
 const LOGIN = "npx wurmhol login && npx wurmhol <port>";
+/** The project's public docs: the same for hosted and self-hosted installs. */
+const DOCS = "https://wurmhol.com/docs";
 
 /** npm's mark (svgl) at 13px inside the rows' 15px icon slot, as the design draws it. */
 function NpmMark() {
@@ -269,20 +273,20 @@ function NpmMark() {
 
 /**
  * The ways to start a pipe, each copied in one press. Every label is the verb and what it
- * copies; once copied, the row says where the text goes next.
+ * copies; once copied, the row names what is on the clipboard.
  */
 const CREATE = [
   {
     id: "prompt",
     label: "Copy agent prompt",
-    done: "Copied. Paste it to your agent",
+    done: "Prompt copied",
     value: PROMPT,
     Icon: IconSparkles,
   },
   {
     id: "command",
     label: "Copy npx command",
-    done: "Copied. Run it next to the dev server",
+    done: "Command copied",
     value: COMMAND,
     Icon: NpmMark,
   },
@@ -290,7 +294,7 @@ const CREATE = [
   {
     id: "machine",
     label: "Copy setup for this computer",
-    done: "Copied. Run it in a terminal here",
+    done: "Setup copied",
     value: LOGIN,
     Icon: IconLaptop,
   },
@@ -330,6 +334,16 @@ function CreateCard() {
           </ActionItem>
         ))}
       </ActionList>
+      {/* The footer mirrors the label above: same row, same muted type, pinned to the bottom. */}
+      <Link
+        href={DOCS}
+        target="_blank"
+        rel="noopener"
+        className="mt-auto flex h-8 items-center gap-1 px-2 text-xs text-subtle-foreground hover:text-foreground"
+      >
+        Docs
+        <IconArrowUpRight className="size-3" />
+      </Link>
     </section>
   );
 }
