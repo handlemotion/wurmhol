@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
 /*
- * The login backdrop's Steiner chain, drawn live. The static rest of the construction is
- * generated (`wormhole-plate.tsx`, from `.claude/skills/network-create/scenes/flat/backdrop.mjs`
- * with `--set chain=off`); these constants and `steiner()` must match that scene.
+ * The login backdrop's moving layer: the Steiner chain and the outer circle's bezel, drawn live.
+ * The static rest of the construction is generated (`wormhole-plate.tsx`, from
+ * `.claude/skills/network-create/scenes/flat/backdrop.mjs` with `--set chain=off`); these
+ * constants and `steiner()` must match that scene. Its dashed lines march by CSS
+ * (`wormhole-march` in styles.css).
  *
  * Steiner's porism: if a ring of circles closes once between two circles, it closes from any
  * starting phase. So the ring can roll around the hole forever, every circle staying tangent to
@@ -13,10 +15,10 @@ import { useEffect, useMemo, useState } from "react";
 const HOLE = 310;
 const N = 9;
 const E = 0.45;
-/** One ring step (2π/N) per 90 s: a drift you notice only when you look for it. */
-const DRIFT = (Math.PI * 2) / N / 90;
-/** Sweeping the cursor across the page rolls the ring half a step: felt, not chased. */
-const PULL = ((Math.PI * 2) / N) * 0.5;
+/** One ring step (2π/N) per minute: slow enough to read as drift, not as a spinner. */
+const DRIFT = (Math.PI * 2) / N / 60;
+/** The bezel turns once every five minutes, against the chain. */
+const BEZEL = -360 / 300;
 
 type Point = [number, number];
 type Circle = { c: Point; r: number };
@@ -58,33 +60,35 @@ function towards(from: Point, to: Point, d: number): Point {
 }
 
 /**
- * The phase: drifts on its own and eases toward where the cursor pulls it. Stays at 0 for
- * reduced motion. Animation frames stop while the tab is hidden.
+ * Seconds since the page opened, per animation frame. Stays at 0 for reduced motion. Frames
+ * stop while the tab is hidden.
  */
-function usePhase() {
-  const [phase, setPhase] = useState(0);
+function useElapsed() {
+  const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    let target = 0;
-    let pull = 0;
     let frame = 0;
     const start = performance.now();
-    const onMove = (event: PointerEvent) => {
-      target = (event.clientX / innerWidth - 0.5) * PULL;
-    };
     const tick = (now: number) => {
-      pull += (target - pull) * 0.04;
-      setPhase(((now - start) / 1000) * DRIFT + pull);
+      setElapsed((now - start) / 1000);
       frame = requestAnimationFrame(tick);
     };
-    addEventListener("pointermove", onMove, { passive: true });
     frame = requestAnimationFrame(tick);
-    return () => {
-      cancelAnimationFrame(frame);
-      removeEventListener("pointermove", onMove);
-    };
+    return () => cancelAnimationFrame(frame);
   }, []);
-  return phase;
+  return elapsed;
+}
+
+/** The bezel: 240 radial ticks outside the outer circle, every 12th one long, as one path. */
+function bezelPath({ c, r }: Circle) {
+  let d = "";
+  for (let i = 0; i < 240; i++) {
+    const t = (i / 240) * Math.PI * 2;
+    const l = i % 12 === 0 ? 14 : 7;
+    const [x, y] = [Math.cos(t), Math.sin(t)];
+    d += `M${c[0] + x * r} ${c[1] + y * r}L${c[0] + x * (r + l)} ${c[1] + y * (r + l)}`;
+  }
+  return d;
 }
 
 const STROKE = {
@@ -104,8 +108,9 @@ function Node({ p, size }: { p: Point; size: number }) {
 
 /** The live chain, laid over the generated plate in the same coordinates. */
 export function WormholeChain({ className }: { className?: string }) {
-  const phase = usePhase();
-  const { hole, outer, chain } = useMemo(() => steiner(phase), [phase]);
+  const elapsed = useElapsed();
+  const { hole, outer, chain } = useMemo(() => steiner(elapsed * DRIFT), [elapsed]);
+  const bezel = useMemo(() => bezelPath(outer), [outer.c[0], outer.c[1], outer.r]);
   return (
     <svg
       viewBox="-1000 -1000 3600 2000"
@@ -120,6 +125,11 @@ export function WormholeChain({ className }: { className?: string }) {
         maxWidth: "none",
       }}
     >
+      <path
+        {...STROKE}
+        d={bezel}
+        transform={`rotate(${elapsed * BEZEL} ${outer.c[0]} ${outer.c[1]})`}
+      />
       <path {...DASH} d={`M${chain.map((C) => `${C.c[0]} ${C.c[1]}`).join("L")}Z`} />
       {chain.map((C, i) => {
         const next = chain[(i + 1) % N]!;
