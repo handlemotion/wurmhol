@@ -152,3 +152,13 @@ export function useNow(ms = 15_000) {
   }, [ms]);
   return now;
 }
+
+/** Billing: the Stripe portal when the org has a plan, Checkout when it has none. */
+export function useOpenBilling() {
+  return useMutation({
+    mutationFn: async () => {
+      const { url } = await api<{ url: string }>("/api/billing/open", { method: "POST", body: {} });
+      location.assign(url);
+    },
+  });
+}

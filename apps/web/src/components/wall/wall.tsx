@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Skeleton } from "skullet/react";
 import {
   IconChevronsUpDown,
+  IconCreditCard,
   IconEllipsis,
   IconKey,
   IconLogOut,
@@ -12,7 +13,15 @@ import { CopyField } from "@/components/ui/copy-field";
 import { Link } from "@/components/ui/link";
 import { Menu, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
 import { Text } from "@/components/ui/text";
-import { useMe, useNow, useSignOut, useSwitchOrg, useTerminate, useWall } from "@/hooks/use-app";
+import {
+  useMe,
+  useNow,
+  useOpenBilling,
+  useSignOut,
+  useSwitchOrg,
+  useTerminate,
+  useWall,
+} from "@/hooks/use-app";
 import type { Me, Share } from "@/lib/api";
 import { ago } from "@/lib/time";
 import { MembersDialog } from "./members-dialog";
@@ -39,6 +48,12 @@ export function Wall({ me }: { me: Me }) {
     <div className="min-h-dvh bg-background">
       <Header me={me} onOpen={setDialog} />
       <main className="mx-auto w-full max-w-6xl px-4 pt-6 pb-16 sm:px-8 sm:pt-10">
+        {me.standing && !me.standing.ok && (
+          <Text className="mb-6 text-sm text-warning-subtle-foreground">
+            The trial has ended: new shares need a plan.
+            {me.role === "owner" ? " Open Billing in the menu." : " Ask an owner to subscribe."}
+          </Text>
+        )}
         <Skeleton id="wall" data={shares} sample={SAMPLE} label="Loading shares">
           {(list) =>
             list.length === 0 ? (
@@ -62,6 +77,7 @@ export function Wall({ me }: { me: Me }) {
 function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens") => void }) {
   const switchOrg = useSwitchOrg();
   const signOut = useSignOut();
+  const billing = useOpenBilling();
   const active = me.orgs.find((org) => org.id === me.activeOrgId);
   return (
     <header className="flex h-14 items-center justify-between gap-3 border-b border-border px-4 sm:px-8">
@@ -106,6 +122,13 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
             <IconKey />
             <MenuLabel>Tokens</MenuLabel>
           </MenuItem>
+          {/* Owners manage billing; with billing off (self-hosted) there is nothing to open. */}
+          {me.role === "owner" && me.standing?.reason !== "billing_off" && (
+            <MenuItem onAction={() => billing.mutate()}>
+              <IconCreditCard />
+              <MenuLabel>Billing</MenuLabel>
+            </MenuItem>
+          )}
           <MenuSeparator />
           <MenuItem onAction={() => signOut.mutate()}>
             <IconLogOut />

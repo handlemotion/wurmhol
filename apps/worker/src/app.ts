@@ -57,6 +57,11 @@ export const app = new Hono<AppEnv>()
       magicLink: ENVIRONMENT !== "production",
     });
   })
+  // Stripe calls this, not a browser: no per-IP auth limit. The plugin verifies the signature.
+  .post("/api/auth/stripe/webhook", (c) => c.var.auth.handler(c.req.raw))
+  // Checkout and the portal go through /api/billing, which pins them to the active org and to
+  // owners. The plugin's own POSTs would let anyone subscribe for themselves, so they are closed.
+  .post("/api/auth/subscription/*", (c) => c.json({ error: "use /api/billing" }, 404))
   .on(["GET", "POST"], "/api/auth/*", limitAuth, (c) => c.var.auth.handler(c.req.raw))
   .route("/api", account)
   .route("/api", api)

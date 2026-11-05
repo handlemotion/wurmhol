@@ -10,6 +10,7 @@ import {
   CircleCheck,
   CircleX,
   Copy,
+  CreditCard,
   Ellipsis,
   Info,
   KeyRound,
@@ -35,6 +36,7 @@ export const IconCircleAlert = thin(CircleAlert, "IconCircleAlert");
 export const IconCircleCheck = thin(CircleCheck, "IconCircleCheck");
 export const IconCircleX = thin(CircleX, "IconCircleX");
 export const IconCopy = thin(Copy, "IconCopy");
+export const IconCreditCard = thin(CreditCard, "IconCreditCard");
 export const IconEllipsis = thin(Ellipsis, "IconEllipsis");
 export const IconInfo = thin(Info, "IconInfo");
 export const IconKey = thin(KeyRound, "IconKey");

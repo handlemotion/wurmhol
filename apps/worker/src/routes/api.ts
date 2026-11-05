@@ -20,6 +20,7 @@ import { z } from "zod";
 import { type AppEnv, requireMember, requireOwner, resolveSession } from "../context.ts";
 import { SHARE_ID } from "../env.ts";
 import { limitPerMember } from "../rate-limiter.ts";
+import { billing } from "./billing.ts";
 
 function allowedOrigins(c: { var: AppEnv["Variables"] }) {
   return new Set([new URL(c.var.config.auth.baseURL).origin, ...c.var.config.auth.trustedOrigins]);
@@ -165,4 +166,5 @@ export const api = new Hono<AppEnv>()
     });
     const url = new URL(`/join/${code}`, c.var.config.auth.baseURL).toString();
     return c.json({ url, expiresAt: expiresAt.toISOString() }, 201);
-  });
+  })
+  .route("/", billing);
