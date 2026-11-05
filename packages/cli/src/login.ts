@@ -119,7 +119,7 @@ export async function login(options: LoginOptions): Promise<Granted> {
       interval += 5000;
       continue;
     }
-    if (refused?.fix) throw new FixError(refused.fix, { final: true, reason: refused.error });
+    if (refused?.fix) throw new FixError(refused.fix, { final: true });
     throw explainRefusal(polled.status, polled.body, { server, viaProxy: polled.viaProxy });
   }
   throw new FixError("The code expired before anyone approved it. Run wurmhol login again.");
@@ -153,8 +153,8 @@ export async function redeem(options: RedeemOptions): Promise<Granted> {
   }
   const refused = parse<{ error?: string; fix?: string }>(answer);
   if (refused?.error === "invalid_grant" || refused?.error === "expired_token") {
-    throw new FixError(STALE_CODE, { final: true, reason: refused.error });
+    throw new FixError(STALE_CODE, { final: true });
   }
-  if (refused?.fix) throw new FixError(refused.fix, { final: true, reason: refused.error });
+  if (refused?.fix) throw new FixError(refused.fix, { final: true });
   throw explainRefusal(answer.status, answer.body, { server, viaProxy: answer.viaProxy });
 }

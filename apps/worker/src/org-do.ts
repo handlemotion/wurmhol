@@ -12,6 +12,7 @@ import {
   newShareCard,
   parseHostMessage,
   type RelayMessage,
+  sendableCloseCode,
   type ShareCard,
   type WallEvent,
 } from "@wurmhol/protocol";
@@ -298,9 +299,8 @@ export class Org extends DurableObject<Env> {
   }
 
   override webSocketClose(socket: WebSocket, code: number) {
-    // 1005/1006 are reserved and cannot be sent back.
     try {
-      socket.close(code === 1005 || code === 1006 ? 1000 : code, "bye");
+      socket.close(sendableCloseCode(code), "bye");
     } catch {
       // Already closed.
     }
