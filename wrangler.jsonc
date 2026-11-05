@@ -11,7 +11,10 @@
   "compatibility_flags": ["nodejs_compat"],
   // Vars set in the dashboard survive deploys.
   "keep_vars": true,
-  "observability": { "enabled": true },
+  // Our own JSON log lines only. Invocation logs would record every request's full URL.
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
+  // Daily retention (ADR 0008): prunes old pipe history and expired sign-in rows.
+  "triggers": { "crons": ["17 3 * * *"] },
   "upload_source_maps": true,
   // Workers Builds installs dependencies with pnpm and runs the root `build` script; a local
   // `wrangler deploy` from the root runs this command instead.
@@ -47,6 +50,8 @@
     "LIMIT_ACTIVE_SHARES": "5",
     "LIMIT_MONTHLY_BYTES": "100000000000",
     "LIMIT_SHARE_SECONDS": "43200",
+    // Days a pipe's history is kept.
+    "RETENTION_DAYS": "90",
     "RATE_LIMIT_AUTH": "60/60",
     "RATE_LIMIT_MAGIC_LINK": "5/900",
     "RATE_LIMIT_CONNECT": "60/60",
