@@ -11,6 +11,17 @@ export interface ShareState {
   pid: number;
   startedAt: string;
   endsAt: string;
+  /** What the pipe was opened with, so a repeat of the same command can reuse it. */
+  request?: ShareRequest;
+}
+
+/** The options a pipe was asked for that change what it is; `--ttl` is not one of them. */
+export interface ShareRequest {
+  name: string | null;
+  /** `--only`'s emails, trimmed, lowercased and sorted. */
+  only: string[];
+  link: string | null;
+  note: string | null;
 }
 
 /** `WURMHOL_HOME`, or `~/.wurmhol`. */

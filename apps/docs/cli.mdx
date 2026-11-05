@@ -63,4 +63,8 @@ and remove the old one, run `wurmhol host --install` again.
 | `HTTPS_PROXY`         | The proxy to go through                                  |
 | `NODE_EXTRA_CA_CERTS` | Your proxy's certificate                                 |
 
+Run the same `wurmhol <port>` again and it prints the pipe that is already open instead of opening
+a second one. A different `--name`, `--only`, `--link` or `--note`, or any `--ttl`, opens a new
+pipe; for a new URL with the same flags, `wurmhol stop <port>` first.
+
 When something fails, the error is one line with what to do about it. Node 22 or later.
