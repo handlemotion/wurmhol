@@ -3,12 +3,12 @@
 Project `wurmhol` (from Omni's `docs/operations/doppler.md`). Branch configs inherit from their
 environment's root config.
 
-| Config       | Consumer                                 | Holds                                                                                                                                                                                                                            |
-| ------------ | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dev`        | every local command (root)               | local D1 settings, non-secret dev config                                                                                                                                                                                         |
-| `dev_worker` | `wrangler dev` (mounted `.dev.vars`)     | `BETTER_AUTH_SECRET`, `ENVIRONMENT=development`, OAuth client secrets, Stripe sandbox keys (`STRIPE_*`)                                                                                                                          |
-| `prd_worker` | Worker secrets                           | `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`                                                                                                               |
-| `prd_github` | `production.yml`, `release.yml`, records | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `D1_DATABASE_ID`, `WORKER_DOMAIN`, `DOPPLER_TOKEN_WORKER` (read-only, `prd_worker`), `RELEASE_APP_CLIENT_ID`, `RELEASE_APP_PRIVATE_KEY`; records `WORKER_ROUTE`, `WORKER_VAR_*` |
+| Config       | Consumer                             | Holds                                                                                                                                                                        |
+| ------------ | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dev`        | every local command (root)           | local D1 settings, non-secret dev config                                                                                                                                     |
+| `dev_worker` | `wrangler dev` (mounted `.dev.vars`) | `BETTER_AUTH_SECRET`, `ENVIRONMENT=development`, OAuth client secrets, Stripe sandbox keys (`STRIPE_*`)                                                                      |
+| `prd_worker` | Worker secrets                       | `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`                                                           |
+| `prd_github` | `production.yml`, records            | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `D1_DATABASE_ID`, `WORKER_DOMAIN`, `DOPPLER_TOKEN_WORKER` (read-only, `prd_worker`); records `WORKER_ROUTE`, `WORKER_VAR_*` |
 
 Rules:
 
@@ -54,26 +54,5 @@ Then on npmjs.com, package `wurmhol` → Settings → Trusted Publisher → GitH
 organization `handlemotion`, repository `wurmhol`, workflow `production.yml`, environment
 `production`. Set "Publishing access" to require 2FA and disallow tokens. Every later version
 ships from `main` when a Changesets release pull request bumps it (`.changeset/README.md`).
-
-## The release pull request
-
-`.github/workflows/release.yml` opens and updates the Changesets release pull request
-(`.changeset/README.md`) as a GitHub App: a pull request opened with the workflow's own
-`GITHUB_TOKEN` starts no `pull_request` workflows, so `Checks` would never run on it. Set it up
-once:
-
-1. GitHub → organization `handlemotion` → Settings → Developer settings → GitHub Apps → New GitHub
-   App. Any name (for example `wurmhol-release`), homepage `https://github.com/handlemotion/wurmhol`,
-   Webhook off. Repository permissions: Contents read and write, Pull requests read and write;
-   nothing else. "Only on this account".
-2. On the App's page, note the Client ID and generate a private key (a `.pem` download).
-3. Install App → `handlemotion` → Only select repositories → `handlemotion/wurmhol`.
-4. Put both in Doppler `prd_github`: `RELEASE_APP_CLIENT_ID` (the Client ID) and
-   `RELEASE_APP_PRIVATE_KEY` (the whole `.pem`, including the `BEGIN` and `END` lines). Then
-   delete the downloaded file. Doppler's GitHub sync makes them secrets of the `production`
-   environment.
-
-Until both exist, the workflow logs that the App is not configured and succeeds without doing
-anything, so forks and self-hosters who don't release the CLI skip this section.
 
 Never deploy from a laptop.

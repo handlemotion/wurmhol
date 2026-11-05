@@ -13,7 +13,7 @@ Releases of the CLI (`packages/cli`, `wurmhol` on npm) are versioned with
   `.github/workflows/release.yml` keeps one pull request open, "Release wurmhol <version>" from the
   branch `changeset-release/main`: it runs `pnpm changeset version`, which bumps
   `packages/cli/package.json`, writes `packages/cli/CHANGELOG.md` and deletes the consumed
-  changesets, and it updates the pull request on every push to `main`. A GitHub App opens it so
-  that `Checks` runs on it (setup: `docs/operations/doppler.md`). When it merges,
+  changesets, and it updates the pull request on every push to `main`, then starts `Checks` on it.
+  Nothing to set up. When it merges,
   `.github/workflows/production.yml` publishes the new version to npm (trusted publishing, with
   provenance) and creates the `wurmhol@<version>` tag and GitHub release.
