@@ -9,7 +9,15 @@ import {
   PONG_TEXT,
   ProtocolError,
 } from "./frame.ts";
-import { forwardable, pipeSetCookie, readCookie, SHARE_COOKIE, withoutCookie } from "./headers.ts";
+import { parseRefusal, refusal } from "./connect.ts";
+import {
+  forwardable,
+  pipeSetCookie,
+  readCookie,
+  SHARE_COOKIE,
+  viewerRequestHeaders,
+  withoutCookie,
+} from "./headers.ts";
 import { HttpStreamOrder, INITIAL_WINDOW, ReceiveWindow, SendWindow } from "./mux.ts";
 
 const bytes = (...values: number[]) => new Uint8Array(values);
@@ -293,6 +301,28 @@ describe("headers", () => {
     expect(withoutCookie(` ${SHARE_COOKIE} = a `, SHARE_COOKIE)).toBeNull();
   });
 
+  it("keeps the viewer's identity and the relay's own headers from the dev server", () => {
+    // Catches: the viewer's IP, user id or share cookie reaching the dev server, or a
+    // compressed body the relay cannot read a title from.
+    const headers = viewerRequestHeaders(
+      [
+        ["accept", "text/html"],
+        ["cookie", `${SHARE_COOKIE}=secret; sid=1`],
+        ["x-wurmhol-viewer", "user_1"],
+        ["cf-connecting-ip", "203.0.113.9"],
+        ["X-Forwarded-For", "203.0.113.9"],
+        ["accept-encoding", "gzip"],
+      ],
+      "https://abcdefghij.wurmhol.dev",
+    );
+    expect(headers).toEqual([
+      ["accept", "text/html"],
+      ["cookie", "sid=1"],
+      ["x-forwarded-host", "abcdefghij.wurmhol.dev"],
+      ["x-forwarded-proto", "https"],
+    ]);
+  });
+
   it("keeps a dev server's cookies on its own pipe host", () => {
     // Catches: a pipe setting `Domain=<pipe domain>`, so its cookie reaches every other pipe
     // while the pipe domain is not on the Public Suffix List.
@@ -317,5 +347,19 @@ describe("headers", () => {
     );
     expect(readCookie("a=1", SHARE_COOKIE)).toBeNull();
     expect(readCookie(null, SHARE_COOKIE)).toBeNull();
+  });
+});
+
+describe("refusals", () => {
+  it("end a share only when retrying cannot help", () => {
+    // Catches: a plan or token refusal on reconnect leaving the CLI to retry, or closing as
+    // `disconnected`; a rate limit ending a share a retry would have kept.
+    const read = (...args: Parameters<typeof refusal>) =>
+      parseRefusal(JSON.stringify(refusal(...args)))?.reason;
+    expect(read(402, "no subscription", "Subscribe.")).toBe("no_subscription");
+    expect(read(401, "token expired", "Make a token.")).toBe("revoked");
+    expect(read(410, "share ended", "Start again.", { reason: "expired" })).toBe("expired");
+    expect(read(429, "too many requests", "Wait.", { retryAfter: 3 })).toBeUndefined();
+    expect(parseRefusal("<html>proxy</html>")).toBeNull();
   });
 });

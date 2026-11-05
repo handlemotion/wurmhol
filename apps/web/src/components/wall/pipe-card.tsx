@@ -7,17 +7,17 @@ import { CopyField } from "@/components/ui/copy-field";
 import { Link } from "@/components/ui/link";
 import { useMe, useNow, useTerminate } from "@/hooks/use-app";
 import { useGithub } from "@/hooks/use-github";
-import type { Share } from "@/lib/api";
+import type { ShareCard } from "@wurmhol/protocol";
 import { ago } from "@/lib/time";
 
 /** The page's title, else the host; a pill falls back to just the pipe's own label. */
-function name(share: Share, short = false) {
+function name(share: ShareCard, short = false) {
   const host = new URL(share.url).host;
   return share.title ?? (short ? host.split(".")[0] : host);
 }
 
 /** The pipe's mark: its favicon, or a filled square; hollow while its CLI reconnects. */
-function Mark({ share }: { share: Share }) {
+function Mark({ share }: { share: ShareCard }) {
   // A favicon that won't load falls back to the square rather than a broken image.
   const [broken, setBroken] = useState(false);
   // One 16px slot for both, so every pill's label starts at the same place.
@@ -45,7 +45,7 @@ function Mark({ share }: { share: Share }) {
 }
 
 /** `data-pipe` lets the network tell a press on a pill from one outside, and refocus it on close. */
-export function PipePill({ share, onPress }: { share: Share; onPress: () => void }) {
+export function PipePill({ share, onPress }: { share: ShareCard; onPress: () => void }) {
   return (
     <Button
       intent="outline"
@@ -117,7 +117,7 @@ function From({ parts }: { parts: React.ReactNode[] }) {
  * The pull request the pipe is posted to (ADR 0016). Before it is, an owner of an org with no
  * GitHub account linked for the pipe's repo gets the way to link one. Null: no row.
  */
-function usePullRequest(share: Share): React.ReactNode {
+function usePullRequest(share: ShareCard): React.ReactNode {
   const me = useMe();
   const onGithub = share.source?.repoHost === "github.com" && Boolean(share.source.repo);
   const github = useGithub(me.data?.role === "owner" && onGithub && !share.preview);
@@ -146,7 +146,7 @@ interface Row {
 /** Viewers named in a card; the rest are counted. */
 const VIEWS_SHOWN = 3;
 
-export function PipeCard({ share }: { share: Share }) {
+export function PipeCard({ share }: { share: ShareCard }) {
   // Focus moves to the card on opening, so Escape and Tab start from it.
   const card = useRef<HTMLElement>(null);
   useEffect(() => card.current?.focus({ preventScroll: true }), []);

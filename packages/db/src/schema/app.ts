@@ -1,5 +1,6 @@
 // Wurmhol's own tables. Every one belongs to an org (`org_id`). Better Auth's tables are in
 // `auth.ts`, generated; never edit that file by hand.
+import { TOKEN_SCOPES, TOKEN_SOURCES } from "@wurmhol/protocol";
 import { sql } from "drizzle-orm";
 import {
   index,
@@ -12,17 +13,6 @@ import {
 import { organizations, users } from "./auth.ts";
 
 const now = sql`(cast(unixepoch('subsecond') * 1000 as integer))`;
-
-/** What a token may do (ADR 0008): `pipes` opens pipes; `org` also lists and closes the org's. */
-export const TOKEN_SCOPES = ["pipes", "org"] as const;
-export type TokenScope = (typeof TOKEN_SCOPES)[number];
-
-/**
- * How a token came to be: made in the console's Tokens dialog, or minted for a computer approved
- * with `wurmhol login` (ADR 0008), which the console lists as a signed-in computer.
- */
-export const TOKEN_SOURCES = ["console", "login"] as const;
-export type TokenSource = (typeof TOKEN_SOURCES)[number];
 
 /**
  * Share tokens (spec section 6, ADR 0008): random, 32 bytes, stored only as a SHA-256 hash.
@@ -221,3 +211,16 @@ export const githubInstallations = sqliteTable(
     index("github_installations_installation_idx").on(table.installationId),
   ],
 );
+
+/**
+ * Orgs an operator blocked for abuse (ADR 0022): their tokens open no pipes and connect no
+ * machines. Deleting the row unblocks the org.
+ */
+export const orgBlocks = sqliteTable("org_blocks", {
+  orgId: text("org_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  /** The operator's note: the report it answers. Never shown to the org. */
+  reason: text("reason"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).default(now).notNull(),
+});

@@ -94,6 +94,8 @@ const DEFAULT_STYLE = {
   stroke: 1,
   dash: [10, 8],
   font: "ui-monospace, 'SF Mono', Menlo, monospace",
+  // The face for copy set with `text()`: the product's own.
+  display: "'Inter Variable', Inter, ui-sans-serif, system-ui, sans-serif",
   text: 15,
   // Icons: strokes scale with the drawing (no non-scaling-stroke), so a 32px mark keeps its
   // proportions at 16px.
@@ -118,7 +120,7 @@ class Plate {
    */
   constructor({ width = 1200, height = 1200, style = {}, origin = [0, 0] } = {}) {
     this.origin = origin;
-    this.voids = [];
+    this.holes = [];
     this.width = width;
     this.height = height;
     this.style = { ...DEFAULT_STYLE, ...style };
@@ -180,11 +182,24 @@ class Plate {
   }
 
   /**
-   * A void: a rectangle the drawing stops at, crisply, like a plan around an opening. Use it to
-   * keep lines off the text a plate sits under; align it to that text's column.
+   * A hole: an opening in the construction, drawn as its rim, that every other line stops at.
+   * `{ c, r }` is a circle, `{ x, y, w, h }` a frame. Text and page content sit in holes (see
+   * `text`): the drawing is built outward from the rim, so nothing crosses what it holds.
    */
-  void(x, y, w, h) {
-    this.voids.push({ x, y, w, h });
+  hole(shape, o = {}) {
+    this.holes.push({ ...shape, ...o });
+    return this;
+  }
+
+  /**
+   * Copy set in the display face (a wordmark, a headline): `lines` are `{ text, size, weight }`,
+   * each with an optional `gap` above it that overrides the block's,
+   * stacked and centred on `c` (`anchor` "middle", or "start" with `c` the block's left middle).
+   * Rendering throws unless the block fits inside a hole with `pad` to spare: text never floats
+   * on a bare patch of paper.
+   */
+  text(c, lines, o = {}) {
+    this.items.push({ kind: "text", c, lines, anchor: "middle", gap: 0.3, pad: 0, ...o });
     return this;
   }
 
@@ -339,6 +354,22 @@ class Plate {
         push(it.p[0], it.p[1], it.size * it.size * 0.6);
       } else if (it.kind === "label") {
         push(it.p[0], it.p[1], it.text.length * this.style.text * 2);
+      } else if (it.kind === "text") {
+        // Weighted per line as check.mjs weighs text, so the search balances what it checks.
+        const b = textBox(it);
+        let y = b.y;
+        it.lines.forEach((l, i) => {
+          y += l.size * (i ? 1 + (l.gap ?? it.gap) : 1);
+          push(it.c[0], y, l.text.length * 20);
+        });
+      }
+    }
+    for (const h of this.holes) {
+      if (h.r === undefined) continue;
+      const n = Math.ceil((Math.PI * 2 * h.r) / 6);
+      for (let i = 0; i <= n; i++) {
+        const t = (Math.PI * 2 * i) / n;
+        push(h.c[0] + h.r * Math.cos(t), h.c[1] + h.r * Math.sin(t), 6);
       }
     }
     return pts;
@@ -401,6 +432,49 @@ function arrowhead(p, angle, size) {
   return `M${f(p[0])} ${f(p[1])}L${f(back[0] + nx)} ${f(back[1] + ny)}L${f(back[0] - nx)} ${f(back[1] - ny)}Z`;
 }
 
+// An estimate of a line's advance in the display face, generous so the fit check errs safe.
+const advance = (line) => line.text.length * line.size * 0.58;
+
+/** A text block's box: its lines stacked with `gap` (a share of each size) between them. */
+function textBox(it) {
+  const height = it.lines.reduce((h, l, i) => h + l.size * (i ? 1 + (l.gap ?? it.gap) : 1), 0);
+  const width = Math.max(...it.lines.map(advance));
+  const x = it.anchor === "middle" ? it.c[0] - width / 2 : it.c[0];
+  return { x, y: it.c[1] - height / 2, w: width, h: height };
+}
+
+/** Whether box `b`, grown by `pad`, lies inside hole `h`. */
+function holds(h, b, pad) {
+  const [x0, y0, x1, y1] = [b.x - pad, b.y - pad, b.x + b.w + pad, b.y + b.h + pad];
+  if (h.r === undefined) return x0 >= h.x && y0 >= h.y && x1 <= h.x + h.w && y1 <= h.y + h.h;
+  return [
+    [x0, y0],
+    [x1, y0],
+    [x0, y1],
+    [x1, y1],
+  ].every(([x, y]) => Math.hypot(x - h.c[0], y - h.c[1]) <= h.r);
+}
+
+function renderText(pl, it) {
+  const b = textBox(it);
+  if (!pl.holes.some((h) => holds(h, b, it.pad))) {
+    throw new Error(
+      `text "${it.lines[0].text}" sits outside every hole: set copy inside a hole() of the construction, never on bare paper`,
+    );
+  }
+  const st = pl.style;
+  const out = [];
+  let y = b.y;
+  it.lines.forEach((l, i) => {
+    y += l.size * (i ? 1 + (l.gap ?? it.gap) : 1);
+    // Baseline about 0.2 of the size above the line box's bottom; x and y last, for check.mjs.
+    out.push(
+      `<text fill="${l.accent ? st.accent : st.ink}" font-family="${st.display}" font-size="${l.size}" font-weight="${l.weight ?? 400}" letter-spacing="${f(-l.size * 0.02)}" text-anchor="${it.anchor}" x="${f(it.c[0])}" y="${f(y - l.size * 0.2)}">${esc(l.text)}</text>`,
+    );
+  });
+  return out;
+}
+
 function renderPlate(pl) {
   const { width: W, height: H, style: st } = pl;
   const ink = st.scheme ? "currentColor" : st.ink;
@@ -428,12 +502,20 @@ function renderPlate(pl) {
       `<g transform="translate(${f(W / 2)} ${f(H / 2)}) scale(${f(zoom)}) translate(${f(-W / 2)} ${f(-H / 2)})">`,
     );
   }
-  // Voids: a luminance mask, white everywhere but the voids. Applied to all ink.
-  const masked = pl.voids.length > 0;
+  // Holes: a luminance mask, white everywhere but inside the holes, so lines stop at each rim;
+  // the rims themselves are drawn after it, unmasked.
+  const masked = pl.holes.length > 0;
   if (masked) {
+    const cut = pl.holes
+      .map((h) =>
+        h.r === undefined
+          ? `<rect x="${f(h.x)}" y="${f(h.y)}" width="${f(h.w)}" height="${f(h.h)}" fill="black"/>`
+          : `<circle cx="${f(h.c[0])}" cy="${f(h.c[1])}" r="${f(h.r)}" fill="black"/>`,
+      )
+      .join("");
     out.push(
-      `<mask id="void" maskUnits="userSpaceOnUse" x="${-pl.origin[0]}" y="${-pl.origin[1]}" width="${W}" height="${H}"><rect x="${-pl.origin[0]}" y="${-pl.origin[1]}" width="${W}" height="${H}" fill="white"/>${pl.voids.map((v) => `<rect x="${f(v.x)}" y="${f(v.y)}" width="${f(v.w)}" height="${f(v.h)}" fill="black"/>`).join("")}</mask>`,
-      `<g mask="url(#void)">`,
+      `<mask id="hole" maskUnits="userSpaceOnUse" x="${-pl.origin[0]}" y="${-pl.origin[1]}" width="${W}" height="${H}"><rect x="${-pl.origin[0]}" y="${-pl.origin[1]}" width="${W}" height="${H}" fill="white"/>${cut}</mask>`,
+      `<g mask="url(#hole)">`,
     );
   }
 
@@ -511,7 +593,17 @@ function renderPlate(pl) {
       }
     }
   }
-  if (masked) out.push("</g>");
+  if (masked) {
+    out.push("</g>");
+    for (const h of pl.holes) {
+      out.push(
+        h.r === undefined
+          ? `<rect ${strokeAttrs(h)} x="${f(h.x)}" y="${f(h.y)}" width="${f(h.w)}" height="${f(h.h)}"/>`
+          : `<circle ${strokeAttrs(h)} cx="${f(h.c[0])}" cy="${f(h.c[1])}" r="${f(h.r)}"/>`,
+      );
+    }
+  }
+  for (const it of pl.items) if (it.kind === "text") out.push(...renderText(pl, it));
   if (st.inset) out.push("</g>");
   out.push("</svg>");
   return out.join("\n");

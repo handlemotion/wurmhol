@@ -3,15 +3,18 @@
 // the agent's MCP session and ends with it; no daemon is left behind.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { PIPE_NAME_RULE, parseDuration, pipeName } from "@wurmhol/protocol";
+import { MAX_PORT, PIPE_NAME_RULE, parseDuration, pipeName } from "@wurmhol/protocol";
 import { z } from "zod";
 import pkg from "../package.json" with { type: "json" };
 import { consoleUrl, findToken, server } from "./config.ts";
 import { FixError } from "./errors.ts";
-import { openPipe, type Pipe } from "./pipe.ts";
+import { appendRequest, recentRequests } from "./logs.ts";
+import { openPipe, pagePath, pageUrl, type Pipe } from "./pipe.ts";
+import { listStates, matches } from "./state.ts";
 
 const INSTRUCTIONS = `Wurmhol gives a local dev server a private HTTPS URL that only members of the user's org can open, in their own browser, on any device.
 When the user wants to see or try a server running here, call open_pipe with its port and send them the URL. Call stop_pipe when they are done. Pipes end when this MCP session ends.
+When the user says something is broken on the page they opened, call recent_requests to see what their browser asked for and what the dev server answered.
 Errors say the fix in one line: pass them on to the user as they are.`;
 
 /** How long shutdown waits for the relay to confirm each pipe ended. */
@@ -76,7 +79,7 @@ export function createServer(pipes: Map<string, Held>) {
       description:
         "Give a local port a private HTTPS URL that members of the user's org can open in their own browser. Returns once the URL works. Send the URL to the user.",
       inputSchema: {
-        port: z.number().int().min(1).max(65535).describe("The port the dev server listens on"),
+        port: z.number().int().min(1).max(MAX_PORT).describe("The port the dev server listens on"),
         ttl: z
           .string()
           .optional()
@@ -91,12 +94,22 @@ export function createServer(pipes: Map<string, Held>) {
           .array(z.string())
           .optional()
           .describe("Emails of the org members who may open it. Default: every member"),
+        path: z
+          .string()
+          .optional()
+          .describe(
+            "A page to send the user to, like /checkout?step=2: the result's pageUrl opens there",
+          ),
       },
-      outputSchema: pipeShape,
+      outputSchema: {
+        ...pipeShape,
+        pageUrl: z.string().optional().describe("The URL at `path`, when one was given"),
+      },
       annotations: { openWorldHint: true },
     },
-    async ({ port, ttl, name, only }) => {
+    async ({ port, ttl, name, only, path }) => {
       try {
+        const page = path === undefined ? undefined : pagePath(path);
         let seconds: number | undefined;
         if (ttl !== undefined) {
           seconds = parseDuration(ttl) ?? undefined;
@@ -120,9 +133,14 @@ export function createServer(pipes: Map<string, Held>) {
         });
         const held: Held = { pipe, name: name ? pipeName(name) : null, startedAt: new Date() };
         pipes.set(pipe.id, held);
+        pipe.on("request", (request) => appendRequest(pipe.id, request, { port }));
         pipe.once("close", () => pipes.delete(pipe.id));
         const result = describe(held);
-        return ok(`${pipe.url}\nPort ${port}, ends ${result.endsAt}. Id ${pipe.id}.`, result);
+        const at = page === undefined ? undefined : pageUrl(pipe.url, page);
+        return ok(`${at ?? pipe.url}\nPort ${port}, ends ${result.endsAt}. Id ${pipe.id}.`, {
+          ...result,
+          ...(at ? { pageUrl: at } : {}),
+        });
       } catch (error) {
         return failure(error);
       }
@@ -144,6 +162,72 @@ export function createServer(pipes: Map<string, Held>) {
         ? list.map((p) => `${p.port}\t${p.url}\t${p.id}\tends ${p.endsAt}`).join("\n")
         : "No open pipes. Open one with open_pipe.";
       return ok(text, { pipes: list });
+    },
+  );
+
+  mcp.registerTool(
+    "recent_requests",
+    {
+      title: "Recent requests",
+      description:
+        "The last requests the user's browser made through a pipe on this machine, oldest first: method, path (query values left out), the dev server's status and how long it took. Use it to see what failed, e.g. a 500 on /api/checkout. Works for pipes opened here and with `npx wurmhol`.",
+      inputSchema: {
+        target: z.string().describe("The pipe's port, id or name"),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe("How many requests, newest last. Default 20"),
+      },
+      outputSchema: {
+        id: z.string(),
+        url: z.string(),
+        requests: z.array(
+          z.object({
+            time: z.string().describe("When the request finished (ISO 8601)"),
+            method: z.string(),
+            path: z.string(),
+            status: z.number().int(),
+            durationMs: z.number(),
+          }),
+        ),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async ({ target, limit }) => {
+      try {
+        const wanted = target.trim().toLowerCase();
+        const own = [...pipes.values()]
+          .filter(
+            ({ pipe, name }) =>
+              pipe.id === target ||
+              String(pipe.port) === wanted ||
+              name === wanted ||
+              new URL(pipe.url).hostname.split(".")[0] === wanted,
+          )
+          .map(({ pipe }) => ({ id: pipe.id, url: pipe.url }));
+        const found =
+          own.at(-1) ??
+          listStates()
+            .filter((s) => matches(s, target))
+            .at(-1);
+        if (!found) {
+          throw new FixError(
+            `No open pipe for ${target} on this machine. See list_pipes, or \`wurmhol ls\`.`,
+          );
+        }
+        const requests = recentRequests(found.id, limit ?? 20) ?? [];
+        const text = requests.length
+          ? requests
+              .map((r) => `${r.time}  ${r.method} ${r.path}  ${r.status}  ${r.durationMs} ms`)
+              .join("\n")
+          : `No requests through ${found.url} yet.`;
+        return ok(text, { id: found.id, url: found.url, requests });
+      } catch (error) {
+        return failure(error);
+      }
     },
   );
 

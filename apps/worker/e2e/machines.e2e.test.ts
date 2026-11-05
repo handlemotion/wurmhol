@@ -1,6 +1,8 @@
 // Machines (ADR 0018): the real `wurmhol host` connected to the real stack reports this
 // computer's web ports, and its owner opens a pipe to one from the API the Create pipe card uses.
 import { type ChildProcess, spawn } from "node:child_process";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import type WebSocket from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -156,6 +158,33 @@ describe("a computer running wurmhol host", () => {
     // Catches: the CLI offering its own server, a pipe that would loop through itself.
     expect(ports).not.toContain(Number(new URL(stack.url).port));
     adas.socket.close();
+  });
+
+  it("lists a web server that answers only on ::1 (needs an IPv6 loopback)", async () => {
+    // Vite on its default `localhost` with Node 17+ listens on ::1 alone.
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/html" }).end("<title>IPv6 only</title>");
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", (error) =>
+        reject(new Error(`this test needs an IPv6 loopback (::1): ${error.message}`)),
+      );
+      server.listen(0, "::1", resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    try {
+      const adas = watch(stack, ada);
+      // Catches: the probe asking only 127.0.0.1, so the port never shows in Create pipe.
+      const machine = await waitFor(
+        () => adas.machines?.find((m) => m.ports.some((p) => p.port === port)) ?? null,
+        { timeoutMs: 15_000, what: `port ${port} on ::1 listed` },
+      );
+      expect(machine.ports.find((p) => p.port === port)?.title).toBe("IPv6 only");
+      adas.socket.close();
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 
   it("opens a pipe to a port it reported when its owner picks it, and to no other port", async () => {

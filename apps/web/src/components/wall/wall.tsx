@@ -5,26 +5,23 @@ import { Button } from "@/components/ui/button";
 import { SkeletonProvider } from "@/components/ui/skeleton-provider";
 import { Text } from "@/components/ui/text";
 import { useMe, useOpenBilling, useWall } from "@/hooks/use-app";
-import { type Me, type Share, toLogin } from "@/lib/api";
+import { newShareCard, type ShareCard } from "@wurmhol/protocol";
+import { type Me, toLogin } from "@/lib/api";
 import { Header, type WallDialog } from "./header";
 import { MembersDialog } from "./members-dialog";
 import { Network } from "./network";
 import { TokensDialog } from "./tokens-dialog";
 
-const SAMPLE: Share[] = [1, 2, 3].map((n) => ({
-  id: `sample${n}`,
-  url: "https://sample.wurmhol.dev",
-  port: 5173,
-  startedBy: "Someone",
-  startedAt: 0,
-  title: "A dev server",
-  favicon: false,
-  lastRequestAt: null,
-  views: [],
-  state: "live",
-  source: null,
-  preview: null,
-}));
+const SAMPLE: ShareCard[] = [1, 2, 3].map((n) =>
+  newShareCard({
+    id: `sample${n}`,
+    url: "https://sample.wurmhol.dev",
+    port: 5173,
+    startedBy: "Someone",
+    startedAt: 0,
+    title: "A dev server",
+  }),
+);
 
 // Motion's animation code (the menus' hover highlight) loads after the wall's first paint, off
 // the startup path, and long before anyone opens a menu.

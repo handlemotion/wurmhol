@@ -22,6 +22,74 @@ const HOP_BY_HOP = new Set([
   "host",
 ]);
 
+/**
+ * On the CLI's own "Waiting for the server on port N" page, sent while nothing listens on the
+ * port. The page is not the app's, so the relay reads no title from it and probes again later.
+ */
+export const WAITING_HEADER = "x-wurmhol-waiting";
+
+/** Headers that carry the viewer's IP address. No dev server needs it. */
+const CLIENT_IP = new Set(["x-forwarded-for", "x-real-ip", "true-client-ip"]);
+
+/**
+ * A viewer's request headers as the dev server gets them. Cloudflare's (`cf-*`) and Wurmhol's
+ * own (`x-wurmhol-*`) headers, the viewer's IP and the share cookie stay with the relay.
+ * `Accept-Encoding` does too: bodies cross the tunnel uncompressed, so the relay can read a page's
+ * title, and Cloudflare compresses toward the viewer. The share's public host and scheme are added.
+ */
+export function viewerRequestHeaders(
+  headers: Iterable<[string, string]>,
+  shareUrl: string,
+): HeaderList {
+  const list: HeaderList = [];
+  for (const [name, value] of headers) {
+    const lower = name.toLowerCase();
+    if (
+      lower.startsWith("cf-") ||
+      lower.startsWith("x-wurmhol-") ||
+      CLIENT_IP.has(lower) ||
+      lower === "accept-encoding"
+    ) {
+      continue;
+    }
+    if (lower === "cookie") {
+      const kept = withoutCookie(value, SHARE_COOKIE);
+      if (kept) list.push([name, kept]);
+      continue;
+    }
+    list.push([name, value]);
+  }
+  return [...list, ...forwardedHeaders(shareUrl)];
+}
+
+/** The share's public host and scheme, as a proxy in front of the dev server would pass them. */
+export function forwardedHeaders(shareUrl: string): HeaderList {
+  const url = new URL(shareUrl);
+  return [
+    ["x-forwarded-host", url.host],
+    ["x-forwarded-proto", url.protocol.replace(":", "")],
+  ];
+}
+
+/**
+ * Request headers as the CLI sends them to the dev server: forwardable ones, and
+ * `Host: localhost:<port>`, which Vite and most frameworks accept without config (spec section 7).
+ */
+export function localRequestHeaders(headers: HeaderList, port: number): HeaderList {
+  return [...forwardable(headers), ["host", `localhost:${port}`]];
+}
+
+/**
+ * A browser WebSocket's handshake headers as the CLI sends them to the dev server: as for a
+ * request, without the browser's `Sec-WebSocket-*`, which the CLI's own handshake sets.
+ */
+export function localSocketHeaders(headers: HeaderList, port: number): HeaderList {
+  return localRequestHeaders(
+    headers.filter(([name]) => !/^sec-websocket-/i.test(name)),
+    port,
+  );
+}
+
 /** Headers that may cross the tunnel, minus hop-by-hop ones and any `Connection` names. */
 export function forwardable(headers: HeaderList): HeaderList {
   const named = new Set<string>();

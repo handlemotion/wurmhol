@@ -27,10 +27,12 @@ import {
   decodeFrame,
   encodeFrame,
   type EndReason,
+  FIRST_STREAM_ID,
   forwardable,
+  forwardedHeaders,
   type Frame,
-  type HeaderList,
   HttpStreamOrder,
+  nextStreamId,
   PING_TEXT,
   pipeSetCookie,
   type PipeSource,
@@ -38,15 +40,18 @@ import {
   ProtocolError,
   ReceiveWindow,
   RECONNECT_GRACE_MS,
+  REPLACED_CLOSE_CODE,
   type RequestHead,
   type ResponseHead,
   SendWindow,
-  SHARE_COOKIE,
+  sendableCloseCode,
   SHARE_HEADERS,
-  withoutCookie,
+  viewerRequestHeaders,
+  WAITING_HEADER,
   type WsClosePayload,
   type WsOpenPayload,
 } from "@wurmhol/protocol";
+import { refuse } from "./bearer.ts";
 import { loadConfig } from "./env.ts";
 import { type Preview, postPreview, retirePreview } from "./github.ts";
 import { createLogger } from "./log.ts";
@@ -96,9 +101,6 @@ interface Tombstone {
   endReason: EndReason;
 }
 
-/** An older socket of the same CLI, replaced by its reconnect. */
-const REPLACED = 4000;
-
 /** Headers the Worker uses to talk to this object; never forwarded, never trusted from clients. */
 const INTERNAL_HEADERS = {
   /** To the object: a new share's `ShareInit`, as JSON. */
@@ -132,13 +134,19 @@ export function toShare(
   return url ? new Request(url, { headers }) : new Request(raw, { headers });
 }
 
+/**
+ * The refusal for a CLI coming back to a share that ended (with why), or that is not its own or
+ * never existed (`null`).
+ */
+export function shareGone(reason: EndReason | null) {
+  const fix = "Start a new pipe: npx wurmhol <port>.";
+  return reason ? refuse(410, "share ended", fix, { reason }) : refuse(404, "share not found", fix);
+}
+
 /** Whether the object refused the viewer (removed from the org, or not on the share's list). */
 export function refusedViewer(response: Response) {
   return response.headers.has(INTERNAL_HEADERS.refused);
 }
-
-/** Headers that carry the viewer's IP address. */
-const CLIENT_IP = new Set(["x-forwarded-for", "x-real-ip", "true-client-ip"]);
 
 /** How long a viewer's membership check stays good before D1 is asked again. */
 const MEMBERSHIP_TTL_MS = 10_000;
@@ -152,7 +160,7 @@ const FAVICON_MAX_BYTES = 100 * 1024;
 /**
  * When a new pipe connects, the relay asks the dev server for `/` itself, so the wall has the
  * favicon (and title) before anyone opens it. A server not listening yet answers with the CLI's
- * waiting page (502); the probe tries again after each of these delays.
+ * waiting page (`WAITING_HEADER`); the probe tries again after each of these delays.
  */
 const PROBE_RETRY_MS = [2_000, 5_000, 10_000, 20_000];
 const PROBE_FIRST_MS = 1_000;
@@ -250,10 +258,11 @@ export class Share extends DurableObject<Env> {
     );
   }
 
+  /** Kept in storage: a viewer's WebSocket stream outlives hibernation, so its id must too. */
   #nextStream() {
-    const next = this.ctx.storage.kv.get<number>("nextStream") ?? 1;
-    this.ctx.storage.kv.put("nextStream", next + 1);
-    return next;
+    const id = this.ctx.storage.kv.get<number>("nextStream") ?? FIRST_STREAM_ID;
+    this.ctx.storage.kv.put("nextStream", nextStreamId(id));
+    return id;
   }
 
   #send(frame: Frame) {
@@ -358,14 +367,12 @@ export class Share extends DurableObject<Env> {
   /** Accepts the CLI's WebSocket: a new share, or the same CLI coming back within the grace. */
   #connect(request: Request) {
     const stored = this.#stored();
-    if (stored?.state === "ended") {
-      return Response.json({ error: "share ended", reason: stored.endReason }, { status: 410 });
-    }
+    if (stored?.state === "ended") return shareGone(stored.endReason);
     let meta = stored;
     const init = request.headers.get(INTERNAL_HEADERS.init);
     const isNew = !meta;
     if (!meta) {
-      if (!init) return Response.json({ error: "share not found" }, { status: 404 });
+      if (!init) return shareGone(null);
       const parsed = JSON.parse(init) as ShareInit;
       meta = {
         ...parsed,
@@ -382,7 +389,7 @@ export class Share extends DurableObject<Env> {
     // One CLI per share: a reconnect replaces a socket the proxy left half-open.
     for (const old of this.ctx.getWebSockets("cli")) {
       try {
-        old.close(REPLACED, "replaced by a reconnect");
+        old.close(REPLACED_CLOSE_CODE, "replaced by a reconnect");
       } catch {
         // Already closed.
       }
@@ -528,25 +535,11 @@ export class Share extends DurableObject<Env> {
 
   #requestHead(request: Request, meta: Meta): RequestHead {
     const url = new URL(request.url);
-    const headers: HeaderList = [];
-    for (const [name, value] of request.headers) {
-      const lower = name.toLowerCase();
-      // Cloudflare's and our own headers stay on this side; so does the share cookie. So does
-      // the viewer's IP, which Cloudflare puts in X-Forwarded-For: no dev server needs it.
-      if (lower.startsWith("cf-") || lower.startsWith("x-wurmhol-") || CLIENT_IP.has(lower)) {
-        continue;
-      }
-      if (lower === "cookie") {
-        const kept = withoutCookie(value, SHARE_COOKIE);
-        if (kept) headers.push([name, kept]);
-        continue;
-      }
-      // Identity bodies: the title scan reads HTML, and Cloudflare compresses toward the viewer.
-      if (lower === "accept-encoding") continue;
-      headers.push([name, value]);
-    }
-    headers.push(...forwardedHeaders(meta));
-    return { method: request.method, path: `${url.pathname}${url.search}`, headers };
+    return {
+      method: request.method,
+      path: `${url.pathname}${url.search}`,
+      headers: viewerRequestHeaders(request.headers, meta.url),
+    };
   }
 
   /** Sends one HTTP request down the CLI's socket and streams its response back. */
@@ -610,7 +603,7 @@ export class Share extends DurableObject<Env> {
       }
     }
     const isHtml = /^text\/html\b/i.test(headers.get("content-type") ?? "");
-    let scan = options.scanTitle && isHtml ? "" : null;
+    let scan = options.scanTitle && isHtml && !headers.has(WAITING_HEADER) ? "" : null;
     const noBody = head.method === "HEAD" || [101, 204, 205, 304].includes(responseHead.status);
 
     const readable = new ReadableStream<Uint8Array>(
@@ -686,18 +679,17 @@ export class Share extends DurableObject<Env> {
           method: "GET",
           path: "/",
           // As on a viewer's request, for apps that build absolute URLs.
-          headers: [["accept", "text/html"], ...forwardedHeaders(meta)],
+          headers: [["accept", "text/html"], ...forwardedHeaders(meta.url)],
         },
         null,
         meta,
         { scanTitle: false },
       );
-      const isHtml = /^text\/html\b/i.test(response.headers.get("content-type") ?? "");
-      if (response.status === 502 && isHtml) {
-        // The CLI's waiting page: the server is not up yet.
+      if (response.headers.has(WAITING_HEADER)) {
         await response.body?.cancel();
         throw new Error("the dev server is not listening yet");
       }
+      const isHtml = /^text\/html\b/i.test(response.headers.get("content-type") ?? "");
       if (response.ok && isHtml && response.body) {
         this.#noteHtml(await readStart(response.body, TITLE_SCAN_BYTES), true);
       } else {
@@ -804,8 +796,7 @@ export class Share extends DurableObject<Env> {
         type: "ws-open",
         payload: {
           path: head.path,
-          // The handshake's own headers are the CLI's to make.
-          headers: head.headers.filter(([name]) => !/^sec-websocket-/i.test(name)),
+          headers: head.headers,
           protocols,
         },
       });
@@ -919,7 +910,7 @@ export class Share extends DurableObject<Env> {
           frame.payload.binary ? frame.payload.data : textDecoder.decode(frame.payload.data),
         );
       } else if (frame.type === "ws-close") {
-        viewer.close(safeCloseCode(frame.payload.code), frame.payload.reason.slice(0, 120));
+        viewer.close(sendableCloseCode(frame.payload.code), frame.payload.reason.slice(0, 120));
       }
     } catch {
       // The viewer's socket is closing; its close event tells the CLI.
@@ -930,7 +921,7 @@ export class Share extends DurableObject<Env> {
     const tags = this.ctx.getTags(socket);
     const viewerTag = tags.find((tag) => tag.startsWith("v:"));
     if (viewerTag) {
-      const payload: WsClosePayload = { code: safeCloseCode(code), reason };
+      const payload: WsClosePayload = { code: sendableCloseCode(code), reason };
       try {
         this.#send({ stream: Number(viewerTag.slice(2)), type: "ws-close", payload });
       } catch {
@@ -941,7 +932,7 @@ export class Share extends DurableObject<Env> {
     if (!tags.includes("cli")) return;
     // A replaced socket closing changes nothing: its successor is the share's CLI now.
     if (
-      code === REPLACED ||
+      code === REPLACED_CLOSE_CODE ||
       this.ctx.getWebSockets("cli").some((s) => s !== socket && s.readyState === WebSocket.OPEN)
     ) {
       return;
@@ -949,7 +940,7 @@ export class Share extends DurableObject<Env> {
     this.#failStreams("the share's CLI disconnected");
     const meta = this.#meta();
     if (!meta || meta.state !== "live") return;
-    if (code === 1000) {
+    if (code === CLOSE_CODES.stopped) {
       await this.#end("stopped");
       return;
     }
@@ -1091,21 +1082,4 @@ export class Share extends DurableObject<Env> {
       bytes: meta.bytes,
     });
   }
-}
-
-/** The share's public host and scheme, as a proxy in front of the dev server would pass them. */
-function forwardedHeaders(meta: Meta): HeaderList {
-  const url = new URL(meta.url);
-  return [
-    ["x-forwarded-host", url.host],
-    ["x-forwarded-proto", url.protocol.replace(":", "")],
-  ];
-}
-
-/** A close code a server may send: 1005, 1006 and 1015 are reserved for the runtime. */
-function safeCloseCode(code: number) {
-  if (code === 1000 || (code >= 1001 && code <= 1014 && ![1004, 1005, 1006].includes(code))) {
-    return code;
-  }
-  return code >= 3000 && code <= 4999 ? code : 1000;
 }

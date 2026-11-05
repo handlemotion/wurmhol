@@ -26,6 +26,13 @@ numbers.
   `browser`, `:5173`, a `*.wurmhol.dev` host. No real tokens or user data.
 - **One accent, one pivot.** The brand `primary` marks the single thing the plate is about, plus
   at most the one line or tag tied to it.
+- **Text lives in the drawing.** Copy and page content (a wordmark, a headline, a form, a
+  message) sit inside a shape of the construction: a hole, a frame, an end wall. The drawing is
+  built outward from that shape, and its lines touch or stop at the drawn rim, never cross it.
+  No bare white box cut out behind text, no fill or fade to make room: the login's form in the
+  Steiner chain's hole, the ended page's message on the duct's end wall, the consent form in its
+  hole and the link preview's copy in the browser circle are the pattern. `hole()` and `text()`
+  build it, and rendering refuses text outside a hole.
 - **Complete and balanced.** A plate fills its frame: outer layers run past the edge, so it reads
   as part of a larger drawing. The ink's centre of mass sits near the frame's centre. Two shapes
   and a line is not a plate.
@@ -118,8 +125,16 @@ you pick a variant instead of guessing. `--tsx Name` writes a React component of
    unscaled, offset so (0, 0) lands on its positioned parent. Anchor at a point CSS can place
    exactly at any size (the column's centre, `top-1/2 left-1/2`), not at a child whose position
    depends on content. The login (`apps/web/src/components/auth/wormhole*.tsx`, scene
-   `backdrop`) puts the form in the hole of a Steiner chain. `void()` is the fallback for text
-   that can't sit inside a shape.
+   `backdrop`) puts the form in the hole of a Steiner chain. There is no fallback for text that
+   doesn't fit a shape: change the construction until one holds it.
+
+   **Copy inside a plate** (a link preview, a hero with its headline): declare the shape with
+   `p.hole({ c, r })` or `p.hole({ x, y, w, h })`, which draws its rim and stops every other line
+   at it, then set the copy with `p.text(c, [{ text, size, weight }], { pad, gap })` in the
+   display face (Inter). Rendering throws if the block doesn't fit inside a hole with `pad` to
+   spare. Prefer lines that are tangent to the rim or end on it with a node over lines that the
+   rim merely clips. To rasterize, load Inter into the page (as `apps/site/scripts/og.mjs` does);
+   `check.mjs` counts the copy in the balance.
 
    Check an anchored plate through real viewports with `check.mjs --frame x,y,w,h` (the window
    a screen shows, in the plate's coordinates), then on the real stack at 1440, 1024 and 390.
@@ -171,6 +186,12 @@ you pick a variant instead of guessing. `--tsx Name` writes a React component of
   (the person's orgs); a small circle out to the right (the assistant) touches the hole's φ bezel
   from outside, and their inner tangents cross at the internal centre of similitude, the grant,
   the accent. A half square on the left circumscribes the hole, so the plate balances.
+
+- **Link preview** (`og`): the marketing site's `og:image`, 1200x630. Common tangents between a
+  large circle (`browser`), a hole that holds the wordmark and headline, and a small one
+  (`container`); every tangent only touches the browser's rim, and the pivot where the inner
+  pair crosses is tagged with a pipe host as the accent. `apps/site/scripts/og.mjs` writes
+  `apps/site/public/og.png`.
 
 - **Ended** (`ended`): the Worker's own pages on a share host (ended, reconnecting, refused). A
   square duct in one-point perspective, frames growing by √φ from a closed end wall; the message

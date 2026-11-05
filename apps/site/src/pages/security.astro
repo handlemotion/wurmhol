@@ -1,0 +1,202 @@
+---
+import Doc from "../layouts/Doc.astro";
+
+// The public form of SECURITY.md, plus how to report abuse on a pipe and what happens to it.
+// When SECURITY.md changes, this page changes in the same pull request.
+const UPDATED = "November 5, 2026";
+const REPO = "https://github.com/handlemotion/wurmhol";
+const REPORT = `${REPO}/security/advisories/new`;
+const POLICY = `${REPO}/blob/main/SECURITY.md`;
+const SELF_HOSTING = "/docs/self-hosting";
+
+const title = "Security and abuse: Wurmhol";
+const description =
+  "How to report a vulnerability in Wurmhol, or abuse or phishing on a pipe at *.wurmhol.dev, and what happens next.";
+
+const scope = [
+  {
+    what: "Pipe access",
+    detail:
+      "Only signed-in members of the org that owns a pipe may reach it. Anything that lets a signed-out viewer, a member of another org, or a removed member load a pipe's pages, or that forges or replays the one-time code or the __Host-wurmhol cookie.",
+  },
+  {
+    what: "Isolation",
+    detail:
+      "A pipe's JavaScript must not read or set cookies of the app or another pipe, or act as the signed-in user on wurmhol.com.",
+  },
+  {
+    what: "Tokens",
+    detail:
+      "Tokens are stored hashed and scoped to one org. Anything that reveals a token, lets one start pipes for another org, or keeps working after revocation.",
+  },
+  {
+    what: "The relay",
+    detail:
+      "Request smuggling between streams, reading another pipe's traffic, or using the relay as an open proxy.",
+  },
+  {
+    what: "Accounts and orgs",
+    detail:
+      "Sessions, passkeys and sign-in with Google or GitHub, and any way to read or change another org's data.",
+  },
+];
+
+const takedown = [
+  {
+    what: "End the pipe",
+    detail:
+      "Its address stops answering. Pipe ids are random and never reused, so the same address does not come back.",
+  },
+  {
+    what: "Revoke the token",
+    detail: "The token that opened the pipe stops working, which ends every other pipe it opened.",
+  },
+  {
+    what: "Block the org",
+    detail:
+      "For deliberate abuse, we block the org behind it: its other pipes end, and none of its tokens can start another.",
+  },
+  {
+    what: "Reply",
+    detail: "We tell you what we found and what we did, on the same report.",
+  },
+];
+---
+
+<Doc
+  title={title}
+  description={description}
+  heading="Security and abuse"
+  lead="How to report a vulnerability in Wurmhol, or a pipe that hosts phishing, malware or other abuse, and what happens after you do."
+  updated={UPDATED}
+>
+  <section class="section" aria-labelledby="contact">
+    <h2 id="contact">Contact</h2>
+    <div class="body prose">
+      <p>
+        Report both vulnerabilities and abuse privately through GitHub: open <a href={REPORT}
+          >Report a vulnerability</a
+        > on the repository's Security tab. Only the Wurmhol maintainers see the report. A GitHub account is needed to send one.
+      </p>
+      <p>
+        Please don't open a public issue, pull request or discussion for either: a public report of
+        a vulnerability puts people at risk before it's fixed.
+      </p>
+      <p class="contact">
+        <a href={REPORT}>github.com/handlemotion/wurmhol/security/advisories/new</a>
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="vulnerability">
+    <h2 id="vulnerability">Report a vulnerability</h2>
+    <div class="body prose">
+      <p>
+        Wurmhol relays traffic between a developer's local server and the people they share it
+        with, so a security bug can expose someone's unreleased app or let a stranger in. We take
+        reports seriously and thank everyone who sends one.
+      </p>
+      <p>
+        Include what you can: the affected component and commit, steps to reproduce or a proof of
+        concept, and the impact you expect. We aim to acknowledge a report within 3 business days,
+        and to agree a disclosure date with you once a fix is ready. We credit reporters in the
+        advisory unless you ask us not to.
+      </p>
+      <p>
+        Test only against your own <a href={SELF_HOSTING}>self-hosted instance</a> or the local
+        stack (<code>pnpm stack:serve</code>). Do not access other people's pipes or data, degrade
+        hosted Wurmhol, or run automated scans against it.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="scope">
+    <h2 id="scope">In scope</h2>
+    <div class="body prose">
+      <p>The code in the repository, especially:</p>
+      <dl class="rows">
+        {
+          scope.map((row) => (
+            <div class="row">
+              <dt>{row.what}</dt>
+              <dd>
+                <p>{row.detail}</p>
+              </dd>
+            </div>
+          ))
+        }
+      </dl>
+      <p>
+        Out of scope: vulnerabilities in Cloudflare or Stripe themselves (report those to the
+        vendor), what a member's own dev server does to that member, findings that need a
+        compromised device, missing hardening headers without a demonstrated impact, and denial of
+        service by volume.
+      </p>
+      <p>
+        The relay can technically read the traffic it carries; that is stated plainly in the <a
+          href="/privacy">privacy page</a
+        >, and request bodies are never logged or stored.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="abuse">
+    <h2 id="abuse">Report abuse</h2>
+    <div class="body prose">
+      <p>
+        Every pipe on hosted Wurmhol has its own address under <code>wurmhol.dev</code>, such as
+        <code>k3x9p2m7qa.wurmhol.dev</code>. Only signed-in members of the org that owns a pipe can
+        open its pages; everyone else gets a sign-in page from Wurmhol, never the pipe's content.
+      </p>
+      <p>
+        If a pipe hosts phishing, malware or anything else that harms people, or a link to one
+        reached you, report it as above. Give the full pipe address, what you saw and when, and
+        where the link came from. A screenshot helps. Don't send credentials you may have entered;
+        change them instead.
+      </p>
+      <p>
+        A pipe on a domain other than <code>wurmhol.dev</code> runs on someone's own Wurmhol
+        install, not ours. Report it to whoever runs that domain.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="takedown">
+    <h2 id="takedown">What we do</h2>
+    <div class="body prose">
+      <p>When a report holds up, we:</p>
+      <dl class="rows">
+        {
+          takedown.map((row) => (
+            <div class="row">
+              <dt>{row.what}</dt>
+              <dd>
+                <p>{row.detail}</p>
+              </dd>
+            </div>
+          ))
+        }
+      </dl>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="versions">
+    <h2 id="versions">Supported versions</h2>
+    <div class="body prose">
+      <p>
+        Wurmhol has no tagged releases yet. Security fixes land on <code>main</code> and ship from
+        there; hosted Wurmhol runs <code>main</code>, and the CLI is published from it. The policy
+        this page is built from is <a href={POLICY}>SECURITY.md</a> in the repository, and its
+        machine-readable form is <a href="/.well-known/security.txt">security.txt</a>.
+      </p>
+    </div>
+  </section>
+</Doc>
+
+<style>
+  .contact {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+  }
+</style>

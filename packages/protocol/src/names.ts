@@ -8,12 +8,17 @@
  * (`xn--`). Never 10 letters and digits alone: that is the shape of a random pipe id.
  */
 const NAME = /^[a-z](?:[a-z0-9-]{1,38})[a-z0-9]$/;
-const RANDOM_ID = /^[a-z0-9]{10}$/;
+
+/** A share id's characters: lowercase, because an id is a DNS label and hosts ignore case. */
+export const SHARE_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
+export const SHARE_ID_LENGTH = 10;
+/** A random pipe id: `SHARE_ID_LENGTH` lowercase letters and digits. */
+export const SHARE_ID = new RegExp(`^[a-z0-9]{${SHARE_ID_LENGTH}}$`);
 
 /** `value` as a pipe name, lowercased, or null when it cannot be one. */
 export function pipeName(value: string): string | null {
   const name = value.trim().toLowerCase();
-  if (!NAME.test(name) || name.includes("--") || RANDOM_ID.test(name)) return null;
+  if (!NAME.test(name) || name.includes("--") || SHARE_ID.test(name)) return null;
   return name;
 }
 
