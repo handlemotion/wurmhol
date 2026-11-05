@@ -22,6 +22,15 @@ Leave `STRIPE_SECRET_KEY` empty and every org opens pipes without a plan. To cha
 
 There's no trial, an org subscribes before its first pipe.
 
+## Preview links on pull requests
+
+Optional. With a GitHub App set up, every open pipe shows up on the open pull request of its branch as a `wurmhol-preview` deployment, with a button to the pipe. Leave `GITHUB_APP_ID` empty and nothing talks to GitHub.
+
+1. Create a GitHub App with the callback URL `https://dirt.example.com/api/github/callback`, the setup URL `https://dirt.example.com/api/github/setup` (with Redirect on update on) and the webhook URL `https://dirt.example.com/api/github/webhook` with a random secret. It needs Deployments read and write, Pull requests read and Metadata read, and the Pull request event.
+2. Generate a private key and a client secret.
+3. Set `GITHUB_APP_ID`, `GITHUB_APP_SLUG` (from `github.com/apps/<slug>`) and `GITHUB_APP_CLIENT_ID`, and the secrets `GITHUB_APP_PRIVATE_KEY` (the `.pem` as GitHub gives it), `GITHUB_APP_CLIENT_SECRET` and `GITHUB_APP_WEBHOOK_SECRET`. On GitHub Enterprise Server, also `GITHUB_API_URL` and `GITHUB_WEB_URL`.
+4. An org owner links the org from a pipe's card on the wall, under Pull request, Connect GitHub.
+
 ## Limits
 
 | Var                     | Default | What it limits, per org               |

@@ -17,17 +17,18 @@ await pipe.close();
 
 The `request` events stay in your process, we never see them.
 
-| Option    | Does                                                                               |
-| --------- | ---------------------------------------------------------------------------------- |
-| `port`    | The dev server's port                                                              |
-| `token`   | Your org's token                                                                   |
-| `host`    | Where the dev server listens, `127.0.0.1` by default                               |
-| `ttl`     | Seconds, or a duration like `"8h"`. `pipe.endsAt` says when it ends                |
-| `name`    | A URL that stays the same, like `--name`                                           |
-| `viewers` | The org members who can open it, like `--only`                                     |
-| `signal`  | An `AbortSignal` that closes the pipe                                              |
-| `server`  | Your own install, if you self-host                                                 |
-| `log`     | `(event, fields) => {}` for connects, drops and reconnects, never request contents |
+| Option    | Does                                                                                                                                                    |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `port`    | The dev server's port                                                                                                                                   |
+| `token`   | Your org's token                                                                                                                                        |
+| `host`    | Where the dev server listens, `127.0.0.1` by default                                                                                                    |
+| `ttl`     | Seconds, or a duration like `"8h"`. `pipe.endsAt` says when it ends                                                                                     |
+| `name`    | A URL that stays the same, like `--name`                                                                                                                |
+| `viewers` | The org members who can open it, like `--only`                                                                                                          |
+| `source`  | Where it came from for the wall, any of `repoHost`, `repo`, `branch`, `commit`, `link`, `note`, `agent`, `agentUrl`. The SDK detects nothing on its own |
+| `signal`  | An `AbortSignal` that closes the pipe                                                                                                                   |
+| `server`  | Your own install, if you self-host                                                                                                                      |
+| `log`     | `(event, fields) => {}` for connects, drops and reconnects, never request contents                                                                      |
 
 `openPipe` rejects with a `FixError` whose message is the same one-line fix the CLI prints. It's ESM only.
 

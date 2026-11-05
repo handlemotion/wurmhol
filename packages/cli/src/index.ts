@@ -8,7 +8,14 @@
 import { openPipe as open, type OpenPipeOptions, type Pipe } from "./pipe.ts";
 
 export { FixError } from "./errors.ts";
-export type { CloseReason, OpenPipeOptions, Pipe, PipeEvents, RequestEvent } from "./pipe.ts";
+export type {
+  CloseReason,
+  OpenPipeOptions,
+  Pipe,
+  PipeEvents,
+  PipeSource,
+  RequestEvent,
+} from "./pipe.ts";
 
 /**
  * Opens a pipe to a local port and resolves once the relay has given it its URL. Rejects with a

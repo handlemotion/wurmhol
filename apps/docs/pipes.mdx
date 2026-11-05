@@ -25,6 +25,14 @@ npx wurmhol 5173 --name my-app
 
 That pipe is always at `https://my-app.wurmhol.dev`. The first org to use a name keeps it, and only one pipe per name is open at a time.
 
+## Where it came from
+
+Each pipe's card on the wall says where it came from, the repo, branch and commit the CLI ran in and the agent session that opened it (Claude Code, Codex, Cursor and others), with a link to the session when there is one. Nothing to set up, and a remote URL's credentials are never sent. You can add a link and a line of text too.
+
+```bash
+npx wurmhol 5173 --note "New checkout flow" --link https://github.com/acme/shop/pull/12
+```
+
 ## Who can open it
 
 Everyone in the org, by default. `--only` narrows it down to some members, and anyone else gets a page saying to ask whoever started it.

@@ -76,10 +76,31 @@ export const shares = sqliteTable(
     endReason: text("end_reason"),
     /** Bytes relayed both ways. Bodies themselves are never stored. */
     bytes: integer("bytes").default(0).notNull(),
+    // Where the pipe came from (ADR 0015): what the CLI that opened it said about itself, each
+    // field bounded and checked by `@wurmhol/protocol`'s `parsePipeSource`. Null when not sent.
+    /** The forge's host, like `github.com`. */
+    repoHost: text("repo_host"),
+    /** The repo's path on the forge, like `owner/name`. */
+    repo: text("repo"),
+    branch: text("branch"),
+    /** Full commit hash. */
+    commitSha: text("commit_sha"),
+    /** `--link`: an http(s) URL. */
+    link: text("link"),
+    /** `--note`: one line. */
+    note: text("note"),
+    /** The agent that opened it, like `Claude Code`. */
+    agent: text("agent"),
+    /** The agent session's page, http(s). */
+    agentUrl: text("agent_url"),
   },
   (table) => [
     index("shares_org_idx").on(table.orgId, table.endedAt),
     index("shares_token_idx").on(table.tokenId),
+    // Open pipes of a branch, for a pull request opened after its pipe (ADR 0016).
+    index("shares_open_branch_idx")
+      .on(table.branch)
+      .where(sql`${table.branch} is not null and ${table.endedAt} is null`),
     // One open pipe per name: the host routes to it.
     uniqueIndex("shares_open_name_idx")
       .on(table.name)
@@ -175,5 +196,28 @@ export const oauthStates = sqliteTable(
   (table) => [
     index("oauth_states_org_idx").on(table.orgId),
     index("oauth_states_expires_idx").on(table.expiresAt),
+  ],
+);
+
+/**
+ * GitHub App installations an org has linked (ADR 0016): its pipes post themselves to matching
+ * pull requests in the installation's repos. Linked only by a member GitHub shows the
+ * installation to, so an org cannot claim another account's installation.
+ */
+export const githubInstallations = sqliteTable(
+  "github_installations",
+  {
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    installationId: integer("installation_id").notNull(),
+    /** The GitHub account (user or organization) it is installed on, as GitHub spells it. */
+    account: text("account").notNull(),
+    linkedBy: text("linked_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).default(now).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.orgId, table.installationId] }),
+    index("github_installations_installation_idx").on(table.installationId),
   ],
 );

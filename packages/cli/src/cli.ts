@@ -2,6 +2,7 @@
 // wurmhol: share a local dev server at a private HTTPS URL (spec section 7).
 //
 //   npx wurmhol <port> [--ttl 8h] [--json] [--only <emails>] [--name <name>]
+//                      [--link <url>] [--note <text>]
 //                                 start a share; prints its URL first, then returns
 //   wurmhol ls [--json]           open shares on this machine
 //   wurmhol stop <port|id|name>   end one; `--all` ends every one
@@ -13,7 +14,14 @@ import { hostname } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { formatDuration, parseDuration, PIPE_NAME_RULE, pipeName } from "@wurmhol/protocol";
+import {
+  formatDuration,
+  parseDuration,
+  PIPE_NAME_RULE,
+  pipeName,
+  SOURCE_FIXES,
+  sourceField,
+} from "@wurmhol/protocol";
 import pkg from "../package.json" with { type: "json" };
 import skill from "../../../plugins/wurmhol/skills/wurmhol/SKILL.md";
 import {
@@ -25,6 +33,7 @@ import {
 import { FixError } from "./errors.ts";
 import { login as deviceLogin } from "./login.ts";
 import { DEFAULT_CONSOLE, DEFAULT_SERVER, openPipe, type Pipe } from "./pipe.ts";
+import { detectSource } from "./source.ts";
 import { alive, listStates, logFile, removeState, writeState } from "./state.ts";
 
 /** The line `init` writes, with the repo's dev port (spec section 7). */
@@ -46,6 +55,8 @@ Usage:
     --only a@x.com,b@y.com      Only these members of the org may open it
     --name <name>               Keep the same URL every time (https://<name>.<pipe domain>),
                                 e.g. for an OAuth redirect URI
+    --link <url>                A link to show with the pipe on the wall, like the issue
+    --note <text>               One line to show with the pipe on the wall
   wurmhol ls [--json]           List open pipes
   wurmhol stop <port|id|name>   End a pipe (--all ends every one)
   wurmhol init [--skill]        Tell this repo's agents how to share (AGENTS.md or
@@ -59,6 +70,9 @@ Environment:
   WURMHOL_TOKEN   A token from your org (${DEFAULT_CONSOLE}, menu → Tokens); wins over login
   WURMHOL_HOME    Where wurmhol keeps its state (default ~/.wurmhol)
   WURMHOL_URL     A self-hosted install (default ${DEFAULT_SERVER})
+
+The wall shows where each pipe came from: the git repo, branch and commit of the
+directory it was opened in, and the agent session, when the environment names one.
   HTTPS_PROXY     Dial out through this proxy; NODE_EXTRA_CA_CERTS adds its CA
 `;
 
@@ -139,6 +153,7 @@ async function share(
   json: boolean,
   only: string | undefined,
   name: string | undefined,
+  extra: { link?: string; note?: string },
 ) {
   token();
   const entry = fileURLToPath(import.meta.url);
@@ -149,6 +164,8 @@ async function share(
     ...(ttl === undefined ? [] : [String(ttl)]),
     ...(only ? ["--only", only] : []),
     ...(name ? ["--name", name] : []),
+    ...(extra.link ? ["--link", extra.link] : []),
+    ...(extra.note ? ["--note", extra.note] : []),
   ];
   const child = spawn(process.execPath, args, {
     detached: true,
@@ -179,6 +196,7 @@ async function daemon(
   ttl: number | undefined,
   only: string | undefined,
   name: string | undefined,
+  extra: { link?: string; note?: string },
 ) {
   const report = (message: ReadyMessage) => process.send?.(message);
   const log = (shareId: string | null, event: string, fields: Record<string, unknown>) => {
@@ -197,7 +215,11 @@ async function daemon(
       ?.split(",")
       .map((email) => email.trim())
       .filter(Boolean);
-    pipe = await openPipe({ server: server(), token: token(), port, ttl, viewers, name }, { log });
+    const source = { ...(await detectSource(process.cwd(), process.env)), ...extra };
+    pipe = await openPipe(
+      { server: server(), token: token(), port, ttl, viewers, name, source },
+      { log },
+    );
   } catch (error) {
     report({ type: "error", message: error instanceof FixError ? error.message : String(error) });
     process.exit(1);
@@ -354,6 +376,8 @@ async function main() {
       json: { type: "boolean", default: false },
       only: { type: "string" },
       name: { type: "string" },
+      link: { type: "string" },
+      note: { type: "string" },
       all: { type: "boolean", default: false },
       skill: { type: "boolean", default: false },
       ttl: { type: "string" },
@@ -366,7 +390,10 @@ async function main() {
   if (values.help || !command) return void process.stdout.write(HELP);
   if (command === "__daemon") {
     const ttl = positionals[2] === undefined ? undefined : Number(positionals[2]);
-    return daemon(parsePort(argument) ?? fail("bad port"), ttl, values.only, values.name);
+    return daemon(parsePort(argument) ?? fail("bad port"), ttl, values.only, values.name, {
+      link: values.link,
+      note: values.note,
+    });
   }
   if (command === "ls") return ls(values.json);
   if (command === "stop") return stop(argument, values.all);
@@ -385,7 +412,14 @@ async function main() {
   if (values.name !== undefined && !pipeName(values.name)) {
     fail(`Not a pipe name: ${values.name}. Use ${PIPE_NAME_RULE}.`);
   }
-  return share(port, ttl, values.json, values.only, values.name);
+  for (const field of ["link", "note"] as const) {
+    const value = values[field];
+    if (value !== undefined && sourceField(field, value) === null) fail(SOURCE_FIXES[field]);
+  }
+  return share(port, ttl, values.json, values.only, values.name, {
+    link: values.link,
+    note: values.note,
+  });
 }
 
 await main();

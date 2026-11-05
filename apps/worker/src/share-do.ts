@@ -5,6 +5,9 @@
 // when the CLI named some, that the viewer is one of them). It keeps the view log: per viewer,
 // first and last seen and a request count, never paths, IPs or user agents (ADR 0008).
 //
+// A new pipe's title and favicon are on the wall before anyone opens it: the object asks the dev
+// server for `/` itself (`#probe`) and reads the page's start, the same as a viewer's first page.
+//
 // Request and response bodies pass through and are never logged or stored. Only the `<title>`
 // of HTML responses and the favicon are kept, while the share is open: at its end the object
 // keeps a tombstone (`state`, `endReason`) and nothing else. The viewer's IP is not forwarded.
@@ -26,6 +29,7 @@ import {
   forwardable,
   type HeaderList,
   HttpStreamOrder,
+  type PipeSource,
   PING_TEXT,
   PONG_TEXT,
   ProtocolError,
@@ -39,6 +43,8 @@ import {
   type WsClosePayload,
   type WsOpenPayload,
 } from "@wurmhol/protocol";
+import { loadConfig } from "./env.ts";
+import { type Preview, postPreview, retirePreview } from "./github.ts";
 import { createLogger } from "./log.ts";
 import { errorPage } from "./pages.ts";
 
@@ -53,6 +59,8 @@ export interface ShareInit {
   startedAt: number;
   /** User ids that may open it (`--only`); null: every member of the org. */
   viewers: string[] | null;
+  /** Where it came from (ADR 0015), as the CLI said; null when it said nothing. */
+  source: PipeSource | null;
   limits: { seconds: number; monthlyBytes: number };
 }
 
@@ -64,6 +72,10 @@ interface Meta extends ShareInit {
   favicon: boolean;
   lastRequestAt: number | null;
   bytes: number;
+  /** When the start-of-pipe probe (`#probe`) runs again, and which retry that is; null: done. */
+  probe?: { at: number; attempt: number } | null;
+  /** Deployments on the pipe's pull request (ADR 0016); absent in pipes from before it. */
+  previews?: Preview[];
 }
 
 /** One viewer's line in the view log, with their name for the wall once looked up. */
@@ -118,6 +130,13 @@ const AWAY_WAIT_MS = 10_000;
 /** Bytes of an HTML response read for its `<title>`. */
 const TITLE_SCAN_BYTES = 64 * 1024;
 const FAVICON_MAX_BYTES = 100 * 1024;
+/**
+ * When a new pipe connects, the relay asks the dev server for `/` itself, so the wall has the
+ * favicon (and title) before anyone opens it. A server not listening yet answers with the CLI's
+ * waiting page (502); the probe tries again after each of these delays.
+ */
+const PROBE_RETRY_MS = [2_000, 5_000, 10_000, 20_000];
+const PROBE_FIRST_MS = 1_000;
 /** Usage goes to the Org object at most this often, or once this many bytes piled up. */
 const USAGE_FLUSH_MS = 5_000;
 const USAGE_FLUSH_BYTES = 8 * 1024 * 1024;
@@ -209,6 +228,7 @@ export class Share extends DurableObject<Env> {
   #pendingUsage = 0;
   #lastUsageFlush = 0;
   #lastRequestPush = 0;
+  #previewing: Promise<void> | null = null;
   #log = createLogger({ component: "share" });
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -261,7 +281,8 @@ export class Share extends DurableObject<Env> {
   #armAlarm(meta: Meta) {
     const expires = meta.startedAt + meta.limits.seconds * 1000;
     const away = meta.awaySince === null ? Infinity : meta.awaySince + RECONNECT_GRACE_MS;
-    void this.ctx.storage.setAlarm(Math.min(expires, away));
+    const probe = meta.probe?.at ?? Infinity;
+    void this.ctx.storage.setAlarm(Math.min(expires, away, probe));
   }
 
   // --- RPC from the Worker ------------------------------------------------------------------
@@ -304,6 +325,39 @@ export class Share extends DurableObject<Env> {
     await this.#end(reason);
   }
 
+  /**
+   * Posts the pipe to the open pull request of its branch, once (ADR 0016): when it starts, and
+   * again when GitHub says a pull request for its branch opened. Calls at once share one attempt.
+   */
+  preview() {
+    this.#previewing ??= this.#preview().finally(() => (this.#previewing = null));
+    return this.#previewing;
+  }
+
+  async #preview() {
+    const meta = this.#meta();
+    const config = loadConfig(this.env);
+    if (!meta?.source || !config.github || meta.previews?.length) return;
+    try {
+      const preview = await postPreview(config.github, createDb(this.env.DB), meta);
+      if (!preview) return;
+      const current = this.#meta();
+      if (!current) {
+        // The pipe ended while the deployment was being made: retire it now.
+        await retirePreview(config.github, preview);
+        return;
+      }
+      current.previews = [preview];
+      this.#save(current);
+      await this.#org(current.orgId).update(current.id, {
+        preview: { pullRequest: preview.pullRequest, url: preview.pullRequestUrl },
+      });
+      this.#log.info("share.preview_posted", { shareId: meta.id, orgId: meta.orgId });
+    } catch (error) {
+      this.#log.warn("share.preview_failed", { shareId: meta.id, orgId: meta.orgId, error });
+    }
+  }
+
   /** The dev server's favicon, as last fetched through the CLI, or null. */
   favicon(): { type: string; body: ArrayBuffer } | null {
     return this.ctx.storage.kv.get<{ type: string; body: ArrayBuffer }>("favicon") ?? null;
@@ -325,6 +379,7 @@ export class Share extends DurableObject<Env> {
     }
     let meta = stored;
     const init = request.headers.get(INTERNAL_HEADERS.init);
+    const isNew = !meta;
     if (!meta) {
       if (!init) return Response.json({ error: "share not found" }, { status: 404 });
       const parsed = JSON.parse(init) as ShareInit;
@@ -355,6 +410,14 @@ export class Share extends DurableObject<Env> {
     this.#save(meta);
     this.#armAlarm(meta);
     if (wasAway) this.ctx.waitUntil(this.#org(meta.orgId).update(meta.id, { state: "live" }));
+    if (isNew && meta.source) this.ctx.waitUntil(this.preview());
+    if (isNew) {
+      // From the alarm, a moment after the socket is up: older CLIs drop a frame that arrives
+      // in the same packet as the upgrade.
+      meta.probe = { at: Date.now() + PROBE_FIRST_MS, attempt: 0 };
+      this.#save(meta);
+      this.#armAlarm(meta);
+    }
     return new Response(null, {
       status: 101,
       webSocket: client,
@@ -621,6 +684,57 @@ export class Share extends DurableObject<Env> {
     this.#save(meta);
     if (changed) this.ctx.waitUntil(this.#org(meta.orgId).update(meta.id, { title }));
     if (fetchFavicon) this.ctx.waitUntil(this.#fetchFavicon(meta));
+  }
+
+  /**
+   * Requests `/` through the CLI as soon as the pipe starts and reads the start of the page for
+   * its title and favicon, as from a viewer's first page. Nothing else of the response is kept.
+   */
+  async #probe(attempt = 0) {
+    const meta = this.#meta();
+    // Ended, or a viewer's page got there first.
+    if (!meta || meta.favicon) return;
+    try {
+      if (!this.#cli()) throw new Error("the CLI is reconnecting");
+      const response = await this.#relay(
+        {
+          method: "GET",
+          path: "/",
+          headers: [
+            ["accept", "text/html"],
+            // As on a viewer's request, for apps that build absolute URLs.
+            ["x-forwarded-host", new URL(meta.url).host],
+            ["x-forwarded-proto", new URL(meta.url).protocol.replace(":", "")],
+          ],
+        },
+        null,
+        meta,
+        { scanTitle: false },
+      );
+      const isHtml = /^text\/html\b/i.test(response.headers.get("content-type") ?? "");
+      if (response.status === 502 && isHtml) {
+        // The CLI's waiting page: the server is not up yet.
+        await response.body?.cancel();
+        throw new Error("the dev server is not listening yet");
+      }
+      if (response.ok && isHtml && response.body) {
+        this.#noteHtml(await readStart(response.body, TITLE_SCAN_BYTES), true);
+      } else {
+        await response.body?.cancel();
+        // No page to read (a redirect to sign in, JSON): the default favicon may still be there.
+        await this.#fetchFavicon(meta);
+      }
+    } catch (error) {
+      const delay = PROBE_RETRY_MS[attempt];
+      const current = this.#meta();
+      if (delay === undefined || !current) {
+        this.#log.info("share.probe_gave_up", { shareId: meta.id, error });
+        return;
+      }
+      current.probe = { at: Date.now() + delay, attempt: attempt + 1 };
+      this.#save(current);
+      this.#armAlarm(current);
+    }
   }
 
   /** Fetches the dev server's favicon through the CLI once, for the wall. */
@@ -906,7 +1020,16 @@ export class Share extends DurableObject<Env> {
     ) {
       await this.#end("disconnected");
     } else {
-      this.#armAlarm(meta);
+      if (meta.probe && now >= meta.probe.at) {
+        // A timer would not survive hibernation; the alarm does. The next try, if any, is set
+        // before this handler returns.
+        const attempt = meta.probe.attempt;
+        meta.probe = null;
+        this.#save(meta);
+        await this.#probe(attempt);
+      }
+      const current = this.#meta();
+      if (current) this.#armAlarm(current);
     }
   }
 
@@ -931,6 +1054,19 @@ export class Share extends DurableObject<Env> {
     this.#save(meta);
     const usage = await this.#org(meta.orgId).addUsage(bytes, meta.limits.monthlyBytes);
     if (usage.over) await this.#end("limit");
+  }
+
+  /** Marks the pipe's deployments inactive; a failure is logged, never fatal to the end. */
+  async #retirePreviews(meta: Meta) {
+    const github = loadConfig(this.env).github;
+    if (!github) return;
+    for (const preview of meta.previews ?? []) {
+      try {
+        await retirePreview(github, preview);
+      } catch (error) {
+        this.#log.warn("share.preview_retire_failed", { shareId: meta.id, error });
+      }
+    }
   }
 
   async #end(reason: EndReason) {
@@ -965,6 +1101,7 @@ export class Share extends DurableObject<Env> {
       this.ctx.storage.kv.delete(key);
     }
     await org.remove(meta.id);
+    await this.#retirePreviews(meta);
     await recordShareEnd(createDb(this.env.DB), { id: meta.id, reason, bytes: meta.bytes });
     this.#log.info("share.ended", {
       shareId: meta.id,
@@ -973,6 +1110,24 @@ export class Share extends DurableObject<Env> {
       bytes: meta.bytes,
     });
   }
+}
+
+/** The first `limit` bytes of a body as text; the rest is never read. */
+async function readStart(body: ReadableStream<Uint8Array>, limit: number) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  try {
+    while (text.length < limit) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      if (/<\/head>/i.test(text)) break;
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return text.slice(0, limit);
 }
 
 /** A close code a server may send: 1005, 1006 and 1015 are reserved for the runtime. */

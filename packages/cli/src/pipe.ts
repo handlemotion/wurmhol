@@ -1,7 +1,14 @@
 // A pipe in the caller's process: `openPipe`, the `wurmhol` package's export, and the CLI's daemon, which
 // adds only its state file and log on top (ADR 0008, section 3).
 import { EventEmitter } from "node:events";
-import { parseDuration, PIPE_NAME_RULE, pipeName } from "@wurmhol/protocol";
+import {
+  parseDuration,
+  PIPE_NAME_RULE,
+  pipeName,
+  SOURCE_FIELDS,
+  SOURCE_FIXES,
+  sourceField,
+} from "@wurmhol/protocol";
 import pkg from "../package.json" with { type: "json" };
 import { FixError } from "./errors.ts";
 import { type RequestEvent, Tunnel } from "./tunnel.ts";
@@ -11,6 +18,44 @@ export const DEFAULT_SERVER = "https://api.wurmhol.com";
 export const DEFAULT_CONSOLE = "https://dirt.wurmhol.com";
 
 export type { RequestEvent };
+
+/** Where a pipe comes from, as the wall shows it. Every field is optional. */
+export interface PipeSource {
+  /** The forge's host, like `github.com`. */
+  repoHost: string | null;
+  /** The repo's path on the forge, like `owner/name`. */
+  repo: string | null;
+  branch: string | null;
+  /** The full commit hash. */
+  commit: string | null;
+  /** An http(s) link to show with the pipe, like its issue. */
+  link: string | null;
+  /** One line of text, at most 280 characters. */
+  note: string | null;
+  /** The agent that opened it, like `Claude Code`. */
+  agent: string | null;
+  /** The agent session's page, http(s). */
+  agentUrl: string | null;
+}
+
+/** A caller's source, checked field by field; null when it sets nothing. */
+function checkSource(raw: Partial<PipeSource> | undefined): PipeSource | null {
+  if (!raw) return null;
+  const source = Object.fromEntries(SOURCE_FIELDS.map((f) => [f, null])) as Record<
+    keyof PipeSource,
+    string | null
+  >;
+  let any = false;
+  for (const field of SOURCE_FIELDS) {
+    const value = raw[field];
+    if (value === null || value === undefined) continue;
+    const checked = sourceField(field, value);
+    if (checked === null) throw new FixError(SOURCE_FIXES[field]);
+    source[field] = checked;
+    any = true;
+  }
+  return any ? source : null;
+}
 
 /** Why a pipe ended. Every reason is final: open a new pipe to share the port again. */
 export type CloseReason =
@@ -57,6 +102,12 @@ export interface OpenPipeOptions {
    * one pipe per name is open at a time.
    */
   name?: string;
+  /**
+   * Where the pipe comes from, shown on the wall: `{ repo: "acme/app", branch: "feat/x",
+   * link: "https://…", note: "…" }` and the rest of the fields of `PipeSource`. Every field is
+   * optional; an invalid one rejects with a fix. The CLI fills it from git and the environment.
+   */
+  source?: Partial<PipeSource>;
   /** Aborting rejects a pending `openPipe`, or closes an open pipe. */
   signal?: AbortSignal;
   /**
@@ -169,6 +220,7 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
   if (name === null) {
     throw new FixError(`Not a pipe name: ${options.name}. Use ${PIPE_NAME_RULE}.`);
   }
+  const source = checkSource(options.source);
   const { signal } = options;
   signal?.throwIfAborted();
 
@@ -191,6 +243,7 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
     ttl,
     viewers: options.viewers ?? [],
     name,
+    source,
     version: pkg.version,
     log,
     onRequest: (event) => pipe?.emit("request", event),

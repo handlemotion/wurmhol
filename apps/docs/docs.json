@@ -7,6 +7,11 @@
     "light": "#5b7cff",
     "dark": "#0d3eef"
   },
+  "logo": {
+    "light": "/logo/logo-light.svg",
+    "dark": "/logo/logo-dark.svg",
+    "href": "https://wurmhol.com"
+  },
   "favicon": "/favicon.svg",
   "fonts": {
     "family": "Inter"
