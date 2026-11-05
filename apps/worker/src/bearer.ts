@@ -1,7 +1,7 @@
 // What the CLI and orchestrators present on the CLI's host: `Authorization: Bearer wh_…`.
 // Refusals are `@wurmhol/protocol`'s `Refusal`: the CLI prints `fix`, one line that says what to
 // do, and stops retrying on one with a `reason`.
-import { type Db, findMember, useToken } from "@wurmhol/db";
+import { type Db, findMember, isOrgBlocked, useToken } from "@wurmhol/db";
 import { refusal } from "@wurmhol/protocol";
 import type { HonoRequest } from "hono";
 import type { AppEnv } from "./context.ts";
@@ -23,9 +23,10 @@ export interface TokenRefusal {
 }
 
 /**
- * The live, unexpired token `presented` is, acting for someone still in its org; or why it is
- * refused. `org` asks for a token that can list and end every pipe of the org, not only open its
- * own. Every route that takes a `wh_` token goes through here.
+ * The live, unexpired token `presented` is, acting for someone still in its org, of an org no
+ * operator blocked (ADR 0022); or why it is refused. `org` asks for a token that can list and end
+ * every pipe of the org, not only open its own. Every route that takes a `wh_` token goes through
+ * here.
  */
 export async function checkToken(
   db: Db,
@@ -61,6 +62,13 @@ export async function checkToken(
       401,
       "token owner left the org",
       `Whoever made this token is no longer in its org. Create a new token at ${tokensPage} and set WURMHOL_TOKEN.`,
+    );
+  }
+  if (await isOrgBlocked(db, token.orgId)) {
+    return refusal(
+      401,
+      "org blocked",
+      `This org is blocked from opening pipes. Contact the operator of ${config.auth.baseURL}.`,
     );
   }
   if (options.org && token.scope !== "org") {
