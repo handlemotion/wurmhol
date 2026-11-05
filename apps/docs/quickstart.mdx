@@ -1,0 +1,35 @@
+---
+title: "Quickstart"
+description: "Share a dev server in two commands."
+---
+
+<Steps>
+  <Step title="Get a token">
+    Sign in at [dirt.wurmhol.com](https://dirt.wurmhol.com), subscribe your org, and create a
+    token (menu → Tokens). On your own computer, `npx wurmhol login` does this for you: it prints
+    a code to approve in the browser and stores the token in `~/.wurmhol/credentials.json`.
+  </Step>
+  <Step title="Open a pipe">
+    ```bash
+    npx wurmhol 8787
+    ```
+
+    It prints `https://<id>.wurmhol.dev` and returns. The URL is new every time.
+
+  </Step>
+  <Step title="Open it">
+    Tap the link on your phone or laptop and sign in once. Every open pipe is also on your org's
+    wall, by page title.
+  </Step>
+  <Step title="Stop it">
+    ```bash
+    npx wurmhol stop 8787
+    ```
+
+    A pipe also ends when anyone in the org ends it from the wall, or after 4 hours.
+
+  </Step>
+</Steps>
+
+Hot reload works: browser WebSockets pass through the pipe, and the CLI sends
+`Host: localhost:<port>`, so Vite and most dev servers need no config.

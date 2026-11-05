@@ -1,0 +1,33 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Wurmhol",
+  "colors": {
+    "primary": "#0d3eef",
+    "light": "#5b7cff",
+    "dark": "#0d3eef"
+  },
+  "favicon": "/favicon.svg",
+  "fonts": {
+    "family": "Inter"
+  },
+  "navbar": {
+    "links": [{ "label": "GitHub", "href": "https://github.com/handlemotion/wurmhol" }],
+    "primary": { "type": "button", "label": "Sign in", "href": "https://dirt.wurmhol.com/login" }
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get started",
+        "pages": ["index", "quickstart", "cloud-environments"]
+      },
+      {
+        "group": "Reference",
+        "pages": ["cli", "sdk", "self-hosting"]
+      }
+    ]
+  },
+  "footer": {
+    "socials": { "github": "https://github.com/handlemotion/wurmhol" }
+  }
+}
