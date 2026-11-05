@@ -2,7 +2,7 @@
 // token's org, and the relay records who opened it (first and last seen, a count), never what
 // they opened.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { FixError, openPipe } from "wurmhol/sdk";
+import { FixError, openPipe } from "wurmhol";
 import {
   api,
   browserFetch,

@@ -143,7 +143,18 @@ Per org, enforced by the Durable Objects: `LIMIT_ACTIVE_SHARES` (5), `LIMIT_MONT
 asks for no lifetime lasts `DEFAULT_SHARE_SECONDS` (4 h), capped at `LIMIT_SHARE_SECONDS`. Rate limits: `RATE_LIMIT_AUTH`, `RATE_LIMIT_CONNECT`,
 `RATE_LIMIT_MANAGE` as `<count>/<seconds>` or `off`.
 
-## 6. Using it
+## 6. Retention
+
+A daily cron trigger (`triggers.crons` in `wrangler.jsonc`, 03:17 UTC) deletes pipe history
+(`shares` rows) older than `RETENTION_DAYS` (90), and expired sessions, sign-in links, invite
+links and device logins. `wrangler deploy` registers it; no other setup. `wrangler dev` never
+fires it on its own: run it with `curl "http://localhost:8787/cdn-cgi/local/scheduled"` (add
+`?time=<ms since epoch>` to run it as of another time).
+
+The Worker logs only its own JSON lines: `observability.logs.invocation_logs` is `false`, so
+Cloudflare does not record each request's URL.
+
+## 7. Using it
 
 ```bash
 WURMHOL_URL=https://api.example.com WURMHOL_TOKEN=wh_… npx wurmhol 8787
@@ -157,7 +168,7 @@ In a sandbox with a Limited network policy, allowlist `api.example.com` (the onl
 dials). The console's Tokens dialog shows all three after you create a token: `WURMHOL_TOKEN`,
 `WURMHOL_URL` and the host, each copied in one click.
 
-## 7. Marketing site (optional)
+## 8. Marketing site (optional)
 
 `apps/site` is hosted Wurmhol's landing page: a static Astro build that its own Worker
 (`wurmhol-site`) serves with Workers static assets. Nothing in the app depends on it, so most
@@ -178,3 +189,5 @@ pnpm stack:serve        # http://localhost:8787, shares at http://<id>.pipe.loca
 ```
 
 Sign in with the magic link printed in `.local/serve/worker.log` (`auth.dev_link`).
+Run the daily retention job against the local D1 with
+`curl "http://127.0.0.1:8787/cdn-cgi/local/scheduled"`.

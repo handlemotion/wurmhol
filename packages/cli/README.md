@@ -32,12 +32,12 @@ to those members.
 
 `WURMHOL_URL` points at a self-hosted install. Node 20+. MIT.
 
-## From your own process: `wurmhol/sdk`
+## From your own process
 
 For orchestrators that open pipes for many agents. No daemon: the pipe lives in your process.
 
 ```ts
-import { openPipe } from "wurmhol/sdk";
+import { openPipe } from "wurmhol";
 
 const pipe = await openPipe({ port: 5173, token: process.env.WURMHOL_TOKEN! });
 pipe.url; // send it to the humans
@@ -48,9 +48,10 @@ await pipe.close();
 
 Options: `server` (a self-hosted install), `host` (where the dev server listens, default
 `127.0.0.1`), `ttl` (seconds, or a duration like `"8h"`; `pipe.endsAt` says when it ends),
-`viewers` (emails of the org members who may open it, like `--only`) and `signal` (an
-`AbortSignal` that closes the pipe). `openPipe` rejects with a
-`FixError` whose message is the one-line fix the CLI prints.
+`viewers` (emails of the org members who may open it, like `--only`), `signal` (an `AbortSignal`
+that closes the pipe) and `log` (`(event, fields) => {}`, the connection's connects, drops and
+reconnects; never request contents). `openPipe` rejects with a `FixError` whose message is the
+one-line fix the CLI prints. ESM only.
 
 ## Teach your agent
 

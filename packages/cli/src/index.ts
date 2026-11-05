@@ -1,4 +1,4 @@
-// `wurmhol/sdk`: open a pipe from your own process (ADR 0008, section 3).
+// The `wurmhol` package's export: open a pipe from your own process (ADR 0008, section 3).
 //
 //   const pipe = await openPipe({ port: 5173, token: process.env.WURMHOL_TOKEN! });
 //   pipe.url; // send it to the humans
@@ -8,7 +8,7 @@
 import { openPipe as open, type OpenPipeOptions, type Pipe } from "./pipe.ts";
 
 export { FixError } from "./errors.ts";
-export type { CloseReason, OpenPipeOptions, Pipe, RequestEvent } from "./pipe.ts";
+export type { CloseReason, OpenPipeOptions, Pipe, PipeEvents, RequestEvent } from "./pipe.ts";
 
 /**
  * Opens a pipe to a local port and resolves once the relay has given it its URL. Rejects with a

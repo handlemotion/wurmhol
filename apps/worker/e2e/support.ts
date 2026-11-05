@@ -212,8 +212,15 @@ export interface Person {
   cookie: string;
 }
 
-/** Signs `email` in through Better Auth's magic-link flow; the link's token is read from D1. */
-export async function signIn(stack: Stack, email = `${randomUUID()}@example.com`): Promise<Person> {
+/**
+ * Signs `email` in through Better Auth's magic-link flow; the link's token is read from D1.
+ * `headers` go on the request that creates the session.
+ */
+export async function signIn(
+  stack: Stack,
+  email = `${randomUUID()}@example.com`,
+  headers: Record<string, string> = {},
+): Promise<Person> {
   const sent = await browserFetch(`${stack.url}/api/auth/sign-in/magic-link`, {
     method: "POST",
     headers: { "content-type": "application/json", origin: stack.url },
@@ -239,6 +246,7 @@ export async function signIn(stack: Stack, email = `${randomUUID()}@example.com`
   );
   const verified = await browserFetch(
     `${stack.url}/api/auth/magic-link/verify?token=${token}&callbackURL=%2F`,
+    { headers },
   );
   const cookie = cookiesOf(verified).join("; ");
   if (!cookie.includes("session_token")) throw new Error(`no session cookie (${verified.status})`);
