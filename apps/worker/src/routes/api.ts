@@ -22,6 +22,9 @@ import { SHARE_ID } from "../env.ts";
 import { limitPerMember } from "../rate-limiter.ts";
 import { billing } from "./billing.ts";
 
+/** Where the CLI dials when WURMHOL_URL is unset (`DEFAULT_SERVER`, packages/cli/src/pipe.ts). */
+const CLI_DEFAULT_SERVER = "https://api.wurmhol.com";
+
 function allowedOrigins(c: { var: AppEnv["Variables"] }) {
   return new Set([new URL(c.var.config.auth.baseURL).origin, ...c.var.config.auth.trustedOrigins]);
 }
@@ -123,8 +126,9 @@ export const api = new Hono<AppEnv>()
   })
   .get("/tokens", async (c) => c.json({ tokens: await listTokens(c.var.db, c.var.member.orgId) }))
   /**
-   * A new token, shown once, with the host the CLI dials: the one a sandbox must allowlist
-   * (ADR 0008, the console snippet).
+   * A new token, shown once, with what a sandbox needs beside it (ADR 0008, the console
+   * snippet): the host the CLI dials, to allowlist, and the URL to set as WURMHOL_URL, or null
+   * when it is the CLI's default and needs no setting.
    */
   .post("/tokens", limitPerMember("manage"), zValidator("json", tokenBody), async (c) => {
     const { id, token } = await createToken(c.var.db, {
@@ -132,8 +136,10 @@ export const api = new Hono<AppEnv>()
       name: c.req.valid("json").name,
       createdBy: c.var.user.id,
     });
-    const host = c.var.config.CONNECT_HOST ?? new URL(c.var.config.auth.baseURL).hostname;
-    return c.json({ id, token, host }, 201);
+    const server = new URL(c.var.config.auth.baseURL);
+    if (c.var.config.CONNECT_HOST) server.hostname = c.var.config.CONNECT_HOST;
+    const url = server.origin === CLI_DEFAULT_SERVER ? null : server.origin;
+    return c.json({ id, token, host: server.hostname, url }, 201);
   })
   /** Revokes a token and ends every share it started (spec section 6, "Token leaked"). */
   .delete("/tokens/:id", async (c) => {

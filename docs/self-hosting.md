@@ -107,7 +107,8 @@ WURMHOL_URL=https://api.example.com WURMHOL_TOKEN=wh_… npx wurmhol 8787
 ```
 
 In a sandbox with a Limited network policy, allowlist `api.example.com` (the only host the CLI
-dials).
+dials). The console's Tokens dialog shows all three after you create a token: `WURMHOL_TOKEN`,
+`WURMHOL_URL` and the host, each copied in one click.
 
 ## 7. Marketing site (optional)
 

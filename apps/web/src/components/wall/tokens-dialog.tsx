@@ -60,8 +60,8 @@ export function TokensDialog({
           </Button>
         </form>
         {create.data && (
-          // What a Claude Code cloud environment needs (ADR 0008): the variable and the one host
-          // the CLI dials. Each field keeps its line 8px below it; the pairs sit 16px apart, and
+          // What a Claude Code cloud environment needs (ADR 0008): the token, the install's URL
+          // when it is not the CLI's default, and the one host the CLI dials. Each field keeps its line 8px below it; the pairs sit 16px apart, and
           // the shared label width lines up the two dividers.
           <div className="flex flex-col gap-4 [--copy-label-width:4.5rem]">
             <div className="flex flex-col gap-2">
@@ -70,6 +70,14 @@ export function TokensDialog({
                 Shown once. Paste it under Environment variables.
               </Text>
             </div>
+            {create.data.url && (
+              <div className="flex flex-col gap-2">
+                <CopyField label="Server" value={`WURMHOL_URL=${create.data.url}`} />
+                <Text className="text-xs text-muted-foreground">
+                  Paste it there too: this install’s address.
+                </Text>
+              </div>
+            )}
             <div className="flex flex-col gap-2">
               <CopyField label="Host" value={create.data.host} />
               <Text className="text-xs text-muted-foreground">
