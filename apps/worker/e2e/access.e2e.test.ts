@@ -33,9 +33,20 @@ beforeAll(async () => {
   hits = [];
   local = await localServer((req, res) => {
     hits.push(req.url ?? "");
+    if (req.url === "/favicon.ico")
+      return void res.writeHead(200, { "content-type": "image/x-icon" }).end(Buffer.from([0]));
     res.writeHead(200, { "content-type": "text/html" }).end("<title>secret app</title>secret");
   });
   shared = await share(stack, env, local.port);
+  // The relay asks the dev server for `/` and the favicon when a pipe starts. Once the favicon is
+  // kept it asks no more, so every request the tests below count is a viewer's.
+  await waitFor(
+    async () =>
+      (
+        await api<{ shares: { id: string; favicon: boolean }[] }>(stack, ada, "/api/shares")
+      ).body.shares.find((s) => s.id === shared.id)?.favicon,
+    { what: "the relay's start-up requests" },
+  );
 });
 
 afterAll(async () => {
