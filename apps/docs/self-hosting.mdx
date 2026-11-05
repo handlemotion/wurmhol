@@ -1,0 +1,30 @@
+---
+title: "Self-hosting"
+description: "Run Wurmhol on your own Cloudflare account."
+---
+
+The code is open source: AGPL-3.0 for the app, MIT for the CLI. One Cloudflare account, two
+hostnames and `wrangler deploy` are enough to run it.
+
+<CardGroup cols={2}>
+  <Card
+    title="Deploy to Cloudflare"
+    icon="cloud"
+    href="https://deploy.workers.cloudflare.com/?url=https://github.com/handlemotion/wurmhol"
+  >
+    Creates the Worker, D1 and Durable Objects in your account.
+  </Card>
+  <Card
+    title="Self-hosting guide"
+    icon="book"
+    href="https://github.com/handlemotion/wurmhol/blob/main/docs/self-hosting.md"
+  >
+    Hostnames, the pipe domain's wildcard route, secrets and sign-in.
+  </Card>
+</CardGroup>
+
+Point the CLI at your install with `WURMHOL_URL`:
+
+```bash
+WURMHOL_URL=https://api.example.com npx wurmhol login
+```
