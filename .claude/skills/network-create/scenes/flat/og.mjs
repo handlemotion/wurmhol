@@ -9,7 +9,7 @@ import { best, meet, PHI, plate } from "../../scripts/flat.mjs";
 // The copy inside the browser circle.
 const COPY = [
   { text: "Wurmhol", size: 30 },
-  { text: "A private URL for your", size: 30 },
+  { text: "A private URL for your", size: 30, gap: 0.9 },
   { text: "agent's dev server.", size: 30 },
 ];
 

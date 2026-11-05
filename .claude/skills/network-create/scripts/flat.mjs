@@ -193,6 +193,7 @@ class Plate {
 
   /**
    * Copy set in the display face (a wordmark, a headline): `lines` are `{ text, size, weight }`,
+   * each with an optional `gap` above it that overrides the block's,
    * stacked and centred on `c` (`anchor` "middle", or "start" with `c` the block's left middle).
    * Rendering throws unless the block fits inside a hole with `pad` to spare: text never floats
    * on a bare patch of paper.
@@ -358,7 +359,7 @@ class Plate {
         const b = textBox(it);
         let y = b.y;
         it.lines.forEach((l, i) => {
-          y += l.size * (i ? 1 + it.gap : 1);
+          y += l.size * (i ? 1 + (l.gap ?? it.gap) : 1);
           push(it.c[0], y, l.text.length * 20);
         });
       }
@@ -436,7 +437,7 @@ const advance = (line) => line.text.length * line.size * 0.58;
 
 /** A text block's box: its lines stacked with `gap` (a share of each size) between them. */
 function textBox(it) {
-  const height = it.lines.reduce((h, l, i) => h + l.size * (i ? 1 + it.gap : 1), 0);
+  const height = it.lines.reduce((h, l, i) => h + l.size * (i ? 1 + (l.gap ?? it.gap) : 1), 0);
   const width = Math.max(...it.lines.map(advance));
   const x = it.anchor === "middle" ? it.c[0] - width / 2 : it.c[0];
   return { x, y: it.c[1] - height / 2, w: width, h: height };
@@ -465,7 +466,7 @@ function renderText(pl, it) {
   const out = [];
   let y = b.y;
   it.lines.forEach((l, i) => {
-    y += l.size * (i ? 1 + it.gap : 1);
+    y += l.size * (i ? 1 + (l.gap ?? it.gap) : 1);
     // Baseline about 0.2 of the size above the line box's bottom; x and y last, for check.mjs.
     out.push(
       `<text fill="${l.accent ? st.accent : st.ink}" font-family="${st.display}" font-size="${l.size}" font-weight="${l.weight ?? 400}" letter-spacing="${f(-l.size * 0.02)}" text-anchor="${it.anchor}" x="${f(it.c[0])}" y="${f(y - l.size * 0.2)}">${esc(l.text)}</text>`,
