@@ -15,7 +15,7 @@ export class FixError extends Error {
 
 function hosts(server: string) {
   const host = new URL(server).hostname;
-  return `${host} and *.on.${host}`;
+  return `${host} and *.pipe.${host}`;
 }
 
 /** A refused handshake: the relay's own `{ error, fix }`, or a proxy saying no. */

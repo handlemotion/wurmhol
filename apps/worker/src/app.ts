@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
 import { routePath } from "hono/route";
-import { type AppEnv, requestScope } from "./context.ts";
+import { type AppEnv, magicLinksOn, requestScope } from "./context.ts";
 import { createLogger, REQUEST_ID_HEADER, requestIdFrom } from "./log.ts";
 import { limitAuth } from "./rate-limiter.ts";
 import { account, api } from "./routes/api.ts";
@@ -49,12 +49,11 @@ export const app = new Hono<AppEnv>()
   .use("/api/*", requestScope, securityHeaders)
   /** Public: which sign-in buttons the login page shows. */
   .get("/api/sign-in-methods", (c) => {
-    const { auth, ENVIRONMENT } = c.var.config;
+    const { auth } = c.var.config;
     return c.json({
       google: auth.google !== undefined,
       github: auth.github !== undefined,
-      // No mail sender yet: magic links only where the link is logged (spec open question 4).
-      magicLink: ENVIRONMENT !== "production",
+      magicLink: magicLinksOn(c.var.config),
     });
   })
   // Stripe calls this, not a browser: no per-IP auth limit. The plugin verifies the signature.

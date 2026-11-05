@@ -40,7 +40,7 @@ export function Join({ code }: { code: string }) {
                 <div className="flex flex-col gap-6">
                   <div className="flex flex-col gap-2">
                     <Heading>Join {data.orgName}</Heading>
-                    <Text>You'll see and open every share its members start.</Text>
+                    <Text>You'll see and open every pipe its members start.</Text>
                   </div>
                   <Button size="lg" isPending={join.isPending} onPress={() => join.mutate()}>
                     Join {data.orgName}

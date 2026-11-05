@@ -299,7 +299,7 @@ describe("through a sandbox's CONNECT proxy", () => {
     const result = await cli(["8080"], { ...env, HTTPS_PROXY: proxy.url, HTTP_PROXY: proxy.url });
     expect(result.code).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("Allowlist localhost and *.on.localhost");
+    expect(result.stderr).toContain("Allowlist localhost and *.pipe.localhost");
     await proxy.close();
   });
 });
@@ -326,7 +326,7 @@ describe("the CLI", () => {
     // The relay ended it at once: the URL says so.
     const page = await browserFetch(`${started.url}/`);
     expect(page.status).toBe(410);
-    expect(await page.text()).toContain("This share has ended.");
+    expect(await page.text()).toContain("This pipe has ended.");
     await local.close();
   });
 

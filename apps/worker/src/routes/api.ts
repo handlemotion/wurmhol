@@ -45,7 +45,6 @@ export const account = new Hono<AppEnv>()
     const standing = session.member
       ? await orgStanding(c.var.db, session.member.orgId, {
           enabled: c.var.config.auth.billing !== undefined,
-          trialDays: c.var.config.auth.trialDays,
         })
       : null;
     return c.json({
@@ -53,11 +52,7 @@ export const account = new Hono<AppEnv>()
       orgs,
       activeOrgId: session.member?.orgId ?? null,
       role: session.member?.role ?? null,
-      standing: standing && {
-        ok: standing.ok,
-        reason: standing.reason,
-        trialEndsAt: standing.ok ? (standing.trialEndsAt?.toISOString() ?? null) : null,
-      },
+      standing,
     });
   })
   /** Which org an invite link is for, so the join page can name it. */

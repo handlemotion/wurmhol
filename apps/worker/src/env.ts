@@ -49,11 +49,11 @@ const configSchema = z
   .object({
     /**
      * The domain under which shares live: a share is `<id>.<SHARE_DOMAIN>`, on the same scheme
-     * and port as BETTER_AUTH_URL. `on.wurmhol.com` in production, `on.localhost` locally.
+     * and port as BETTER_AUTH_URL. `pipe.wurmhol.com` in production, `pipe.localhost` locally.
      */
     SHARE_DOMAIN: z
       .string()
-      .regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, "use a lowercase domain like on.example.com"),
+      .regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, "use a lowercase domain like pipe.example.com"),
     /** Fair-use limits per org (spec section 4), enforced by the Durable Objects. */
     LIMIT_ACTIVE_SHARES: positive(5),
     /** Bytes relayed per org per calendar month (UTC), both directions. 100 GB by default. */
@@ -66,8 +66,19 @@ const configSchema = z
      * exists yet (spec open question 4). Never in production: those links sign you in.
      */
     ENVIRONMENT: z.enum(["production", "development", "test"]).default("production"),
+    /**
+     * Sender of magic-link mail through Cloudflare Email Service (ADR 0005), on an onboarded
+     * domain. Empty: no magic links in production.
+     */
+    MAIL_FROM: z
+      .string()
+      .optional()
+      .transform((value) => value || undefined)
+      .pipe(z.email().optional()),
     /** Per IP: every sign-in step. */
     RATE_LIMIT_AUTH: rateLimit("60/60"),
+    /** Per email address: magic links, each of which sends mail. */
+    RATE_LIMIT_MAGIC_LINK: rateLimit("5/900"),
     /** Per token: share connections (new and reconnecting). */
     RATE_LIMIT_CONNECT: rateLimit("60/60"),
     /** Per member: creating tokens and invite links, terminating shares. */
@@ -105,7 +116,7 @@ export function loadConfig(env: Env): Config {
   return config;
 }
 
-/** The public origin of share `id`: `https://<id>.on.wurmhol.com`. */
+/** The public origin of share `id`: `https://<id>.pipe.wurmhol.com`. */
 export function shareOrigin(config: Config, id: string) {
   const app = new URL(config.auth.baseURL);
   return `${app.protocol}//${id}.${config.SHARE_DOMAIN}${app.port ? `:${app.port}` : ""}`;

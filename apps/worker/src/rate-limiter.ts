@@ -10,6 +10,7 @@ import type { Config, RateLimit } from "./env.ts";
 /** Each rule and the variable that sets it. */
 const RULES = {
   auth: "RATE_LIMIT_AUTH",
+  magicLink: "RATE_LIMIT_MAGIC_LINK",
   connect: "RATE_LIMIT_CONNECT",
   manage: "RATE_LIMIT_MANAGE",
 } as const satisfies Record<string, keyof Config>;
@@ -85,7 +86,20 @@ export const limitAuth = createMiddleware<AppEnv>(async (c, next) => {
   const path = new URL(c.req.url).pathname.replace(/^\/api\/auth/, "");
   const signInStep = c.req.method === "POST" || /^\/(callback|magic-link|passkey)\//.test(path);
   if (!signInStep) return next();
-  const wait = await checkRateLimit(c.env, c.var.config, "auth", clientIp(c.req.raw));
+  const checks = [checkRateLimit(c.env, c.var.config, "auth", clientIp(c.req.raw))];
+  // A magic link sends mail: also per address, so nobody mail-bombs an inbox through us.
+  if (c.req.method === "POST" && path === "/sign-in/magic-link") {
+    const body = (await c.req.raw
+      .clone()
+      .json()
+      .catch(() => null)) as { email?: unknown } | null;
+    if (typeof body?.email === "string") {
+      checks.push(
+        checkRateLimit(c.env, c.var.config, "magicLink", body.email.trim().toLowerCase()),
+      );
+    }
+  }
+  const wait = Math.max(...(await Promise.all(checks)));
   if (wait) return tooManyRequests(wait);
   await next();
 });

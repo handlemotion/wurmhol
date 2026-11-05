@@ -9,7 +9,7 @@ export { RateLimiter } from "./rate-limiter.ts";
 export { Share } from "./share-do.ts";
 
 export default {
-  /** `<id>.on.wurmhol.com` is a share; every other host is the app. */
+  /** `<id>.pipe.wurmhol.com` is a share; every other host is the app. */
   async fetch(request, env, ctx) {
     const shareId = shareIdFromHost(loadConfig(env), request.headers.get("host"));
     if (shareId === null) return app.fetch(request, env, ctx);

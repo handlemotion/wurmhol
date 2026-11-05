@@ -33,22 +33,19 @@ const optionalText = z
   .optional()
   .transform((value) => value || undefined);
 
-const wholeNumber = z.string().regex(/^\d+$/, "use a whole number").transform(Number);
-
 /**
- * Billing (spec section 4): one plan per org, monthly or yearly. All optional: with no
- * `STRIPE_SECRET_KEY` there is no Stripe plugin and shares never need a plan (self-hosting).
+ * Billing (ADR 0004): one plan per org, bought before the first pipe; no trial. Yearly is the
+ * plan (card fees eat a small monthly charge); a monthly price is optional. All optional: with no
+ * `STRIPE_SECRET_KEY` there is no Stripe plugin and pipes never need a plan (self-hosting).
  * Amounts live in Stripe as prices; only their ids are config.
  */
 const billingFields = {
   STRIPE_SECRET_KEY: optionalText,
   STRIPE_WEBHOOK_SECRET: optionalText,
-  /** Monthly price of the plan. */
-  STRIPE_PRICE_MONTHLY: optionalText,
-  /** Yearly price (the one the app pushes). Empty offers monthly only. */
+  /** Yearly price of the plan: the default, and the only one offered unless a monthly is set. */
   STRIPE_PRICE_YEARLY: optionalText,
-  /** Days a new org may start shares without a plan. Empty: 7. 0: none. */
-  BILLING_TRIAL_DAYS: optionalText.pipe(wholeNumber.optional()).transform((days) => days ?? 7),
+  /** Optional monthly price. Empty offers yearly only. */
+  STRIPE_PRICE_MONTHLY: optionalText,
 };
 
 /** Auth variables, documented in `apps/worker/.dev.vars.example`. */
@@ -89,14 +86,19 @@ export const authEnvSchema = z
       }
       return;
     }
-    for (const name of ["STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_MONTHLY"] as const) {
-      if (env[name] === undefined) {
-        ctx.addIssue({
-          code: "custom",
-          path: [name],
-          message: "is required with STRIPE_SECRET_KEY",
-        });
-      }
+    if (env.STRIPE_WEBHOOK_SECRET === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["STRIPE_WEBHOOK_SECRET"],
+        message: "is required with STRIPE_SECRET_KEY",
+      });
+    }
+    if (env.STRIPE_PRICE_YEARLY === undefined && env.STRIPE_PRICE_MONTHLY === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["STRIPE_PRICE_YEARLY"],
+        message: "set a price with STRIPE_SECRET_KEY",
+      });
     }
   })
   .transform((env) => ({
@@ -113,9 +115,10 @@ export const authEnvSchema = z
       env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
         ? { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET }
         : undefined,
-    trialDays: env.BILLING_TRIAL_DAYS,
     billing:
-      env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET && env.STRIPE_PRICE_MONTHLY
+      env.STRIPE_SECRET_KEY &&
+      env.STRIPE_WEBHOOK_SECRET &&
+      (env.STRIPE_PRICE_YEARLY || env.STRIPE_PRICE_MONTHLY)
         ? {
             secretKey: env.STRIPE_SECRET_KEY,
             webhookSecret: env.STRIPE_WEBHOOK_SECRET,
@@ -176,8 +179,10 @@ function billingPlugin(env: AuthEnv, billing: BillingConfig) {
       plans: [
         {
           name: PLAN_NAME,
-          priceId: billing.monthlyPriceId,
-          annualDiscountPriceId: billing.yearlyPriceId,
+          // The plugin's base price is the monthly one when there is one; yearly-only plans use
+          // the yearly price as the base (Checkout then never passes `annual`).
+          priceId: billing.monthlyPriceId ?? billing.yearlyPriceId!,
+          annualDiscountPriceId: billing.monthlyPriceId ? billing.yearlyPriceId : undefined,
         },
       ],
       // Org subscriptions only (the Worker refuses others), managed by owners.

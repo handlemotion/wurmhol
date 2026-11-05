@@ -12,7 +12,7 @@ import { useSignInMethods } from "@/hooks/use-app";
 import { safeNext, signInMagicLink, signInPasskey, signInSocial } from "@/lib/auth";
 
 const REASONS: Record<string, string> = {
-  "not-member": "That share belongs to an org you're not in. Sign in with an account that is.",
+  "not-member": "That pipe belongs to an org you're not in. Sign in with an account that is.",
 };
 
 /** The login page: passkeys, Google and GitHub (spec section 3). */
@@ -51,7 +51,7 @@ export function Login() {
         <Card className="gap-6 p-6">
           <div className="flex flex-col gap-2">
             <Heading>Sign in to Wurmhol</Heading>
-            <Text>{reason ?? "Open the shares your agents start, on any device."}</Text>
+            <Text>{reason ?? "Open the pipes your agents start, on any device."}</Text>
           </div>
           <div className="flex flex-col gap-2">
             <Button
@@ -110,7 +110,7 @@ export function Login() {
               </TextField>
               <Button type="submit" intent="secondary" size="lg" isPending={magicLink.isPending}>
                 <IconMail />
-                {sent ? "Link sent (see the wrangler console)" : "Email me a link"}
+                {sent ? "Check your email" : "Email me a link"}
               </Button>
             </form>
           )}
