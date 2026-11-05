@@ -1,26 +1,15 @@
 // One Share Durable Object per share (spec section 5). It holds the CLI's WebSocket (hibernation
 // API), multiplexes every viewer request and browser WebSocket over it as streams
-// (`@wurmhol/protocol`), records the page title and the last request for the wall, and enforces
-// the share's limits: its lifetime, the org's monthly bytes, and membership of each viewer (and,
-// when the CLI named some, that the viewer is one of them). It keeps the view log: per viewer,
-// first and last seen and a request count, never paths, IPs or user agents (ADR 0008).
-//
-// A new pipe's title and favicon are on the wall before anyone opens it: the object asks the dev
-// server for `/` itself (`#probe`) and reads the page's start, the same as a viewer's first page.
+// (`@wurmhol/protocol`), and owns the share's lifecycle and limits: its lifetime, the org's
+// monthly bytes, and membership of each viewer (and, when the CLI named some, that the viewer is
+// one of them). Its parts keep the rest: the title and favicon (`share-page.ts`), the view log
+// (`share-views.ts`) and the pull request preview (`share-previews.ts`).
 //
 // Request and response bodies pass through and are never logged or stored. Only the `<title>`
 // of HTML responses and the favicon are kept, while the share is open: at its end the object
 // keeps a tombstone (`state`, `endReason`) and nothing else. The viewer's IP is not forwarded.
 import { DurableObject } from "cloudflare:workers";
-import {
-  createDb,
-  findMember,
-  randomSecret,
-  recordShareEnd,
-  recordShareViews,
-  type ShareView,
-  sha256Hex,
-} from "@wurmhol/db";
+import { createDb, findMember, randomSecret, recordShareEnd, sha256Hex } from "@wurmhol/db";
 import {
   chunk,
   CLOSE_CODES,
@@ -32,7 +21,6 @@ import {
   type HeaderList,
   HttpStreamOrder,
   PING_TEXT,
-  type PipeSource,
   PONG_TEXT,
   ProtocolError,
   ReceiveWindow,
@@ -46,54 +34,19 @@ import {
   type WsClosePayload,
   type WsOpenPayload,
 } from "@wurmhol/protocol";
-import { loadConfig } from "./env.ts";
-import { type Preview, postPreview, retirePreview } from "./github.ts";
 import { createLogger } from "./log.ts";
 import { orgStub } from "./org-do.ts";
-import { extractFaviconPath, extractTitle, readStart } from "./html-head.ts";
 import { errorPage } from "./pages.ts";
-
-/** What the Worker tells a new share's object when its CLI first connects. */
-export interface ShareInit {
-  id: string;
-  orgId: string;
-  tokenId: string;
-  port: number;
-  url: string;
-  startedBy: string | null;
-  startedAt: number;
-  /** User ids that may open it (`--only`); null: every member of the org. */
-  viewers: string[] | null;
-  /** Where it came from (ADR 0015), as the CLI said; null when it said nothing. */
-  source: PipeSource | null;
-  limits: { seconds: number; monthlyBytes: number };
-}
-
-interface Meta extends ShareInit {
-  state: "live" | "away";
-  awaySince: number | null;
-  title: string | null;
-  faviconPath: string | null;
-  favicon: boolean;
-  lastRequestAt: number | null;
-  bytes: number;
-  /** When the start-of-pipe probe (`#probe`) runs again, and which retry that is; null: done. */
-  probe?: { at: number; attempt: number } | null;
-  /** Deployments on the pipe's pull request (ADR 0016); absent in pipes from before it. */
-  previews?: Preview[];
-}
-
-/** One viewer's line in the view log, with their name for the wall once looked up. */
-interface View extends ShareView {
-  name: string | null;
-  flushedAt: number;
-}
-
-/** All an ended share keeps: enough to answer "ended", and why, to a viewer or its CLI. */
-interface Tombstone {
-  state: "ended";
-  endReason: EndReason;
-}
+import {
+  forwardedHeaders,
+  type Meta,
+  type ShareInit,
+  type ShareState,
+  type Tombstone,
+} from "./share-meta.ts";
+import { PROBE_FIRST_MS, SharePage, TITLE_SCAN_BYTES } from "./share-page.ts";
+import { SharePreviews } from "./share-previews.ts";
+import { ViewLog } from "./share-views.ts";
 
 /** An older socket of the same CLI, replaced by its reconnect. */
 const REPLACED = 4000;
@@ -145,23 +98,11 @@ const MEMBERSHIP_TTL_MS = 10_000;
 const RESPONSE_HEAD_TIMEOUT_MS = 100_000;
 /** How long a viewer request waits for an away CLI to come back before it is answered. */
 const AWAY_WAIT_MS = 10_000;
-/** Bytes of an HTML response read for its `<title>`. */
-const TITLE_SCAN_BYTES = 64 * 1024;
-const FAVICON_MAX_BYTES = 100 * 1024;
-/**
- * When a new pipe connects, the relay asks the dev server for `/` itself, so the wall has the
- * favicon (and title) before anyone opens it. A server not listening yet answers with the CLI's
- * waiting page (502); the probe tries again after each of these delays.
- */
-const PROBE_RETRY_MS = [2_000, 5_000, 10_000, 20_000];
-const PROBE_FIRST_MS = 1_000;
 /** Usage goes to the Org object at most this often, or once this many bytes piled up. */
 const USAGE_FLUSH_MS = 5_000;
 const USAGE_FLUSH_BYTES = 8 * 1024 * 1024;
 /** The wall's "last request" line updates at most this often. */
 const LAST_REQUEST_PUSH_MS = 5_000;
-/** A viewer's counts go to D1 and the wall when they first open the share, then at most this often. */
-const VIEW_FLUSH_MS = 30_000;
 /** One-time viewer codes (spec section 6). */
 const CODE_TTL_MS = 60_000;
 
@@ -211,11 +152,28 @@ export class Share extends DurableObject<Env> {
   #pendingUsage = 0;
   #lastUsageFlush = 0;
   #lastRequestPush = 0;
-  #previewing: Promise<void> | null = null;
   #log = createLogger({ component: "share" });
+  #page: SharePage;
+  #views: ViewLog;
+  #previews: SharePreviews;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    const state: ShareState = {
+      ctx,
+      env,
+      log: this.#log,
+      meta: () => this.#meta(),
+      save: (meta) => this.#save(meta),
+      org: (orgId) => this.#org(orgId),
+    };
+    this.#page = new SharePage(state, {
+      relay: (head, meta) => this.#relay(head, null, meta, { scanTitle: false }),
+      connected: () => this.#cli() !== null,
+      armAlarm: (meta) => this.#armAlarm(meta),
+    });
+    this.#views = new ViewLog(state);
+    this.#previews = new SharePreviews(state);
     // The CLI's heartbeat is answered by the runtime, without waking this object (ADR 0002).
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(PING_TEXT, PONG_TEXT));
   }
@@ -313,37 +271,12 @@ export class Share extends DurableObject<Env> {
    * again when GitHub says a pull request for its branch opened. Calls at once share one attempt.
    */
   preview() {
-    this.#previewing ??= this.#preview().finally(() => (this.#previewing = null));
-    return this.#previewing;
-  }
-
-  async #preview() {
-    const meta = this.#meta();
-    const config = loadConfig(this.env);
-    if (!meta?.source || !config.github || meta.previews?.length) return;
-    try {
-      const preview = await postPreview(config.github, createDb(this.env.DB), meta);
-      if (!preview) return;
-      const current = this.#meta();
-      if (!current) {
-        // The pipe ended while the deployment was being made: retire it now.
-        await retirePreview(config.github, preview);
-        return;
-      }
-      current.previews = [preview];
-      this.#save(current);
-      await this.#org(current.orgId).update(current.id, {
-        preview: { pullRequest: preview.pullRequest, url: preview.pullRequestUrl },
-      });
-      this.#log.info("share.preview_posted", { shareId: meta.id, orgId: meta.orgId });
-    } catch (error) {
-      this.#log.warn("share.preview_failed", { shareId: meta.id, orgId: meta.orgId, error });
-    }
+    return this.#previews.post();
   }
 
   /** The dev server's favicon, as last fetched through the CLI, or null. */
-  favicon(): { type: string; body: ArrayBuffer } | null {
-    return this.ctx.storage.kv.get<{ type: string; body: ArrayBuffer }>("favicon") ?? null;
+  favicon() {
+    return this.#page.favicon();
   }
 
   // --- Fetch: the CLI's socket and viewer traffic ----------------------------------------------
@@ -429,7 +362,7 @@ export class Share extends DurableObject<Env> {
       });
     }
     this.#touch(meta);
-    this.#noteView(meta, viewer);
+    this.#views.note(meta, viewer);
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
       return this.#openViewerSocket(request, meta);
     }
@@ -466,62 +399,6 @@ export class Share extends DurableObject<Env> {
       this.ctx.waitUntil(
         this.#org(meta.orgId).update(meta.id, { lastRequestAt: meta.lastRequestAt }),
       );
-    }
-  }
-
-  /** Counts one request for the view log. */
-  #noteView(meta: Meta, userId: string) {
-    // A request still in flight when the share ended must not write the log back.
-    if (!this.#meta()) return;
-    const now = Date.now();
-    const key = `view:${userId}`;
-    const seen = this.ctx.storage.kv.get<View>(key);
-    const view: View = seen
-      ? { ...seen, lastSeenAt: now, requests: seen.requests + 1 }
-      : { userId, name: null, firstSeenAt: now, lastSeenAt: now, requests: 1, flushedAt: 0 };
-    this.ctx.storage.kv.put(key, view);
-    if (now - view.flushedAt >= VIEW_FLUSH_MS) this.ctx.waitUntil(this.#flushViews(meta));
-  }
-
-  #views() {
-    return [...this.ctx.storage.kv.list<View>({ prefix: "view:" })].map(([, view]) => view);
-  }
-
-  /**
-   * Writes the view log to D1 and the wall's card, naming viewers seen for the first time.
-   * `final` is the flush at the share's end; any other flush stops writing to storage once the
-   * share has ended, so the tombstone stays all the object keeps.
-   */
-  async #flushViews(meta: Meta, final = false) {
-    const put = (view: View) => {
-      if (final || this.#meta()) this.ctx.storage.kv.put(`view:${view.userId}`, view);
-    };
-    try {
-      const now = Date.now();
-      for (const view of this.#views()) put({ ...view, flushedAt: now });
-      const db = createDb(this.env.DB);
-      const unnamed = this.#views()
-        .filter((view) => view.name === null)
-        .map((view) => view.userId);
-      if (unnamed.length) {
-        const users = await db.query.users.findMany({
-          where: (u, { inArray }) => inArray(u.id, unnamed),
-          columns: { id: true, name: true, email: true },
-        });
-        for (const user of users) {
-          const view = this.ctx.storage.kv.get<View>(`view:${user.id}`);
-          if (view) put({ ...view, name: user.name || user.email });
-        }
-      }
-      const views = this.#views();
-      await recordShareViews(db, meta, views);
-      await this.#org(meta.orgId).update(meta.id, {
-        views: views
-          .toSorted((a, b) => b.lastSeenAt - a.lastSeenAt)
-          .map((view) => ({ name: view.name ?? "Someone", lastSeenAt: view.lastSeenAt })),
-      });
-    } catch (error) {
-      this.#log.warn("share.views_failed", { shareId: meta.id, error });
     }
   }
 
@@ -620,7 +497,7 @@ export class Share extends DurableObject<Env> {
           if (next) {
             if (scan !== null && scan.length < TITLE_SCAN_BYTES) {
               scan += textDecoder.decode(next, { stream: true });
-              this.#noteHtml(scan, scan.length >= TITLE_SCAN_BYTES);
+              this.#page.note(scan, scan.length >= TITLE_SCAN_BYTES);
               if (/<\/title>/i.test(scan) || scan.length >= TITLE_SCAN_BYTES) scan = null;
             }
             controller.enqueue(next);
@@ -651,99 +528,6 @@ export class Share extends DurableObject<Env> {
       return new Response(null, { status: responseHead.status, headers });
     }
     return new Response(readable, { status: responseHead.status, headers });
-  }
-
-  #noteHtml(html: string, final: boolean) {
-    const title = extractTitle(html);
-    if (!title && !final) return;
-    const meta = this.#meta();
-    if (!meta) return;
-    const faviconPath = extractFaviconPath(html) ?? "/favicon.ico";
-    const changed = title !== null && title !== meta.title;
-    if (title) meta.title = title;
-    const fetchFavicon = !meta.favicon || meta.faviconPath !== faviconPath;
-    meta.faviconPath = faviconPath;
-    this.#save(meta);
-    if (changed) this.ctx.waitUntil(this.#org(meta.orgId).update(meta.id, { title }));
-    if (fetchFavicon) this.ctx.waitUntil(this.#fetchFavicon(meta));
-  }
-
-  /**
-   * Requests `/` through the CLI as soon as the pipe starts and reads the start of the page for
-   * its title and favicon, as from a viewer's first page. Nothing else of the response is kept.
-   */
-  async #probe(attempt = 0) {
-    const meta = this.#meta();
-    // Ended, or a viewer's page got there first.
-    if (!meta || meta.favicon) return;
-    try {
-      if (!this.#cli()) throw new Error("the CLI is reconnecting");
-      const response = await this.#relay(
-        {
-          method: "GET",
-          path: "/",
-          // As on a viewer's request, for apps that build absolute URLs.
-          headers: [["accept", "text/html"], ...forwardedHeaders(meta)],
-        },
-        null,
-        meta,
-        { scanTitle: false },
-      );
-      const isHtml = /^text\/html\b/i.test(response.headers.get("content-type") ?? "");
-      if (response.status === 502 && isHtml) {
-        // The CLI's waiting page: the server is not up yet.
-        await response.body?.cancel();
-        throw new Error("the dev server is not listening yet");
-      }
-      if (response.ok && isHtml && response.body) {
-        this.#noteHtml(await readStart(response.body, TITLE_SCAN_BYTES), true);
-      } else {
-        await response.body?.cancel();
-        // No page to read (a redirect to sign in, JSON): the default favicon may still be there.
-        await this.#fetchFavicon(meta);
-      }
-    } catch (error) {
-      const delay = PROBE_RETRY_MS[attempt];
-      const current = this.#meta();
-      if (delay === undefined || !current) {
-        this.#log.info("share.probe_gave_up", { shareId: meta.id, error });
-        return;
-      }
-      current.probe = { at: Date.now() + delay, attempt: attempt + 1 };
-      this.#save(current);
-      this.#armAlarm(current);
-    }
-  }
-
-  /** Fetches the dev server's favicon through the CLI once, for the wall. */
-  async #fetchFavicon(meta: Meta) {
-    try {
-      const response = await this.#relay(
-        {
-          method: "GET",
-          path: meta.faviconPath ?? "/favicon.ico",
-          headers: [["accept", "image/*"]],
-        },
-        null,
-        meta,
-        { scanTitle: false },
-      );
-      const type = response.headers.get("content-type") ?? "";
-      if (!response.ok || !/^image\//i.test(type)) {
-        await response.body?.cancel();
-        return;
-      }
-      const body = await response.arrayBuffer();
-      if (body.byteLength === 0 || body.byteLength > FAVICON_MAX_BYTES) return;
-      this.ctx.storage.kv.put("favicon", { type, body });
-      const current = this.#meta();
-      if (!current) return;
-      current.favicon = true;
-      this.#save(current);
-      await this.#org(current.orgId).update(current.id, { favicon: true });
-    } catch (error) {
-      this.#log.warn("share.favicon_failed", { shareId: meta.id, error });
-    }
   }
 
   async #pumpRequestBody(id: number, stream: HttpStream, body: ReadableStream<Uint8Array> | null) {
@@ -1004,7 +788,7 @@ export class Share extends DurableObject<Env> {
         const attempt = meta.probe.attempt;
         meta.probe = null;
         this.#save(meta);
-        await this.#probe(attempt);
+        await this.#page.probe(attempt);
       }
       const current = this.#meta();
       if (current) this.#armAlarm(current);
@@ -1034,19 +818,6 @@ export class Share extends DurableObject<Env> {
     if (usage.over) await this.#end("limit");
   }
 
-  /** Marks the pipe's deployments inactive; a failure is logged, never fatal to the end. */
-  async #retirePreviews(meta: Meta) {
-    const github = loadConfig(this.env).github;
-    if (!github) return;
-    for (const preview of meta.previews ?? []) {
-      try {
-        await retirePreview(github, preview);
-      } catch (error) {
-        this.#log.warn("share.preview_retire_failed", { shareId: meta.id, error });
-      }
-    }
-  }
-
   async #end(reason: EndReason) {
     const meta = this.#meta();
     if (!meta) return;
@@ -1065,7 +836,7 @@ export class Share extends DurableObject<Env> {
     for (const [key] of this.ctx.storage.kv.list({ prefix: "code:" })) {
       this.ctx.storage.kv.delete(key);
     }
-    this.ctx.storage.kv.delete("favicon");
+    this.#page.clear();
     await this.ctx.storage.deleteAlarm();
     // The usage still counts, even though the share is gone.
     const pending = this.#pendingUsage;
@@ -1074,12 +845,9 @@ export class Share extends DurableObject<Env> {
     const org = this.#org(meta.orgId);
     if (pending) await org.addUsage(pending, meta.limits.monthlyBytes);
     // The view log's last counts go to D1; the object keeps none of it.
-    await this.#flushViews(meta, true);
-    for (const [key] of this.ctx.storage.kv.list({ prefix: "view:" })) {
-      this.ctx.storage.kv.delete(key);
-    }
+    await this.#views.close(meta);
     await org.remove(meta.id);
-    await this.#retirePreviews(meta);
+    await this.#previews.retire(meta);
     await recordShareEnd(createDb(this.env.DB), { id: meta.id, reason, bytes: meta.bytes });
     this.#log.info("share.ended", {
       shareId: meta.id,
@@ -1088,15 +856,6 @@ export class Share extends DurableObject<Env> {
       bytes: meta.bytes,
     });
   }
-}
-
-/** The share's public host and scheme, as a proxy in front of the dev server would pass them. */
-function forwardedHeaders(meta: Meta): HeaderList {
-  const url = new URL(meta.url);
-  return [
-    ["x-forwarded-host", url.host],
-    ["x-forwarded-proto", url.protocol.replace(":", "")],
-  ];
 }
 
 /** A close code a server may send: 1005, 1006 and 1015 are reserved for the runtime. */
