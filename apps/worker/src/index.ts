@@ -10,8 +10,18 @@ export { Org } from "./org-do.ts";
 export { RateLimiter } from "./rate-limiter.ts";
 export { Share } from "./share-do.ts";
 
-/** The CLI's host answers these and `/v1/pipes` (ADR 0006, ADR 0008): the pipe socket, `wurmhol login`, health. */
-const CLI_PATHS = new Set(["/connect", "/device/code", "/device/token", "/health"]);
+/**
+ * The CLI's host answers these and `/v1/pipes` (ADR 0006, ADR 0008): the pipe socket, `wurmhol
+ * login`, health, and the hosted MCP server with its protected resource metadata (ADR 0014).
+ */
+const CLI_PATHS = new Set([
+  "/connect",
+  "/device/code",
+  "/device/token",
+  "/health",
+  "/mcp",
+  "/.well-known/oauth-protected-resource/mcp",
+]);
 
 export default {
   /**

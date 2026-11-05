@@ -64,6 +64,13 @@
       "when": 1793900198479,
       "tag": "0008_public_expediter",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793904286051,
+      "tag": "0009_hosted_mcp",
+      "breakpoints": true
     }
   ]
 }

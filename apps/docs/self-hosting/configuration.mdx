@@ -40,7 +40,16 @@ Optional. With a GitHub App set up, every open pipe shows up on the open pull re
 | `LIMIT_SHARE_SECONDS`   | 12 h    | The longest `--ttl`                   |
 | `DEFAULT_SHARE_SECONDS` | 4 h     | A pipe's lifetime when it doesn't ask |
 
-`RATE_LIMIT_AUTH`, `RATE_LIMIT_MAGIC_LINK`, `RATE_LIMIT_CONNECT` and `RATE_LIMIT_MANAGE` take `<count>/<seconds>`, or `off`.
+`RATE_LIMIT_AUTH`, `RATE_LIMIT_MAGIC_LINK`, `RATE_LIMIT_CONNECT`, `RATE_LIMIT_MANAGE` and `RATE_LIMIT_MCP` take `<count>/<seconds>`, or `off`.
+
+## Hosted MCP server
+
+On by default, with nothing to set up. People add `https://api.example.com/mcp` (your `CONNECT_HOST`, or `BETTER_AUTH_URL`'s host without one) to their assistant and sign in through dirt. The access tokens are signed with a key Wurmhol creates in D1 on first use, encrypted with `BETTER_AUTH_SECRET`.
+
+- `MCP_ENABLED=false` turns it off: `/mcp` and its sign-in routes answer 404.
+- `RATE_LIMIT_MCP`, 120 calls a minute per person or token by default.
+- Assistants register by Client ID Metadata Document: the Worker fetches the HTTPS URL the assistant names as its client id, at most 64 KB, without following redirects.
+- It needs HTTPS, or plain HTTP on `localhost` or `127.0.0.1`. A stack on plain HTTP under any other host, like `api.localhost`, has it off.
 
 ## Docs link
 

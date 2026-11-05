@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
 import { routePath } from "hono/route";
-import { type AppEnv, magicLinksOn, requestScope } from "./context.ts";
-import { type Config, loadConfig } from "./env.ts";
+import { type AppEnv, magicLinksOn, mcpScope, requestScope } from "./context.ts";
+import { type Config, loadConfig, mcpResource } from "./env.ts";
 import { createLogger, REQUEST_ID_HEADER, requestIdFrom } from "./log.ts";
 import { limitAuth } from "./rate-limiter.ts";
 import { account, api } from "./routes/api.ts";
@@ -11,6 +11,7 @@ import { connect } from "./routes/connect.ts";
 import { deviceApproval, deviceFlow } from "./routes/device.ts";
 import { open } from "./routes/open.ts";
 import { githubRoutes } from "./routes/github.ts";
+import { serveMcp } from "./routes/mcp.ts";
 import { pipes } from "./routes/pipes.ts";
 import { securityHeaders } from "./security-headers.ts";
 
@@ -84,10 +85,72 @@ async function serveApp(c: { env: Env; req: { raw: Request } }) {
     .transform(res);
 }
 
+/**
+ * The hosted MCP server's resource URL (ADR 0014) when this request's host serves it; else null.
+ * With a CLI host, `/mcp` lives there only: a token's audience names one host.
+ */
+function mcpHere(c: { req: { url: string }; var: AppEnv["Variables"] }) {
+  const resource = mcpResource(c.var.config);
+  return resource && new URL(resource).host === new URL(c.req.url).host ? resource : null;
+}
+
+const notFound = () => Response.json({ error: "not found" }, { status: 404 });
+
+/**
+ * The OAuth provider's routes the hosted MCP server needs (ADR 0014): authorize, the consent
+ * page's call, the token and revocation endpoints a client calls, a client's public name for the
+ * consent page, and the signing keys. The rest (client management, consents, introspection,
+ * userinfo, registration, session JWTs) stay closed until something of ours uses them.
+ */
+const OAUTH_ROUTES = new Set([
+  "GET /api/auth/oauth2/authorize",
+  "POST /api/auth/oauth2/consent",
+  "POST /api/auth/oauth2/token",
+  "POST /api/auth/oauth2/revoke",
+  "GET /api/auth/oauth2/public-client",
+  "GET /api/auth/jwks",
+]);
+
 /** The app's host: the console, its API, `/connect`, `/device/*` and `/v1`. Share hosts never reach this (index.ts). */
 export const app = new Hono<AppEnv>()
   .use(trace)
   .get("/health", (c) => c.json({ ok: true }))
+  // The hosted MCP server (ADR 0014). POST only: every request stands alone, so there is no
+  // session to resume (GET) or end (DELETE).
+  .use("/mcp", mcpScope, securityHeaders)
+  .post("/mcp", async (c) => {
+    const resource = mcpHere(c);
+    return resource ? serveMcp(c, resource) : notFound();
+  })
+  .all("/mcp", (c) =>
+    mcpHere(c)
+      ? Response.json({ error: "use POST" }, { status: 405, headers: { allow: "POST" } })
+      : notFound(),
+  )
+  // Its protected resource metadata (RFC 9728), beside it, and the authorization server's
+  // metadata (RFC 8414) on the app's host, where people sign in. Better Auth serves both.
+  .use("/.well-known/*", mcpScope)
+  .get("/.well-known/oauth-protected-resource/mcp", async (c) =>
+    mcpHere(c) ? c.var.auth.handler(c.req.raw) : notFound(),
+  )
+  .get("/.well-known/oauth-authorization-server", async (c) =>
+    mcpResource(c.var.config) ? c.var.auth.handler(c.req.raw) : notFound(),
+  )
+  .all("/.well-known/*", () => notFound())
+  // Where the OAuth flow sends someone signed out: the login page, which comes back to authorize
+  // once they are in, by any sign-in method. The signature is authorize's own business; dropping
+  // `prompt=login` keeps authorize from sending them straight back here.
+  .get("/oauth/login", (c) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of new URL(c.req.url).searchParams) {
+      if (key !== "sig" && key !== "exp" && !key.startsWith("ba_")) query.append(key, value);
+    }
+    const prompt = (query.get("prompt") ?? "").split(" ").filter((p) => p && p !== "login");
+    if (prompt.length) query.set("prompt", prompt.join(" "));
+    else query.delete("prompt");
+    const next = `/api/auth/oauth2/authorize?${query}`;
+    return c.redirect(`/login?next=${encodeURIComponent(next)}`);
+  })
   .use("/connect", requestScope)
   .route("/connect", connect)
   .use("/device/*", requestScope)
@@ -119,6 +182,18 @@ export const app = new Hono<AppEnv>()
       ? next()
       : c.json({ error: "use /api/orgs, /api/org and /api/members" }, 404),
   )
+  // The OAuth provider loads for its own routes only (context.ts).
+  .use("/api/auth/oauth2/*", mcpScope)
+  .use("/api/auth/jwks", mcpScope)
+  .on(
+    ["GET", "POST"],
+    ["/api/auth/oauth2/*", "/api/auth/admin/*", "/api/auth/token", "/api/auth/jwks"],
+    async (c, next) => (OAUTH_ROUTES.has(`${c.req.method} ${c.req.path}`) ? next() : notFound()),
+  )
+  // MCP clients call these from their own servers, many people behind one address, with a code
+  // or refresh token that is its own proof: no per-IP sign-in limit.
+  .post("/api/auth/oauth2/token", (c) => c.var.auth.handler(c.req.raw))
+  .post("/api/auth/oauth2/revoke", (c) => c.var.auth.handler(c.req.raw))
   // Development sends no mail: the link comes back in the response, for the login page to show.
   .post("/api/auth/sign-in/magic-link", limitAuth, async (c) => {
     const response = await c.var.auth.handler(c.req.raw);

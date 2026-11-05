@@ -36,6 +36,9 @@ beforeAll(async () => {
     res.writeHead(200, { "content-type": "text/html" }).end("<title>secret app</title>secret");
   });
   shared = await share(stack, env, local.port);
+  // The relay asks the dev server for `/` and its favicon a second after the pipe connects, for
+  // the wall. Wait it out, so it is not counted as a viewer's request reaching the dev server.
+  await waitFor(() => hits.includes("/favicon.ico"), { what: "the start-of-pipe probe" });
 });
 
 afterAll(async () => {
