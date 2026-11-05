@@ -5,16 +5,26 @@
 //   wurmhol ls [--json]           open shares on this machine
 //   wurmhol stop <port|id>        end one; `--all` ends every one
 //   wurmhol init                  tell the repo's agents how to share
+//   wurmhol login | logout        store or delete a token for this computer
 import { spawn } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { formatDuration, parseDuration } from "@wurmhol/protocol";
 import pkg from "../package.json" with { type: "json" };
+import {
+  credentialsFile,
+  readCredentials,
+  removeCredentials,
+  writeCredentials,
+} from "./credentials.ts";
 import { FixError } from "./errors.ts";
+import { login as deviceLogin } from "./login.ts";
 import { DEFAULT_CONSOLE, DEFAULT_SERVER, openPipe, type Pipe } from "./pipe.ts";
 import { alive, listStates, logFile, removeState, writeState } from "./state.ts";
+
 const INIT_LINE = "Share a local server with `npx wurmhol <port>` and send the user the URL.";
 
 const HELP = `wurmhol ${pkg.version}: a private HTTPS URL for a local dev server
@@ -25,9 +35,12 @@ Usage:
   wurmhol ls [--json]           List open pipes
   wurmhol stop <port|id>        End a pipe (--all ends every one)
   wurmhol init                  Add a line about wurmhol to AGENTS.md or CLAUDE.md
+  wurmhol login                 Approve this computer in the browser; stores a token
+  wurmhol logout                Delete the stored token
 
 Environment:
-  WURMHOL_TOKEN   A token from your org (${DEFAULT_CONSOLE}, menu → Tokens)
+  WURMHOL_TOKEN   A token from your org (${DEFAULT_CONSOLE}, menu → Tokens); wins over login
+  WURMHOL_HOME    Where wurmhol keeps its state (default ~/.wurmhol)
   WURMHOL_URL     A self-hosted install (default ${DEFAULT_SERVER})
   HTTPS_PROXY     Dial out through this proxy; NODE_EXTRA_CA_CERTS adds its CA
 `;
@@ -61,10 +74,45 @@ function server() {
   }
 }
 
+/** WURMHOL_TOKEN when set, else the token `wurmhol login` stored for this server. */
 function token() {
   const value = process.env.WURMHOL_TOKEN?.trim();
-  if (!value) fail(`Set WURMHOL_TOKEN to a token from ${consoleUrl()} (menu → Tokens).`);
-  return value;
+  if (value) return value;
+  const stored = readCredentials();
+  if (stored && stored.server === server()) return stored.token;
+  fail(`Run wurmhol login, or set WURMHOL_TOKEN to a token from ${consoleUrl()} (menu → Tokens).`);
+}
+
+async function login() {
+  try {
+    const granted = await deviceLogin({
+      server: server(),
+      name: hostname(),
+      version: pkg.version,
+      prompt: (code) =>
+        process.stdout.write(`Open ${code.verification_uri} and enter ${code.user_code}\n`),
+    });
+    writeCredentials({
+      server: server(),
+      token: granted.token,
+      org: granted.org.name,
+      name: granted.name,
+    });
+    const org = granted.org.name ? ` to ${granted.org.name}` : "";
+    process.stdout.write(
+      `Logged in${org} as ${granted.name}. Token saved in ${credentialsFile()}\n`,
+    );
+    if (process.env.WURMHOL_TOKEN?.trim()) {
+      process.stdout.write("WURMHOL_TOKEN is set and wins over the saved token.\n");
+    }
+  } catch (error) {
+    fail(error instanceof FixError ? error.message : String(error));
+  }
+}
+
+function logout() {
+  const removed = removeCredentials();
+  process.stdout.write(removed ? `Deleted ${credentialsFile()}\n` : "Not logged in.\n");
 }
 
 /** Starts the detached daemon and waits for it to report the URL (or the reason it could not). */
@@ -234,6 +282,8 @@ async function main() {
   if (command === "ls") return ls(values.json);
   if (command === "stop") return stop(argument, values.all);
   if (command === "init") return init();
+  if (command === "login") return login();
+  if (command === "logout") return logout();
   const port = parsePort(command);
   if (port === null) fail(`Not a port or a command: ${command}. See: wurmhol --help`);
   let ttl: number | undefined;

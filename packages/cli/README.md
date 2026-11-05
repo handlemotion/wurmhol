@@ -4,9 +4,12 @@ A private HTTPS URL for a local dev server, from inside sandboxed cloud containe
 cloud and similar) where ngrok and Cloudflare Tunnel can't connect.
 
 ```bash
-export WURMHOL_TOKEN=wh_…        # from https://dirt.wurmhol.com (menu → Tokens)
+npx wurmhol login                # approve this computer in the browser; stores a token
 npx wurmhol 8787                 # prints https://<id>.wurmhol.dev, then returns
 ```
+
+In a cloud environment, set `WURMHOL_TOKEN=wh_…` instead (from https://dirt.wurmhol.com, menu →
+Tokens): the stored token dies with the container. `WURMHOL_TOKEN` wins when both are there.
 
 Only signed-in members of the token's org can open the URL. One outbound WebSocket on 443,
 dialed through `HTTPS_PROXY` when set; `NODE_EXTRA_CA_CERTS` adds a proxy's CA. In a sandbox
@@ -18,6 +21,8 @@ that only reaches listed hosts, allow `api.wurmhol.com`: it is the only host the
 | `wurmhol ls [--json]`                | List open pipes and when each ends                               |
 | `wurmhol stop <port\|id>`            | End one (`--all` ends every one)                                 |
 | `wurmhol init`                       | Tell this repo's agents how to share (AGENTS.md)                 |
+| `wurmhol login`                      | Approve this computer; stores `~/.wurmhol/credentials.json`      |
+| `wurmhol logout`                     | Delete the stored token                                          |
 
 A pipe ends after 4 hours. `--ttl` asks for another lifetime, like `90m` or `8h`, up to 12 hours
 on wurmhol.com.

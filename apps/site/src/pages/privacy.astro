@@ -44,6 +44,12 @@ const kept = [
     kept: "Kept as history after revocation",
   },
   {
+    what: "Device logins",
+    detail:
+      "While wurmhol login waits for approval: the code it shows, a random device code, the computer's name, who opened the code, whether it was approved or denied and for which org, and when the computer last checked.",
+    kept: "Deleted when the computer collects its token or learns it was denied or expired; a login abandoned before then is deleted within a day of expiring",
+  },
+  {
     what: "Pipe history",
     detail:
       "For each pipe: its id, org, the token that opened it, who started it, the local port number, when it started and ended, why it ended, and how many bytes it relayed.",

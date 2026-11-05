@@ -9,10 +9,13 @@ export { Org } from "./org-do.ts";
 export { RateLimiter } from "./rate-limiter.ts";
 export { Share } from "./share-do.ts";
 
+/** The CLI's host answers these and `/v1/pipes` (ADR 0006, ADR 0008): the pipe socket, `wurmhol login`, health. */
+const CLI_PATHS = new Set(["/connect", "/device/code", "/device/token", "/health"]);
+
 export default {
   /**
    * One Worker, four kinds of host (ADR 0006): pipes (`<id>.wurmhol.dev`), the CLI's
-   * endpoint (`api.wurmhol.com`: `/connect` and the `/v1/pipes` API), aliases that redirect to the app
+   * endpoint (`api.wurmhol.com`: `/connect`, `/device/*`, the `/v1/pipes` API and `/health`), aliases that redirect to the app
    * (`app.wurmhol.com`), and the app itself (`dirt.wurmhol.com`: console, API, sign-in).
    */
   async fetch(request, env, ctx) {
@@ -25,11 +28,7 @@ export default {
     }
     if (host.role === "connect") {
       const { pathname } = new URL(request.url);
-      if (
-        pathname === "/connect" ||
-        pathname === "/health" ||
-        /^\/v1\/pipes(\/|$)/.test(pathname)
-      ) {
+      if (CLI_PATHS.has(pathname) || /^\/v1\/pipes(\/|$)/.test(pathname)) {
         return app.fetch(request, env, ctx);
       }
       return Response.json(

@@ -7,6 +7,9 @@ import { type Db, createPersonalOrg, schema } from "@wurmhol/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
+
+export { APIError };
+import { deviceAuthorization } from "better-auth/plugins/device-authorization";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { multiSession } from "better-auth/plugins/multi-session";
 import { organization } from "better-auth/plugins/organization";
@@ -161,6 +164,12 @@ export async function findMembership(db: Db, userId: string, orgId: string) {
     .limit(1);
   return member ?? null;
 }
+
+/**
+ * The one client of the device flow (`wurmhol login`, ADR 0008). The Worker fills it in on the
+ * CLI's behalf; the plugin refuses any other.
+ */
+export const DEVICE_CLIENT_ID = "wurmhol-cli";
 
 /** Whether `userId` owns `orgId`: owners manage billing. */
 export async function isOwner(db: Db, userId: string, orgId: string) {
@@ -317,6 +326,14 @@ export function createAuth(env: AuthEnv) {
       }),
       // Several accounts signed in on one device; switch with `multiSession.setActive`.
       multiSession(),
+      // `wurmhol login` (ADR 0008): user codes, polling, `slow_down`, approve and deny, single
+      // redemption. The Worker answers `/device/*` itself and never hands out the session the
+      // plugin's token endpoint makes; its own routes under /api/auth stay closed (app.ts).
+      deviceAuthorization({
+        verificationUri: "/device",
+        validateClient: (clientId) => clientId === DEVICE_CLIENT_ID,
+        schema: { deviceCode: { modelName: "deviceCodes" } },
+      }),
       ...(env.billing ? [billingPlugin(env, env.billing)] : []),
     ],
   });

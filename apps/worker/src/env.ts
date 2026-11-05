@@ -55,8 +55,8 @@ const configSchema = z
       .string()
       .regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, "use a lowercase domain like example-pipes.dev"),
     /**
-     * The host the CLI dials (ADR 0006), e.g. `api.wurmhol.com`: it answers `/connect` and
-     * `/health` only. Empty: the CLI dials the app's own host (BETTER_AUTH_URL).
+     * The host the CLI dials (ADR 0006), e.g. `api.wurmhol.com`: it answers `/connect`,
+     * `/device/code`, `/device/token` and `/health` only. Empty: the CLI dials the app's own host (BETTER_AUTH_URL).
      */
     CONNECT_HOST: z
       .string()

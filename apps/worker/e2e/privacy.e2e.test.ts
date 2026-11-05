@@ -130,16 +130,19 @@ describe("what the relay keeps about viewers", () => {
 });
 
 describe("the daily retention job", () => {
-  /** Runs the Worker's cron handler, as the daily trigger does. */
-  async function runRetention() {
-    const response = await fetch(`${stack.url}/__scheduled?cron=17+3+*+*+*`);
+  /**
+   * Runs the Worker's cron handler as if it fired at `at`, through Miniflare's trigger endpoint
+   * (the one `wrangler dev` names for testing crons locally).
+   */
+  async function runRetention(at: number) {
+    const response = await fetch(`${stack.url}/cdn-cgi/local/scheduled?cron=17+3+*+*+*&time=${at}`);
     expect(response.status).toBe(200);
   }
 
   it("deletes expired sign-in rows, and pipe history after 90 days", async () => {
     const bo = await signIn(stack);
     const boId = rows<{ id: string }>("select id from users where email = ?", bo.email)[0]!.id;
-    // An invite link nobody used, and a magic link nobody clicked.
+    // An invite link nobody used, a magic link nobody clicked, a login nobody approved.
     const invite = await api<{ url: string }>(stack, bo, "/api/invites", { method: "POST" });
     expect(invite.status).toBe(201);
     const pending = `${randomUUID()}@example.com`;
@@ -148,6 +151,13 @@ describe("the daily retention job", () => {
       headers: { "content-type": "application/json", origin: stack.url },
       body: JSON.stringify({ email: pending, callbackURL: "/" }),
     });
+    const login = await browserFetch(`${stack.url}/device/code`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "abandoned" }),
+    });
+    expect(login.status).toBe(200);
+    const { user_code: userCode } = (await login.json()) as { user_code: string };
     const boEnv = cliEnv(stack, (await createToken(stack, bo)).token);
     const local = await localServer((_req, res) => res.end("ok"));
     const started = await share(stack, boEnv, local.port);
@@ -165,35 +175,28 @@ describe("the daily retention job", () => {
       sessions: rows("select id from sessions where user_id = ?", boId).length,
       verifications: rows("select id from verifications where value like ?", `%${pending}%`).length,
       invites: rows(`select id from invite_links where org_id in (${orgOfBo})`, boId).length,
+      deviceCodes: rows(
+        "select id from device_codes where user_code = ?",
+        userCode.replaceAll("-", ""),
+      ).length,
       shares: rows("select id from shares where id = ?", started.id).length,
     });
+    const all = { sessions: 1, verifications: 1, invites: 1, deviceCodes: 1, shares: 1 };
 
-    // Fresh rows: nothing is due.
-    await runRetention();
-    expect(counts()).toEqual({ sessions: 1, verifications: 1, invites: 1, shares: 1 });
-
-    // Expired a minute ago, and a pipe from 89 days ago: the sign-in rows go, history stays.
-    const ago = (ms: number) => Date.now() - ms;
-    stack.exec("update sessions set expires_at = ? where user_id = ?", ago(60_000), boId);
-    stack.exec(
-      "update verifications set expires_at = ? where value like ?",
-      ago(60_000),
-      `%${pending}%`,
-    );
-    stack.exec(
-      `update invite_links set expires_at = ? where org_id in (${orgOfBo})`,
-      ago(60_000),
-      boId,
-    );
-    stack.exec("update shares set started_at = ? where id = ?", ago(89 * DAY_MS), started.id);
-    await runRetention();
-    expect(counts()).toEqual({ sessions: 0, verifications: 0, invites: 0, shares: 1 });
-    // Ada's live session is untouched.
-    expect((await api(stack, ada, "/api/me")).status).toBe(200);
-
-    // A pipe from 91 days ago: its history goes too.
-    stack.exec("update shares set started_at = ? where id = ?", ago(91 * DAY_MS), started.id);
-    await runRetention();
+    // Today: nothing is due.
+    await runRetention(Date.now());
+    expect(counts()).toEqual(all);
+    // In 89 days: the session, magic link, invite and login have long expired; history stays.
+    await runRetention(Date.now() + 89 * DAY_MS);
+    expect(counts()).toEqual({
+      sessions: 0,
+      verifications: 0,
+      invites: 0,
+      deviceCodes: 0,
+      shares: 1,
+    });
+    // In 91 days: the pipe's history is gone too.
+    await runRetention(Date.now() + 91 * DAY_MS);
     expect(counts().shares).toBe(0);
   });
 });

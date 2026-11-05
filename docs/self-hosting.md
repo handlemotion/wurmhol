@@ -146,9 +146,10 @@ asks for no lifetime lasts `DEFAULT_SHARE_SECONDS` (4 h), capped at `LIMIT_SHARE
 ## 6. Retention
 
 A daily cron trigger (`triggers.crons` in `wrangler.jsonc`, 03:17 UTC) deletes pipe history
-(`shares` rows) older than `RETENTION_DAYS` (90), and expired sessions, sign-in links and invite
-links. `wrangler deploy` registers it; no other setup. Locally, `wrangler dev --test-scheduled`
-runs it on `GET /__scheduled`.
+(`shares` rows) older than `RETENTION_DAYS` (90), and expired sessions, sign-in links, invite
+links and device logins. `wrangler deploy` registers it; no other setup. `wrangler dev` never
+fires it on its own: run it with `curl "http://localhost:8787/cdn-cgi/local/scheduled"` (add
+`?time=<ms since epoch>` to run it as of another time).
 
 The Worker logs only its own JSON lines: `observability.logs.invocation_logs` is `false`, so
 Cloudflare does not record each request's URL.
@@ -158,6 +159,10 @@ Cloudflare does not record each request's URL.
 ```bash
 WURMHOL_URL=https://api.example.com WURMHOL_TOKEN=wh_… npx wurmhol 8787
 ```
+
+Or `WURMHOL_URL=https://api.example.com npx wurmhol login`: it prints a code to approve at
+`<BETTER_AUTH_URL>/device` and stores the token in `~/.wurmhol/credentials.json`. Both of its
+calls go to the CLI's host, so nothing else needs allowlisting.
 
 In a sandbox with a Limited network policy, allowlist `api.example.com` (the only host the CLI
 dials).
@@ -183,3 +188,5 @@ pnpm stack:serve        # http://localhost:8787, shares at http://<id>.pipe.loca
 ```
 
 Sign in with the magic link printed in `.local/serve/worker.log` (`auth.dev_link`).
+Run the daily retention job against the local D1 with
+`curl "http://127.0.0.1:8787/cdn-cgi/local/scheduled"`.

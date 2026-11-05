@@ -6,8 +6,8 @@
 # --- App and shares ---
 # Public origin of the app: login, the wall, the API and `/connect` (the CLI's WURMHOL_URL).
 BETTER_AUTH_URL=http://localhost:8787
-# Optional (ADR 0006). The host the CLI dials, answering /connect and /health only, e.g.
-# api.example.com. Empty: the CLI dials BETTER_AUTH_URL's host.
+# Optional (ADR 0006, ADR 0008). The host the CLI dials, answering /connect, /device/code,
+# /device/token (wurmhol login) and /health only, e.g. api.example.com. Empty: the CLI dials BETTER_AUTH_URL's host.
 CONNECT_HOST=
 # Optional. Hosts that 301 to BETTER_AUTH_URL, comma-separated, e.g. app.example.com.
 APP_ALIASES=
@@ -69,8 +69,9 @@ LIMIT_SHARE_SECONDS=43200
 DEFAULT_SHARE_SECONDS=14400
 
 # --- Retention (ADR 0008); the daily cron in wrangler.jsonc `triggers.crons` ---
-# Days a pipe's history (its `shares` row) is kept. Default 90. Expired sessions, sign-in links
-# and invite links are deleted by the same job whatever this is.
+# Days a pipe's history (its `shares` row) is kept. Default 90. Expired sessions, sign-in links,
+# invite links and device logins are deleted by the same job whatever this is. Locally, run it
+# with `curl http://localhost:8787/cdn-cgi/local/scheduled`.
 RETENTION_DAYS=90
 
 # --- Rate limits as "<count>/<seconds>" or "off"; empty uses the default in wrangler.jsonc ---
