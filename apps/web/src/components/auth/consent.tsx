@@ -4,13 +4,14 @@ import { ConsentPlate } from "@/components/auth/consent-plate";
 import { Button } from "@/components/ui/button";
 import { Heading } from "@/components/ui/heading";
 import { SkeletonProvider } from "@/components/ui/skeleton-provider";
-import { Strong, Text } from "@/components/ui/text";
+import { IconCheck, IconX } from "@/components/icons/lucide";
+import { Strong, Text, TextLink } from "@/components/ui/text";
 import { api, ApiError, type Me } from "@/lib/api";
 
-/** What each scope lets the assistant do (ADR 0014). */
+/** What each scope lets the assistant do (ADR 0014), one short line each. */
 const SCOPE_TEXT: Record<string, string> = {
-  "pipes:read": "See the open pipes of your orgs, as the wall shows them",
-  "pipes:write": "Stop any of those pipes",
+  "pipes:read": "See your open pipes",
+  "pipes:write": "Stop any of them",
 };
 
 interface PublicClient {
@@ -36,6 +37,9 @@ function Review() {
   const search = new URLSearchParams(location.search);
   const clientId = search.get("client_id") ?? "";
   const scopes = (search.get("scope") ?? "").split(" ").filter((s) => s in SCOPE_TEXT);
+  /** Where the code goes, as the provider checked it against the client's registered URIs. */
+  const redirect = search.get("redirect_uri") ?? "";
+  const redirectHost = URL.canParse(redirect) ? new URL(redirect).host : null;
   const review = useQuery({
     queryKey: ["consent", clientId],
     queryFn: async () => {
@@ -45,7 +49,7 @@ function Review() {
         ),
         api<Me>("/api/me"),
       ]);
-      return { client, orgs: me.orgs };
+      return { client, orgs: me.orgs, email: me.user.email };
     },
     retry: false,
   });
@@ -73,28 +77,34 @@ function Review() {
       sample={{
         client: { client_id: "https://claude.ai/oauth/mcp-client", client_name: "Claude" },
         orgs: [{ id: "", name: "Handlemotion", role: "member", personal: false }],
+        email: "ada@example.com",
       }}
       label="Loading the request"
     >
-      {({ client, orgs }) => {
+      {({ client, orgs, email }) => {
         const host = clientHost(client.client_id);
+        const name = client.client_name ?? host ?? "This app";
         return (
           <div className="flex flex-col gap-6">
             <div className="flex flex-col gap-2">
-              <Heading size="sm">Connect {client.client_name ?? host ?? "this app"}?</Heading>
+              <Heading size="sm">{name} wants to reach your pipes</Heading>
               <Text>
-                {host ? (
-                  <>
-                    It says it is from <Strong>{host}</Strong>.{" "}
-                  </>
-                ) : null}
-                It will be able to, in {orgs.map((o) => o.name).join(", ")}:
+                In {orgs.map((o) => (o.personal ? "your personal org" : o.name)).join(", ")}, as{" "}
+                <Strong>{email}</Strong>. <TextLink onPress={toLogin}>Not you?</TextLink>
               </Text>
-              {scopes.map((scope) => (
-                <Text key={scope}>{SCOPE_TEXT[scope]}.</Text>
-              ))}
-              <Text>It cannot open pipes, see what passes through them, or manage your orgs.</Text>
             </div>
+            <ul className="flex flex-col gap-2">
+              {scopes.map((scope) => (
+                <li key={scope} className="flex items-center gap-2">
+                  <IconCheck aria-hidden className="size-icon shrink-0 text-muted-foreground" />
+                  <Text>{SCOPE_TEXT[scope]}</Text>
+                </li>
+              ))}
+              <li className="flex items-center gap-2">
+                <IconX aria-hidden className="size-icon shrink-0 text-muted-foreground" />
+                <Text>Never open pipes or see what passes through them</Text>
+              </li>
+            </ul>
             <div className="flex flex-col gap-2">
               <Button
                 size="lg"
@@ -117,6 +127,14 @@ function Review() {
             {decide.error && !(decide.error instanceof ApiError && decide.error.status === 401) && (
               <Text className="text-danger-subtle-foreground">{decide.error.message}</Text>
             )}
+            <Text className="text-xs">
+              {redirectHost ? (
+                <>
+                  Allowing sends you back to <Strong>{redirectHost}</Strong>.{" "}
+                </>
+              ) : null}
+              {host ? `${name} says it is from ${host}; Wurmhol hasn't verified that.` : null}
+            </Text>
           </div>
         );
       }}
