@@ -84,9 +84,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
         reason: share.endReason,
       });
     }
-    return shareStub(c.env, share.id).fetch(
-      toShare(c.req.raw, null, new URL("/connect", c.req.url)),
-    );
+    return shareStub(c.env, share.id).fetch(toShare(c.req.raw, { cli: null }));
   }
 
   const port = Number(c.req.query("port"));
@@ -205,9 +203,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
           "The org has used this month's transfer allowance. It resets on the 1st (UTC).",
         );
   }
-  const response = await shareStub(c.env, init.id).fetch(
-    toShare(c.req.raw, { init }, new URL("/connect", c.req.url)),
-  );
+  const response = await shareStub(c.env, init.id).fetch(toShare(c.req.raw, { cli: init }));
   if (response.status !== 101) {
     await org.remove(init.id);
     await recordShareEnd(db, { id: init.id, reason: "disconnected", bytes: 0 });
