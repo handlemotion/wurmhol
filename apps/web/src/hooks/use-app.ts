@@ -128,6 +128,34 @@ export function useRemoveMember() {
   });
 }
 
+/** Changes that move what the whole page shows (org name, role, which org): refetch it all. */
+function useOrgChange<T>(mutationFn: (input: T) => Promise<unknown>) {
+  const client = useQueryClient();
+  return useMutation({ mutationFn, onSuccess: () => client.invalidateQueries() });
+}
+
+export function useRenameOrg() {
+  return useOrgChange((name: string) => api("/api/org", { method: "PATCH", body: { name } }));
+}
+
+export function useSetRole() {
+  return useOrgChange(({ id, role }: { id: string; role: "owner" | "member" }) =>
+    api(`/api/members/${id}/role`, { method: "POST", body: { role } }),
+  );
+}
+
+export function useTransferOrg() {
+  return useOrgChange((id: string) => api(`/api/members/${id}/transfer`, { method: "POST" }));
+}
+
+export function useLeaveOrg() {
+  return useOrgChange(() => api("/api/org/leave", { method: "POST" }));
+}
+
+export function useDeleteOrg() {
+  return useOrgChange(() => api("/api/org", { method: "DELETE" }));
+}
+
 export function useCreateInvite() {
   return useMutation({
     mutationFn: () => api<{ url: string; expiresAt: string }>("/api/invites", { method: "POST" }),

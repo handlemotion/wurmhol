@@ -1,13 +1,34 @@
+import { useState } from "react";
 import { Skeleton } from "skullet/react";
+import { IconCrown, IconEllipsis, IconTrash, IconUser } from "@/components/icons/lucide";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { CopyField } from "@/components/ui/copy-field";
-import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useCreateInvite, useMembers, useRemoveMember } from "@/hooks/use-app";
-import type { Me } from "@/lib/api";
+import {
+  Dialog,
+  DialogBody,
+  DialogClose,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Menu, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
+import { Text } from "@/components/ui/text";
+import {
+  useCreateInvite,
+  useMembers,
+  useRemoveMember,
+  useSetRole,
+  useTransferOrg,
+} from "@/hooks/use-app";
+import type { Me, Member } from "@/lib/api";
 import { initials } from "@/lib/initials";
 
-/** Members (spec section 3): list, invite by copyable link, remove. Owners invite and remove. */
+/**
+ * Members (spec section 3): list, invite by copyable link, remove. Owners invite, remove, change
+ * roles and hand the org over, from a menu on each other member's row.
+ */
 export function MembersDialog({
   me,
   isOpen,
@@ -20,6 +41,8 @@ export function MembersDialog({
   const members = useMembers(isOpen);
   const invite = useCreateInvite();
   const remove = useRemoveMember();
+  const setRole = useSetRole();
+  const [handOver, setHandOver] = useState<Member | null>(null);
   const owner = me.role === "owner";
 
   return (
@@ -77,26 +100,106 @@ export function MembersDialog({
                         {member.name || member.email}
                       </span>
                       <span className="truncate text-xs text-muted-foreground">
-                        {member.name ? `${member.email} · ${member.role}` : member.role}
+                        {[member.name && member.email, member.role === "owner" ? "Owner" : "Member"]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </span>
                     </div>
                   </div>
                   {owner && member.id !== data.you && (
-                    <Button
-                      intent="danger"
-                      size="xs"
-                      isPending={remove.isPending && remove.variables === member.id}
-                      onPress={() => remove.mutate(member.id)}
-                    >
-                      Remove
-                    </Button>
+                    <MenuTrigger>
+                      <Button
+                        intent="plain"
+                        size="sq-xs"
+                        aria-label={`Manage ${member.name || member.email}`}
+                        isPending={
+                          (remove.isPending && remove.variables === member.id) ||
+                          (setRole.isPending && setRole.variables?.id === member.id)
+                        }
+                      >
+                        <IconEllipsis />
+                      </Button>
+                      <Menu
+                        placement="bottom end"
+                        onAction={(key) => {
+                          if (key === "role") {
+                            setRole.mutate({
+                              id: member.id,
+                              role: member.role === "owner" ? "member" : "owner",
+                            });
+                          } else if (key === "transfer") setHandOver(member);
+                          else if (key === "remove") remove.mutate(member.id);
+                        }}
+                      >
+                        <MenuItem id="role">
+                          {member.role === "owner" ? <IconUser /> : <IconCrown />}
+                          <MenuLabel>
+                            {member.role === "owner" ? "Make a member" : "Make an owner"}
+                          </MenuLabel>
+                        </MenuItem>
+                        <MenuItem id="transfer">
+                          <IconCrown />
+                          <MenuLabel>Transfer ownership</MenuLabel>
+                        </MenuItem>
+                        <MenuSeparator />
+                        <MenuItem id="remove" intent="danger">
+                          <IconTrash />
+                          <MenuLabel>Remove from org</MenuLabel>
+                        </MenuItem>
+                      </Menu>
+                    </MenuTrigger>
                   )}
                 </li>
               ))}
             </ul>
           )}
         </Skeleton>
+        {(setRole.error ?? remove.error) && (
+          <Text className="text-danger-subtle-foreground">
+            {(setRole.error ?? remove.error)!.message}
+          </Text>
+        )}
       </DialogBody>
+      <TransferDialog member={handOver} onClose={() => setHandOver(null)} />
+    </Dialog>
+  );
+}
+
+/** Hands the org to another member: they become its owner, and you a member. */
+function TransferDialog({ member, onClose }: { member: Member | null; onClose: () => void }) {
+  const transfer = useTransferOrg();
+  const who = member ? member.name || member.email : "";
+  return (
+    <Dialog
+      isOpen={member !== null}
+      onOpenChange={(open) => {
+        if (!open) {
+          transfer.reset();
+          onClose();
+        }
+      }}
+      size="md"
+      role="alertdialog"
+    >
+      <DialogHeader>
+        <DialogTitle>Transfer ownership to {who}?</DialogTitle>
+        <DialogDescription>
+          {who} becomes an owner and you become a member: you can no longer manage members, billing
+          or the org.
+        </DialogDescription>
+      </DialogHeader>
+      {transfer.error && (
+        <Text className="text-danger-subtle-foreground">{transfer.error.message}</Text>
+      )}
+      <DialogFooter>
+        <DialogClose>Cancel</DialogClose>
+        <Button
+          isPending={transfer.isPending}
+          onPress={() => member && transfer.mutate(member.id, { onSuccess: onClose })}
+        >
+          Make {who} the owner
+        </Button>
+      </DialogFooter>
     </Dialog>
   );
 }
