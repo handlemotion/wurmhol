@@ -1,4 +1,4 @@
-// GitHub App installations linked to orgs, and the open pipes a pull request matches (ADR 0013).
+// GitHub App installations linked to orgs, and the open pipes a pull request matches (ADR 0016).
 import { and, eq, isNull } from "drizzle-orm";
 import type { Db } from "./client.ts";
 import { githubInstallations, shares } from "./schema/index.ts";

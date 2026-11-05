@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
-/** Whether this install has a GitHub App, and the accounts the org linked (ADR 0013). */
+/** Whether this install has a GitHub App, and the accounts the org linked (ADR 0016). */
 export function useGithub(enabled: boolean) {
   return useQuery({
     queryKey: ["github"],

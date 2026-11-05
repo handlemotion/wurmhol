@@ -1,4 +1,4 @@
-// Where a pipe came from (ADR 0012): the real CLI, run in a real git repo, sends its repo, branch,
+// Where a pipe came from (ADR 0015): the real CLI, run in a real git repo, sends its repo, branch,
 // commit, agent session, link and note; the Worker checks them, keeps them on the share's row,
 // and shows them on the wall's card and in the org pipes API.
 import { execFileSync } from "node:child_process";

@@ -47,15 +47,22 @@
     {
       "idx": 6,
       "version": "6",
-      "when": 1793897893755,
-      "tag": "0006_damp_bill_hollister",
+      "when": 1793898557799,
+      "tag": "0006_spotty_warpath",
       "breakpoints": true
     },
     {
       "idx": 7,
       "version": "6",
-      "when": 1793898522079,
-      "tag": "0007_lazy_the_renegades",
+      "when": 1793900126027,
+      "tag": "0007_bumpy_meltdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1793900198479,
+      "tag": "0008_public_expediter",
       "breakpoints": true
     }
   ]

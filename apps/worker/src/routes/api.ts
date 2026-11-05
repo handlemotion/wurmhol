@@ -22,6 +22,7 @@ import { type AppEnv, requireMember, requireOwner, resolveSession } from "../con
 import { SHARE_ID } from "../env.ts";
 import { limitPerMember } from "../rate-limiter.ts";
 import { billing } from "./billing.ts";
+import { org } from "./org.ts";
 
 /** Where the CLI dials when WURMHOL_URL is unset (`DEFAULT_SERVER`, packages/cli/src/pipe.ts). */
 const CLI_DEFAULT_SERVER = "https://api.wurmhol.com";
@@ -186,4 +187,5 @@ export const api = new Hono<AppEnv>()
     const url = new URL(`/join/${code}`, c.var.config.auth.baseURL).toString();
     return c.json({ url, expiresAt: expiresAt.toISOString() }, 201);
   })
+  .route("/", org)
   .route("/", billing);

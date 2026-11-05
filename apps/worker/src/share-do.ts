@@ -56,7 +56,7 @@ export interface ShareInit {
   startedAt: number;
   /** User ids that may open it (`--only`); null: every member of the org. */
   viewers: string[] | null;
-  /** Where it came from (ADR 0012), as the CLI said; null when it said nothing. */
+  /** Where it came from (ADR 0015), as the CLI said; null when it said nothing. */
   source: PipeSource | null;
   limits: { seconds: number; monthlyBytes: number };
 }
@@ -69,7 +69,7 @@ interface Meta extends ShareInit {
   favicon: boolean;
   lastRequestAt: number | null;
   bytes: number;
-  /** Deployments on the pipe's pull request (ADR 0013); absent in pipes from before it. */
+  /** Deployments on the pipe's pull request (ADR 0016); absent in pipes from before it. */
   previews?: Preview[];
 }
 
@@ -313,7 +313,7 @@ export class Share extends DurableObject<Env> {
   }
 
   /**
-   * Posts the pipe to the open pull request of its branch, once (ADR 0013): when it starts, and
+   * Posts the pipe to the open pull request of its branch, once (ADR 0016): when it starts, and
    * again when GitHub says a pull request for its branch opened. Calls at once share one attempt.
    */
   preview() {

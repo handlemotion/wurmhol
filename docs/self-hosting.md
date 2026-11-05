@@ -143,7 +143,7 @@ Leave `STRIPE_SECRET_KEY` empty and every org shares without a plan. To bill:
 ## 4a. Preview links on pull requests (optional)
 
 Leave `GITHUB_APP_ID` empty and nothing talks to GitHub. To post each open pipe to the open pull
-request of its branch as a deployment (`wurmhol-preview`, ADR 0013):
+request of its branch as a deployment (`wurmhol-preview`, ADR 0016):
 
 1. Create a GitHub App (Settings → Developer settings → GitHub Apps):
    - Callback URL `<BETTER_AUTH_URL>/api/github/callback`.

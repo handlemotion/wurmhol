@@ -25,7 +25,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
 }
 
 export interface Me {
-  user: { id: string; email: string; name: string };
+  user: { id: string; email: string; name: string; image: string | null };
   orgs: { id: string; name: string; role: string }[];
   activeOrgId: string | null;
   role: "owner" | "member" | null;
@@ -44,9 +44,9 @@ export interface Share {
   lastRequestAt: number | null;
   views: { name: string; lastSeenAt: number }[];
   state: "live" | "away";
-  /** Where it came from (ADR 0012); null when its CLI said nothing. */
+  /** Where it came from (ADR 0015); null when its CLI said nothing. */
   source: PipeSource | null;
-  /** The pull request it is posted to as a GitHub deployment (ADR 0013). */
+  /** The pull request it is posted to as a GitHub deployment (ADR 0016). */
   preview: { pullRequest: number; url: string } | null;
 }
 
@@ -76,6 +76,8 @@ export interface Token {
   id: string;
   name: string;
   scope: TokenScope;
+  /** `login`: a computer approved with `wurmhol login`, shown under Computers. */
+  source: "console" | "login";
   createdAt: string;
   expiresAt: string | null;
   lastUsedAt: string | null;

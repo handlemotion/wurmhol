@@ -1,4 +1,4 @@
-# 0012: Every pipe says where it came from
+# 0015: Every pipe says where it came from
 
 Status: accepted. Extends spec v1 section 3 (the wall's cards) and section 7 (the CLI). Adds to
 what ADR 0008 lists as stored.

@@ -3,7 +3,7 @@ import { and, desc, eq, gt, isNull, or } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import type { Db } from "./client.ts";
 import { randomSecret, sha256Hex } from "./crypto.ts";
-import { type TokenScope, tokens, users } from "./schema/index.ts";
+import { type TokenScope, type TokenSource, tokens, users } from "./schema/index.ts";
 
 /** Every token starts with this, so secret scanners and people can tell what it is. */
 export const TOKEN_PREFIX = "wh_";
@@ -16,6 +16,8 @@ export async function createToken(
     name: string;
     createdBy: string;
     scope: TokenScope;
+    /** `login` for a computer approved with `wurmhol login`; the console's own by default. */
+    source?: TokenSource;
     /** Null: never expires. */
     expiresAt: Date | null;
   },
@@ -28,6 +30,7 @@ export async function createToken(
     name: input.name,
     hash: await sha256Hex(token),
     scope: input.scope,
+    source: input.source ?? "console",
     expiresAt: input.expiresAt,
     createdBy: input.createdBy,
   });
@@ -40,6 +43,7 @@ export async function listTokens(db: Db, orgId: string) {
       id: tokens.id,
       name: tokens.name,
       scope: tokens.scope,
+      source: tokens.source,
       createdAt: tokens.createdAt,
       expiresAt: tokens.expiresAt,
       lastUsedAt: tokens.lastUsedAt,
