@@ -3,16 +3,20 @@
 //
 //   node render.mjs <scene.mjs ...> [--out dir] [--png] [--theme light|dark|both]
 //                   [--tone strong|quiet] [--seed n] [--size WxH] [--stroke px]
-//                   [--ink currentColor] [--sheet]
+//                   [--ink color] [--accent color] [--paper color|none] [--seeds n]
+//                   [--tsx ComponentName] [--sheet]
 //
 // A scene file default-exports `(o) => scene`, where `o` is
 // `{ seed, theme, tone, ink, accent, paper, width, height, stroke }`. `--ink currentColor`
 // writes an SVG that takes its color from CSS (for embedding in the app); `--sheet` also writes
-// `index.html`, a contact sheet of everything rendered.
+// `index.html`, a contact sheet of everything rendered. `--seeds n` renders seeds 1..n of each
+// scene (`<name>-s<seed>`), to compare variants side by side. `--tsx Name` also writes
+// `<name>.tsx`, a React component with the SVG as JSX that passes `className` through, for
+// shipping a plate into apps/web (use with `--ink currentColor --paper none`).
 /* oxlint-disable no-console -- a CLI: printing is its output */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { basename, join, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { THEMES } from "./engine.mjs";
 
@@ -22,7 +26,19 @@ const flag = (name, fallback) => {
   return i === -1 ? fallback : args[i + 1];
 };
 const has = (name) => args.includes(`--${name}`);
-const valued = new Set(["out", "theme", "tone", "seed", "size", "stroke", "ink"]);
+const valued = new Set([
+  "out",
+  "theme",
+  "tone",
+  "seed",
+  "seeds",
+  "size",
+  "stroke",
+  "ink",
+  "accent",
+  "paper",
+  "tsx",
+]);
 const files = args.filter((a, i) => !a.startsWith("--") && !valued.has(args[i - 1]?.slice(2)));
 
 if (!files.length) {
@@ -39,28 +55,62 @@ const seed = Number(flag("seed", 1));
 const [width, height] = flag("size", "1200x1200").split("x").map(Number);
 mkdirSync(out, { recursive: true });
 
+const seeds = has("seeds")
+  ? Array.from({ length: Number(flag("seeds")) }, (_, i) => i + 1)
+  : [seed];
+
+/** SVG markup to a React component: attributes to camelCase, `className` on the root. */
+function toTsx(name, svg, scene) {
+  const jsx = svg
+    .replace(
+      /<svg ([^>]*?) width="[^"]+" height="[^"]+">/,
+      '<svg $1 className={className} aria-hidden="true" preserveAspectRatio="xMidYMid slice">',
+    )
+    .replace(
+      / ([a-z]+)-([a-z]+)(?:-([a-z]+))?=/g,
+      (_, a, b, c) =>
+        ` ${a}${b[0].toUpperCase()}${b.slice(1)}${c ? c[0].toUpperCase() + c.slice(1) : ""}=`,
+    )
+    .replace("ariaHidden=", "aria-hidden=");
+  return `// Generated from ${scene} by .claude/skills/network-create/scripts/render.mjs --tsx.
+// Edit the scene and regenerate; don't edit this file.
+export function ${name}({ className }: { className?: string }) {
+  return (
+    ${jsx.replace(/\n/g, "\n    ")}
+  );
+}
+`;
+}
+
 const rendered = [];
 for (const file of files) {
   const mod = await import(pathToFileURL(resolve(file)).href);
-  for (const theme of themes) {
-    const t = THEMES[theme];
-    const o = {
-      seed,
-      theme,
-      tone,
-      width,
-      height,
-      ink: flag("ink", t[tone]),
-      accent: t.accent,
-      paper: t.paper,
-      stroke: Number(flag("stroke", 1)),
-    };
-    const svg = mod.default(o).render();
-    const name = `${basename(file, ".mjs")}${themes.length > 1 ? `-${theme}` : ""}`;
-    writeFileSync(join(out, `${name}.svg`), svg);
-    rendered.push({ name, svg, paper: t.paper });
-    console.log(`${name}.svg  ${(svg.length / 1024).toFixed(0)} KB`);
-  }
+  for (const theme of themes)
+    for (const seed of seeds) {
+      const t = THEMES[theme];
+      const paper = flag("paper", t.paper);
+      const o = {
+        seed,
+        theme,
+        tone,
+        width,
+        height,
+        ink: flag("ink", t[tone]),
+        accent: flag("accent", t.accent),
+        paper: paper === "none" ? null : paper,
+        stroke: Number(flag("stroke", 1)),
+      };
+      const svg = mod.default(o).render();
+      const name = `${basename(file, ".mjs")}${themes.length > 1 ? `-${theme}` : ""}${seeds.length > 1 ? `-s${seed}` : ""}`;
+      writeFileSync(join(out, `${name}.svg`), svg);
+      if (has("tsx"))
+        writeFileSync(
+          join(out, `${name}.tsx`),
+          toTsx(flag("tsx"), svg, relative(process.cwd(), resolve(file))),
+        );
+      rendered.push({ name, svg, paper: t.paper });
+      console.log(`${name}.svg  ${(svg.length / 1024).toFixed(0)} KB`);
+    }
 }
 
 if (has("png") || has("sheet")) {

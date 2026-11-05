@@ -169,18 +169,6 @@
 /* The strong ease-out for anything the user causes, defined once (tactile-design). */
 @theme {
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  /* The login wormhole's fall: one ring moves into its inner neighbour's place per cycle. */
-  --animate-wormhole: wormhole 6s linear infinite;
-}
-
-/* Scales by the wormhole's ring ratio (`RATIO` in components/auth/wormhole.tsx). */
-@keyframes wormhole {
-  from {
-    transform: scale(1);
-  }
-  to {
-    transform: scale(0.72);
-  }
 }
 
 /* A toast's countdown bar empties over its duration. */

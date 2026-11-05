@@ -57,6 +57,23 @@ export const meet = {
     return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
   },
   /** The two points where tangents from `p` touch the circle. */
+  /**
+   * Inversion in the circle (o, k): maps a circle that does not pass through o to another
+   * circle. Tangency is preserved, which is how a Steiner chain is made eccentric.
+   */
+  invertCircle(c, r, o, k) {
+    const dx = c[0] - o[0];
+    const dy = c[1] - o[1];
+    const d = Math.hypot(dx, dy);
+    const s = (k * k) / (d * d - r * r);
+    return { c: [o[0] + dx * s, o[1] + dy * s], r: Math.abs(r * s) };
+  },
+  invertPoint(p, o, k) {
+    const dx = p[0] - o[0];
+    const dy = p[1] - o[1];
+    const s = (k * k) / (dx * dx + dy * dy);
+    return [o[0] + dx * s, o[1] + dy * s];
+  },
   tangents(p, c, r) {
     const dx = p[0] - c[0];
     const dy = p[1] - c[1];
@@ -146,6 +163,99 @@ class Plate {
     return this;
   }
 
+  /** A polyline; `closed` joins its ends. */
+  poly(points, o = {}) {
+    this.items.push({ kind: "poly", points, closed: false, ...o });
+    return this;
+  }
+
+  /** An ellipse with semi-axes a, b, rotated by `angle` radians. Foci: `focusOf`. */
+  ellipse(c, a, b, angle = 0, o = {}) {
+    const pts = [];
+    for (let i = 0; i < 256; i++) {
+      const t = (i / 256) * Math.PI * 2;
+      const x = a * Math.cos(t);
+      const y = b * Math.sin(t);
+      pts.push([
+        c[0] + x * Math.cos(angle) - y * Math.sin(angle),
+        c[1] + x * Math.sin(angle) + y * Math.cos(angle),
+      ]);
+    }
+    return this.poly(pts, { closed: true, ...o });
+  }
+
+  /** Radial ticks around a circle: `count` strokes of `length`, every `every`th one longer. */
+  ticks(c, r, { count = 120, length = 8, every = 0, from = 0, to = Math.PI * 2, ...o } = {}) {
+    for (let i = 0; i < count; i++) {
+      const t = from + ((to - from) * i) / count;
+      const l = every && i % every === 0 ? length * 2 : length;
+      const u = [Math.cos(t), Math.sin(t)];
+      this.line(
+        [c[0] + u[0] * r, c[1] + u[1] * r],
+        [c[0] + u[0] * (r + l), c[1] + u[1] * (r + l)],
+        o,
+      );
+    }
+    return this;
+  }
+
+  /** A construction cross, the drafting mark for a reference point. */
+  cross(p, size = 5, o = {}) {
+    return this.line([p[0] - size, p[1]], [p[0] + size, p[1]], o).line(
+      [p[0], p[1] - size],
+      [p[0], p[1] + size],
+      o,
+    );
+  }
+
+  /**
+   * A dimension line, as on a drawing: offset `off` px from the measured edge a→b, extension
+   * lines back to it, end ticks at 45°, and the value centred above.
+   */
+  dimension(a, b, text, { off = 24, ...o } = {}) {
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const L = Math.hypot(dx, dy) || 1;
+    const n = [-dy / L, dx / L];
+    const A = [a[0] + n[0] * off, a[1] + n[1] * off];
+    const B = [b[0] + n[0] * off, b[1] + n[1] * off];
+    const ext = Math.sign(off) * 6;
+    this.line(a, [A[0] + n[0] * ext, A[1] + n[1] * ext], o).line(
+      b,
+      [B[0] + n[0] * ext, B[1] + n[1] * ext],
+      o,
+    );
+    this.line(A, B, o);
+    const k = 5;
+    for (const q of [A, B]) {
+      this.line(
+        [q[0] - (dx / L + n[0]) * k, q[1] - (dy / L + n[1]) * k],
+        [q[0] + (dx / L + n[0]) * k, q[1] + (dy / L + n[1]) * k],
+        o,
+      );
+    }
+    const mid = [(A[0] + B[0]) / 2 + n[0] * 14, (A[1] + B[1]) / 2 + n[1] * 14];
+    return this.label(mid, text, { anchor: "middle", ...o });
+  }
+
+  /**
+   * Mirrors the plate across its diagonal: x↔y, width↔height. Build a construction once in
+   * landscape and transpose it for a portrait frame (a phone backdrop).
+   */
+  transpose() {
+    const t = (q) => [q[1], q[0]];
+    [this.width, this.height] = [this.height, this.width];
+    for (const it of this.items) {
+      if (it.a) [it.a, it.b] = [t(it.a), t(it.b)];
+      if (it.c) it.c = t(it.c);
+      if (it.p) it.p = t(it.p);
+      if (it.points) it.points = it.points.map(t);
+      if (it.kind === "frame") [it.x, it.y, it.w, it.h] = [it.y, it.x, it.h, it.w];
+      if (it.kind === "arc") [it.a0, it.a1] = [Math.PI / 2 - it.a0, Math.PI / 2 - it.a1];
+    }
+    return this;
+  }
+
   /** Every point of ink the plate will draw, for balance and coverage scores. */
   samples() {
     const pts = [];
@@ -164,6 +274,14 @@ class Plate {
         for (let i = 0; i <= n; i++) {
           const t = a0 + ((a1 - a0) * i) / n;
           push(it.c[0] + it.r * Math.cos(t), it.c[1] + it.r * Math.sin(t), 6);
+        }
+      } else if (it.kind === "poly") {
+        const pts = it.closed ? [...it.points, it.points[0]] : it.points;
+        for (let k = 1; k < pts.length; k++) {
+          const [a, b] = [pts[k - 1], pts[k]];
+          const n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 6);
+          for (let i = 0; i <= n; i++)
+            push(a[0] + ((b[0] - a[0]) * i) / n, a[1] + ((b[1] - a[1]) * i) / n, 6);
         }
       } else if (it.kind === "frame") {
         const { x, y, w, h } = it;
@@ -260,7 +378,7 @@ function renderPlate(pl) {
   const color = (it) => (it.accent ? st.accent : st.ink);
   const dash = (it) => (it.dashed ? ` stroke-dasharray="${st.dash.join(" ")}"` : "");
   const strokeAttrs = (it) =>
-    `fill="none" stroke="${color(it)}" stroke-width="${st.stroke}"${dash(it)}`;
+    `fill="none" stroke="${color(it)}" stroke-width="${st.stroke}" vector-effect="non-scaling-stroke"${dash(it)}`;
   const out = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`,
   ];
@@ -282,6 +400,10 @@ function renderPlate(pl) {
       out.push(
         `<path ${strokeAttrs(it)} d="M${f(p0[0])} ${f(p0[1])}A${f(it.r)} ${f(it.r)} 0 ${large} ${sweep} ${f(p1[0])} ${f(p1[1])}"/>`,
       );
+    } else if (it.kind === "poly") {
+      const d =
+        "M" + it.points.map((q) => `${f(q[0])} ${f(q[1])}`).join("L") + (it.closed ? "Z" : "");
+      out.push(`<path ${strokeAttrs(it)} d="${d}"/>`);
     } else if (it.kind === "frame") {
       out.push(
         `<rect ${strokeAttrs(it)} x="${f(it.x)}" y="${f(it.y)}" width="${f(it.w)}" height="${f(it.h)}"/>`,

@@ -60,8 +60,8 @@ export function Login() {
 
   return (
     <main className="relative isolate flex min-h-dvh items-center justify-center overflow-hidden bg-background px-4 py-12">
-      <Wormhole className="pointer-events-none absolute inset-0 -z-10 size-full text-foreground" />
-      {/* The form sits raw on the canvas at the wormhole's centre, where the rings have faded out. */}
+      <Wormhole className="pointer-events-none absolute inset-0 -z-10 size-full text-hairline-line" />
+      {/* The form sits raw on the canvas on the link between the backdrop's two points, where the drawing has faded out. */}
       <div className="flex w-full max-w-88 flex-col gap-6">
         <div className="flex flex-col gap-2">
           <Heading>Welcome to the Wurmhol</Heading>

@@ -34,17 +34,21 @@ numbers.
 
 Everything is in `scripts/` and needs only Node (PNG output uses the pre-installed Playwright).
 
-| File         | What it does                                                                                                      |
-| ------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `flat.mjs`   | `plate()`: `line`, `ray`, `circle`, `arc`, `frame`, `node`, `label`, `fan`; `meet` intersections; `best` search   |
-| `engine.mjs` | 3D mode: scene, camera, depth-buffer hidden lines (curves dash exactly where a surface hides them)                |
-| `prims.mjs`  | 3D geometry: `throat`, `sphere`, `cluster`, `sheet`, `torus`, `arc`, `ticks`, `field`; also `connect` (MST + kNN) |
-| `render.mjs` | Scene files to SVG, PNG at 2x, light and dark, `--ink currentColor`, a contact sheet                              |
-| `check.mjs`  | Fails a plate that is thick, off-palette, incomplete (under 85% coverage) or unbalanced (centre over 7% off)      |
+| File         | What it does                                                                                                                                                                                          |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `flat.mjs`   | `plate()`: `line`, `ray`, `circle`, `arc`, `ellipse`, `poly`, `frame`, `ticks`, `cross`, `dimension`, `node`, `label`, `fan`, `transpose`; `meet` (intersections, tangents, circle inversion); `best` |
+| `engine.mjs` | 3D mode: scene, camera, depth-buffer hidden lines (curves dash exactly where a surface hides them)                                                                                                    |
+| `prims.mjs`  | 3D geometry: `throat`, `sphere`, `cluster`, `sheet`, `torus`, `arc`, `ticks`, `field`; also `connect` (MST + kNN)                                                                                     |
+| `render.mjs` | Scene files to SVG, PNG at 2x, light and dark, `--ink currentColor`, a contact sheet                                                                                                                  |
+| `check.mjs`  | Fails a plate that is thick, off-palette, incomplete (under 85% coverage) or unbalanced (centre over 7% off)                                                                                          |
 
 `best(build, { seed, tries })` is the generative step. It builds `tries` candidates from seeded
 randomness and keeps the most balanced one that fills the frame. Put the variation (offsets,
 which step of a scale, which crossings get nodes) in `build`, and let the search choose.
+
+`render.mjs` flags worth knowing: `--seeds n` renders seeds 1..n of each scene side by side, so
+you pick a variant instead of guessing. `--tsx Name` writes a React component of the plate.
+`--ink currentColor --accent "var(--primary)" --paper none` makes it follow the app's theme.
 
 ## Workflow
 
@@ -97,9 +101,17 @@ which step of a scale, which crossings get nodes) in `build`, and let the search
    node .claude/skills/network-create/scripts/check.mjs /tmp/net/*.svg
    ```
 
-5. **Ship.** For UI, render with `--ink currentColor` and use the SVG as markup so it follows the
-   theme through `text-*` classes (`--tone quiet` for backdrops behind forms). Commit the scene
-   file beside the SVG so it can be regenerated.
+5. **Ship.** Into the app as a generated component, never hand-edited:
+
+   ```bash
+   node .claude/skills/network-create/scripts/render.mjs .claude/skills/network-create/scenes/flat/backdrop.mjs --size 1600x1000 --ink currentColor --accent "var(--primary)" --paper none --tsx WormholeLandscape --out /tmp/ship
+   ```
+
+   Copy `/tmp/ship/backdrop.tsx` into place. The caller's text class sets the ink
+   (`text-hairline-line` for a quiet backdrop). The login backdrop
+   (`apps/web/src/components/auth/wormhole*.tsx`) ships this way, with a landscape cut and a
+   portrait cut (`--size 1000x1600`; the scene transposes itself) switched by the `landscape:`
+   and `portrait:` variants. Check it on the real stack in both themes and at phone width.
 
 ## Constructions that work
 
@@ -117,6 +129,17 @@ which step of a scale, which crossings get nodes) in `build`, and let the search
   crosses on the grid.
 - **System loop** (`orbits`): places as circles, the request as the accent arc with arrowheads,
   steps as labelled nodes.
+
+- **Steiner chain** (`steiner`): a ring of mutually tangent circles between two others, built
+  concentric, then inverted through a point in the hole so it crowds to one side. Inversion
+  keeps every tangency exact.
+- **Confocal conics** (`confocal`): ellipses and hyperbolas sharing two foci (the two places),
+  crossing at right angles; nodes on elliptic-coordinate crossings.
+- **Portal elevation** (`portal`): a round arch on φ proportions, with regulating circle,
+  diagonals, voussoir joints and dimension lines in modules. The keystone is the pivot.
+- **Polar instrument** (`polar`): rings on a √2 scale, spokes every 15°, a hatched bezel, and
+  routes that hop between grid crossings into the centre.
+- **Backdrop** (`backdrop`): the Apollonian construction set wide for the login.
 
 When lines converge on a point, stop them short of it (as `corridor` does). A fan of 20 lines
 into one pixel reads as a smudge.
