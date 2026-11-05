@@ -4,7 +4,6 @@
 import {
   ArrowLeft,
   ArrowUpRight,
-  Ban,
   Check,
   ChevronDown,
   ChevronRight,
@@ -47,7 +46,6 @@ function thin(Icon: LucideIcon, name: string) {
 
 export const IconArrowLeft = thin(ArrowLeft, "IconArrowLeft");
 export const IconArrowUpRight = thin(ArrowUpRight, "IconArrowUpRight");
-export const IconBan = thin(Ban, "IconBan");
 export const IconCheck = thin(Check, "IconCheck");
 export const IconChevronDown = thin(ChevronDown, "IconChevronDown");
 export const IconChevronRight = thin(ChevronRight, "IconChevronRight");

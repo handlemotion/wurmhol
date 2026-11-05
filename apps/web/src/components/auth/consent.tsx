@@ -4,14 +4,7 @@ import { ConsentPlate } from "@/components/auth/consent-plate";
 import { Button } from "@/components/ui/button";
 import { Heading } from "@/components/ui/heading";
 import { SkeletonProvider } from "@/components/ui/skeleton-provider";
-import {
-  IconBan,
-  IconCircleAlert,
-  IconCircleStop,
-  IconCornerDownLeft,
-  IconEye,
-  IconUser,
-} from "@/components/icons/lucide";
+import { IconCircleStop, IconCornerDownLeft, IconEye, IconUser } from "@/components/icons/lucide";
 import { Text, TextLink } from "@/components/ui/text";
 import { api, ApiError, type Me } from "@/lib/api";
 
@@ -40,33 +33,41 @@ function toLogin() {
 type Glyph = React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
 
 /**
- * One line with a muted glyph before it. The glyph sits in a 16px box on the text's 16px line,
+ * One line with a muted glyph before it. The glyph sits in a 20px box on the text's 20px line,
  * so its centre and the line's centre share an axis.
  */
 function Row({ icon: Icon, children }: { icon: Glyph; children: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-2">
-      <span className="flex h-4 shrink-0 items-center">
+    <div className="flex items-start gap-2.5">
+      <span className="flex h-5 shrink-0 items-center">
         <Icon aria-hidden className="size-icon text-muted-foreground" />
       </span>
-      <Text className="leading-4">{children}</Text>
+      <Text className="leading-5">{children}</Text>
     </div>
   );
 }
 
 /**
- * A permission: its glyph on the title's line, the title in the foreground and one muted line
- * under it (16px lines, 2px apart), as the rows on Google's and GitHub's consent screens.
+ * A permission: its glyph on the title's line, the title in the foreground and, when there is
+ * one, a muted line under it (20px lines, 2px apart), as on Google's and GitHub's consent screens.
  */
-function Permission({ icon: Icon, title, detail }: { icon: Glyph; title: string; detail: string }) {
+function Permission({
+  icon: Icon,
+  title,
+  detail,
+}: {
+  icon: Glyph;
+  title: string;
+  detail?: string;
+}) {
   return (
-    <li className="flex items-start gap-2">
-      <span className="flex h-4 shrink-0 items-center">
+    <li className="flex items-start gap-2.5">
+      <span className="flex h-5 shrink-0 items-center">
         <Icon aria-hidden className="size-icon text-muted-foreground" />
       </span>
       <div className="flex flex-col gap-0.5">
-        <Text className="leading-4 text-foreground">{title}</Text>
-        <Text className="leading-4">{detail}</Text>
+        <Text className="leading-5 text-foreground">{title}</Text>
+        {detail && <Text className="leading-5">{detail}</Text>}
       </div>
     </li>
   );
@@ -130,35 +131,21 @@ function Review() {
         const name = client.client_name ?? host ?? "This app";
         const reach = orgList(orgs);
         return (
-          <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-8">
             <div className="flex flex-col gap-2">
               <Heading size="sm">{name} wants to reach your pipes</Heading>
               <Row icon={IconUser}>
                 {email} · <TextLink onPress={toLogin}>Not you?</TextLink>
               </Row>
             </div>
-            {/* Ink, measured: the label sits 16px above its rows and 27px under the account
-                line; rows are 18 to 20px apart (descenders differ), title to detail 6px. */}
-            <div className="flex flex-col gap-2.5">
-              <Text className="leading-4">It will be able to</Text>
-              <ul className="flex flex-col gap-4">
-                {scopes.has("pipes:read") && (
-                  <Permission icon={IconEye} title="See your open pipes" detail={`In ${reach}`} />
-                )}
-                {scopes.has("pipes:write") && (
-                  <Permission
-                    icon={IconCircleStop}
-                    title="Stop any of them"
-                    detail="As Terminate on the wall does"
-                  />
-                )}
-                <Permission
-                  icon={IconBan}
-                  title="Never open pipes"
-                  detail="Or see what passes through them"
-                />
-              </ul>
-            </div>
+            <ul className="flex flex-col gap-4">
+              {scopes.has("pipes:read") && (
+                <Permission icon={IconEye} title="See your open pipes" detail={`In ${reach}`} />
+              )}
+              {scopes.has("pipes:write") && (
+                <Permission icon={IconCircleStop} title="Stop any of them" />
+              )}
+            </ul>
             <div className="flex flex-col gap-2">
               <Button
                 size="lg"
@@ -183,16 +170,7 @@ function Review() {
                 {decide.error.message}
               </Text>
             )}
-            {(redirectHost || host) && (
-              <div className="flex flex-col gap-2">
-                {redirectHost && (
-                  <Row icon={IconCornerDownLeft}>Sends you back to {redirectHost}</Row>
-                )}
-                {host && (
-                  <Row icon={IconCircleAlert}>Says it is from {host}, not verified by Wurmhol</Row>
-                )}
-              </div>
-            )}
+            {redirectHost && <Row icon={IconCornerDownLeft}>Sends you back to {redirectHost}</Row>}
           </div>
         );
       }}
