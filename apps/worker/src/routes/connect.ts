@@ -7,7 +7,8 @@
 // (ADR 0008, per-pipe access); without it, the whole org may open it.
 //
 // A `name` query parameter opens a named pipe (ADR 0009) at `<name>.<SHARE_DOMAIN>`: the same
-// host every time, held by the first org to use the name, one open pipe per name.
+// host every time, held by the first org to use the name, one open pipe per name. The OAuth
+// relay's label (ADR 0010) is no pipe's name.
 //
 // Refusals answer with plain HTTP before the upgrade, as `{ error, fix }`: the CLI prints `fix`,
 // one line that says what to do.
@@ -22,7 +23,7 @@ import {
 import { Hono } from "hono";
 import { bearerToken, refuse } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
-import { shareOrigin, SHARE_ID } from "../env.ts";
+import { reservedPipeName, shareOrigin, SHARE_ID } from "../env.ts";
 import { INTERNAL_HEADERS, type ShareInit } from "../share-do.ts";
 
 /** The header that names a new share's viewers, comma-separated emails. */
@@ -85,6 +86,9 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
   const name = rawName === undefined ? null : pipeName(rawName);
   if (rawName !== undefined && !name) {
     return refuse(400, "bad name", `Pick a pipe name of ${PIPE_NAME_RULE}.`);
+  }
+  if (name && name === reservedPipeName(config)) {
+    return refuse(409, "name reserved", `The pipe name ${name} is reserved. Pick another --name.`);
   }
   let viewers: string[] | null = null;
   const named = (c.req.header(VIEWERS_HEADER) ?? "")

@@ -60,6 +60,9 @@ D1 migrations need no step: the deploy command applies new ones on every push. S
   - DNS: a proxied wildcard record `*` (an `AAAA` to `100::` is enough; the Worker route
     answers). The apex needs no record.
   - Route: `*.example-pipes.dev/*` → the Worker.
+- Optional, the OAuth callback relay (ADR 0010): `oauth.example-pipes.dev` (`OAUTH_RELAY_HOST`).
+  Under the pipe domain, the wildcard record, route and certificate above already cover it, and
+  no pipe may take `oauth` as its name. Pick a label no org has used as a pipe name yet.
 - Alternative, one domain: pipes at `<id>.pipe.example.com`. That is a two-level wildcard, which
   the free certificate does not cover: in Cloudflare it needs **Advanced Certificate Manager**
   (paid) for `*.pipe.example.com`, a proxied `*.pipe` record and the route `*.pipe.example.com/*`.
@@ -89,6 +92,7 @@ dashboard, or `WORKER_VAR_<NAME>` build variables for the deploy script.
 | `CONNECT_HOST`                         | `api.example.com` (optional)                  |
 | `APP_ALIASES`                          | `app.example.com` (optional)                  |
 | `SHARE_DOMAIN`                         | `example-pipes.dev`                           |
+| `OAUTH_RELAY_HOST`                     | `oauth.example-pipes.dev` (optional)          |
 | `AUTH_TRUSTED_ORIGINS`                 | empty (or extra origins allowed to call auth) |
 | `ENVIRONMENT`                          | `production`                                  |
 | `GOOGLE_CLIENT_ID`, `GITHUB_CLIENT_ID` | optional OAuth clients                        |
@@ -147,7 +151,7 @@ asks for no lifetime lasts `DEFAULT_SHARE_SECONDS` (4 h), capped at `LIMIT_SHARE
 
 A daily cron trigger (`triggers.crons` in `wrangler.jsonc`, 03:17 UTC) deletes pipe history
 (`shares` rows) older than `RETENTION_DAYS` (90), and expired sessions, sign-in links, invite
-links and device logins. `wrangler deploy` registers it; no other setup. `wrangler dev` never
+links, device logins and OAuth relay states. `wrangler deploy` registers it; no other setup. `wrangler dev` never
 fires it on its own: run it with `curl "http://localhost:8787/cdn-cgi/local/scheduled"` (add
 `?time=<ms since epoch>` to run it as of another time).
 

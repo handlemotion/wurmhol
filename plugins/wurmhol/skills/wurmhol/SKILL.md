@@ -15,6 +15,8 @@ signed-in members of the token's org can open.
    returns; a server that restarts on the same port stays shared. When the URL must stay the
    same (an OAuth redirect URI, a link the user keeps), add `--name <name>`: the pipe opens at
    `https://<name>.wurmhol.dev` every time, and `npx wurmhol stop <name>` ends it.
+   If the app's OAuth redirect URI is on `https://oauth.wurmhol.dev`, any number of pipes of it can
+   sign in at once: the relay sends each callback back to the pipe that started it.
 3. **Send the user the URL** in your reply, as a plain link. They sign in to open it.
 4. **Stop it when the user is done looking:** `npx wurmhol stop <port>`. `npx wurmhol ls` lists
    what is open; `npx wurmhol stop --all` ends every pipe.

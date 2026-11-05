@@ -34,6 +34,8 @@
     "APP_ALIASES": "",
     // Shares live at `<id>.<SHARE_DOMAIN>`, same scheme and port as BETTER_AUTH_URL.
     "SHARE_DOMAIN": "pipe.localhost",
+    // The OAuth callback relay's host (ADR 0010), e.g. `oauth.wurmhol.dev`. Empty: no relay.
+    "OAUTH_RELAY_HOST": "",
     "AUTH_TRUSTED_ORIGINS": "http://localhost:5173",
     "AUTH_PASSKEY_RP_ID": "",
     "APP_NAME": "Wurmhol",
