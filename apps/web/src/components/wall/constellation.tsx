@@ -1,3 +1,4 @@
+import { cn } from "cn";
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { ANCHOR, grow, hash, layout, type Point, type Size } from "./constellation-layout";
 
@@ -36,6 +37,8 @@ export function Constellation(props: {
   nodes: Node[];
   /** The node shown as an open card, if any. Its card carries `data-open`. */
   open: string | null;
+  /** A drawing behind the network, its (0, 0) held on the anchor's place (without its drift). */
+  backdrop?: React.ReactNode;
 }) {
   const { nodes, open } = props;
   const canvas = useRef<HTMLDivElement>(null);
@@ -43,6 +46,7 @@ export function Constellation(props: {
   /** Each node's size as a pill (or the Create pipe button): what the layout places. */
   const closed = useRef(new Map<string, Size>());
   const lines = useRef(new Map<string, SVGLineElement>());
+  const backdrop = useRef<HTMLDivElement>(null);
   const targets = useRef(new Map<string, Point>());
   const sim = useRef(new Map<string, Point>());
   const origin = useRef({ x: 0, y: 0 });
@@ -169,6 +173,15 @@ export function Constellation(props: {
         el.style.transform = `translate3d(${left}px, ${top}px, 0)`;
         el.style.visibility = "visible";
       }
+      // The backdrop follows the anchor's place as it eases and as the camera pans, but not its
+      // drift: a whole drawing swaying with the button would read as the page moving.
+      const seat = sim.current.get(ANCHOR);
+      if (backdrop.current && seat) {
+        const x = snap(ox + seat.x);
+        const y = snap(oy + seat.y);
+        backdrop.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+        backdrop.current.style.visibility = "visible";
+      }
       const hub = drawn.get(ANCHOR);
       for (const [id, line] of lines.current) {
         const end = drawn.get(id);
@@ -198,6 +211,24 @@ export function Constellation(props: {
 
   return (
     <div ref={canvas} className="relative w-full">
+      {props.backdrop && (
+        <div
+          ref={backdrop}
+          aria-hidden
+          className="pointer-events-none invisible absolute top-0 left-0 size-0 will-change-transform"
+        >
+          {/* Opening Create pipe leans into the drawing: it grows a little about the anchor,
+              while its lines stay 1px (non-scaling strokes). */}
+          <div
+            className={cn(
+              "transition-transform duration-700 ease-out motion-reduce:transition-none",
+              open === ANCHOR && "scale-105",
+            )}
+          >
+            {props.backdrop}
+          </div>
+        </div>
+      )}
       <svg aria-hidden className="absolute inset-0 size-full overflow-visible text-hairline-line">
         {nodes.map((node) => (
           <line
