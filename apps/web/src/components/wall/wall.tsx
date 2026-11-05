@@ -7,6 +7,7 @@ import {
   IconCreditCard,
   IconEllipsis,
   IconExternalLink,
+  IconPlus,
   IconKey,
   IconLogOut,
   IconUsers,
@@ -30,6 +31,7 @@ import type { Me, Share } from "@/lib/api";
 import { ago } from "@/lib/time";
 import { MembersDialog } from "./members-dialog";
 import { Constellation } from "./constellation";
+import { ANCHOR } from "./constellation-layout";
 import { TokensDialog } from "./tokens-dialog";
 
 const SAMPLE: Share[] = [1, 2, 3].map((n) => ({
@@ -168,34 +170,37 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
 }
 
 const COMMAND = "npx wurmhol <port>";
+const PROMPT =
+  "Start the dev server, then run `npx wurmhol <port>` with its port and send me the URL it prints.";
 
 /**
- * Every pipe as a pill on a spoke from the anchor, the command that opens another. Pressing a
- * pill opens it into a card with its details; the other pills make room around it.
+ * Every pipe as a pill on a spoke from the anchor, the Create pipe button. Pressing a pill opens
+ * it into a card with its details; pressing Create pipe opens the ways to start one. One is open
+ * at a time, and the other pills make room around it.
  */
 function Network({ shares }: { shares: Share[] }) {
   const [open, setOpen] = useState<string | null>(null);
-  const current = shares.some((share) => share.id === open) ? open : null;
+  const current = open === ANCHOR || shares.some((share) => share.id === open) ? open : null;
 
   // Closing returns focus to the pill the card came from.
   const close = () => {
     const id = current;
     setOpen(null);
     if (id) {
-      requestAnimationFrame(() =>
-        document.querySelector<HTMLElement>(`[data-pipe="${CSS.escape(id)}"]`)?.focus(),
-      );
+      const selector = id === ANCHOR ? "[data-create]" : `[data-pipe="${CSS.escape(id)}"]`;
+      requestAnimationFrame(() => document.querySelector<HTMLElement>(selector)?.focus());
     }
   };
 
-  // Escape, or a press anywhere outside the card, closes it. A press on another pill opens that
-  // one instead, and presses inside a dialog or menu are theirs.
+  // Escape, or a press anywhere outside the open card, closes it. A press on another pill opens
+  // that one instead, and presses inside a dialog, menu or tooltip are theirs.
   useEffect(() => {
     if (!current) return;
     const onKey = (event: KeyboardEvent) => event.key === "Escape" && close();
     const onPress = (event: PointerEvent) => {
       const target = event.target as Element;
-      if (target.closest("[data-open-pipe], [data-pipe], [role=dialog], [role=menu]")) return;
+      const keep = "[data-open], [data-pipe], [data-create], [role=dialog], [role=menu]";
+      if (target.closest(keep)) return;
       close();
     };
     document.addEventListener("keydown", onKey);
@@ -210,14 +215,26 @@ function Network({ shares }: { shares: Share[] }) {
     <Constellation
       open={current}
       anchor={
-        <div className="relative w-60">
-          {shares.length === 0 && (
-            // Above the field, out of its box, so the field stays the network's centre.
-            <Text className="absolute inset-x-0 bottom-full mb-3 text-center">
-              No open pipes. From a dev server's machine, run:
+        <div className="relative">
+          {shares.length === 0 && current !== ANCHOR && (
+            // Above the button, out of its box, so the button stays the network's centre.
+            <Text className="absolute start-1/2 bottom-full mb-3 -translate-x-1/2 text-nowrap">
+              No open pipes yet.
             </Text>
           )}
-          <CopyField label="New pipe" value={COMMAND} className="border border-border" />
+          {current === ANCHOR ? (
+            <CreateCard />
+          ) : (
+            <Button
+              intent="secondary"
+              data-create
+              aria-expanded={false}
+              onPress={() => setOpen(ANCHOR)}
+            >
+              <IconPlus />
+              Create pipe
+            </Button>
+          )}
         </div>
       }
       nodes={shares.map((share) => ({
@@ -230,6 +247,31 @@ function Network({ shares }: { shares: Share[] }) {
           ),
       }))}
     />
+  );
+}
+
+/**
+ * The ways to start a pipe, each copied in one click. A fixed square, so options can be added
+ * without the card changing shape.
+ */
+function CreateCard() {
+  const card = useRef<HTMLElement>(null);
+  useEffect(() => card.current?.focus({ preventScroll: true }), []);
+  return (
+    <section
+      ref={card}
+      tabIndex={-1}
+      data-open
+      aria-label="Create pipe"
+      className="flex size-72 animate-in flex-col gap-4 border border-primary bg-background p-4 outline-0 duration-200 ease-out fade-in zoom-in-95 motion-reduce:animate-none"
+    >
+      <span className="text-sm text-foreground">Create pipe</span>
+      {/* The labels share one width, so the fields' dividers line up. */}
+      <div className="flex flex-col gap-2 [--copy-label-width:--spacing(20)]">
+        <CopyField label="Prompt" value={PROMPT} />
+        <CopyField label="Command" value={COMMAND} />
+      </div>
+    </section>
   );
 }
 
@@ -306,7 +348,7 @@ function PipeCard({ share }: { share: Share }) {
     <section
       ref={card}
       tabIndex={-1}
-      data-open-pipe
+      data-open
       aria-label={name(share)}
       className="flex w-[min(22rem,calc(100vw-2rem))] animate-in outline-0 flex-col gap-4 border border-primary bg-background p-4 duration-200 ease-out fade-in zoom-in-95 motion-reduce:animate-none"
     >

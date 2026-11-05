@@ -12,8 +12,9 @@ command), and it gives every card the same weight whether you're looking at it o
 
 ## Decision
 
-- **The wall is a network.** The `npx wurmhol <port>` command, in a `CopyField`, is the anchor at
-  the centre. Each open pipe is a sharp, grey pill (its mark, its title or pipe id, its port) on
+- **The wall is a network.** A **Create pipe** button is the anchor at the centre. Pressed, it
+  opens into a fixed 288px square card of ways to start one, each a `CopyField`: a prompt to
+  paste to an agent, and the `npx wurmhol <port>` command. The square leaves room for more. Each open pipe is a sharp, grey pill (its mark, its title or pipe id, its port) on
   a hairline spoke from the anchor. Pills drift by a few pixels so the network reads as alive;
   under reduced motion they hold still. A new pipe comes out of the anchor.
 - **Pressing a pill opens it in place.** The pill becomes a card with a `primary` border in the

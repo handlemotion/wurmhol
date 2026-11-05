@@ -17,6 +17,7 @@ import {
   KeyRound,
   LogOut,
   Mail,
+  Plus,
   TriangleAlert,
   Users,
   X,
@@ -45,6 +46,7 @@ export const IconInfo = thin(Info, "IconInfo");
 export const IconKey = thin(KeyRound, "IconKey");
 export const IconLogOut = thin(LogOut, "IconLogOut");
 export const IconMail = thin(Mail, "IconMail");
+export const IconPlus = thin(Plus, "IconPlus");
 export const IconTriangleAlert = thin(TriangleAlert, "IconTriangleAlert");
 export const IconUsers = thin(Users, "IconUsers");
 export const IconX = thin(X, "IconX");
