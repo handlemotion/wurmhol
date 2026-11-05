@@ -376,12 +376,16 @@ export async function connectProxy(allowPorts: number[]) {
       client.end("HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n");
       return;
     }
-    const upstream = netConnect(port, host === "localhost" ? "127.0.0.1" : host!, () => {
-      client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-      upstream.write(head);
-      upstream.pipe(client);
-      client.pipe(upstream);
-    });
+    const upstream = netConnect(
+      port,
+      host === "localhost" || host!.endsWith(".localhost") ? "127.0.0.1" : host!,
+      () => {
+        client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+        upstream.write(head);
+        upstream.pipe(client);
+        client.pipe(upstream);
+      },
+    );
     tunnels.add(client);
     tunnels.add(upstream);
     const drop = () => {

@@ -13,9 +13,9 @@ export class FixError extends Error {
   }
 }
 
+/** What a sandbox must allowlist: only the host the CLI dials. Pipes are opened elsewhere. */
 function hosts(server: string) {
-  const host = new URL(server).hostname;
-  return `${host} and *.pipe.${host}`;
+  return new URL(server).hostname;
 }
 
 /** A refused handshake: the relay's own `{ error, fix }`, or a proxy saying no. */

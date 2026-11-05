@@ -54,6 +54,30 @@ const configSchema = z
     SHARE_DOMAIN: z
       .string()
       .regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, "use a lowercase domain like pipe.example.com"),
+    /**
+     * The host the CLI dials (ADR 0006), e.g. `api.wurmhol.com`: it answers `/connect` and
+     * `/health` only. Empty: the CLI dials the app's own host (BETTER_AUTH_URL).
+     */
+    CONNECT_HOST: z
+      .string()
+      .optional()
+      .transform((value) => value?.toLowerCase() || undefined)
+      .pipe(
+        z
+          .string()
+          .regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, "use a hostname like api.example.com")
+          .optional(),
+      ),
+    /** Hosts that permanently redirect to the app, e.g. `app.wurmhol.com`. Comma-separated. */
+    APP_ALIASES: z
+      .string()
+      .optional()
+      .transform((value) =>
+        (value ?? "")
+          .split(",")
+          .map((host) => host.trim().toLowerCase())
+          .filter(Boolean),
+      ),
     /** Fair-use limits per org (spec section 4), enforced by the Durable Objects. */
     LIMIT_ACTIVE_SHARES: positive(5),
     /** Bytes relayed per org per calendar month (UTC), both directions. 100 GB by default. */
@@ -134,3 +158,19 @@ export function shareIdFromHost(config: Config, host: string | null): string | n
 
 /** A share id: 10 lowercase letters and digits. */
 export const SHARE_ID = /^[a-z0-9]{10}$/;
+
+/** What a request's host is for (ADR 0006). */
+export type HostRole =
+  | { role: "share"; shareId: string }
+  | { role: "connect" }
+  | { role: "alias" }
+  | { role: "app" };
+
+export function hostRole(config: Config, host: string | null): HostRole {
+  const shareId = shareIdFromHost(config, host);
+  if (shareId !== null) return { role: "share", shareId };
+  const hostname = (host ?? "").toLowerCase().replace(/:\d+$/, "");
+  if (config.CONNECT_HOST && hostname === config.CONNECT_HOST) return { role: "connect" };
+  if (config.APP_ALIASES.includes(hostname)) return { role: "alias" };
+  return { role: "app" };
+}
