@@ -14,6 +14,19 @@ const REASONS: Record<string, string> = {
   "not-member": "That pipe belongs to an org you're not in. Sign in with an account that is.",
 };
 
+/**
+ * A brand mark drawn at 14px inside the 17px slot a `lg` button gives its icon, so the label
+ * starts where it does after the passkey glyph. Full-colour marks carry more ink than a stroked
+ * Lucide glyph, so the smaller size reads as the same weight.
+ */
+function ProviderMark({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="flex size-4.25 shrink-0 items-center justify-center *:size-3.5">
+      {children}
+    </span>
+  );
+}
+
 /** The login page: passkeys, Google and GitHub (spec section 3). */
 export function Login() {
   const params = new URLSearchParams(location.search);
@@ -44,12 +57,12 @@ export function Login() {
   const failure = passkey.error ?? social.error ?? magicLink.error;
 
   return (
-    <main className="min-h-dvh bg-background px-4 py-8 sm:px-12 sm:py-12">
+    <main className="min-h-dvh bg-background px-4 py-5 sm:p-9">
       {/* The form sits raw on the canvas, pinned to the top left; the rest of the screen stays empty. */}
       <div className="flex w-full max-w-88 flex-col gap-6">
         <div className="flex flex-col gap-2">
-          <Heading>Hol&rsquo; up, wanderer.</Heading>
-          <Text>{reason ?? "The Wurm holt what your agents dig up. Who asks?"}</Text>
+          <Heading>Welcome to the Wurmhol</Heading>
+          <Text>{reason ?? "Sign in to see what your agents are building."}</Text>
         </div>
         <div className="flex flex-col gap-2">
           <Button
@@ -70,7 +83,9 @@ export function Login() {
               isPending={social.isPending && social.variables === "google"}
               onPress={() => social.mutate("google")}
             >
-              <Google aria-hidden />
+              <ProviderMark>
+                <Google aria-hidden />
+              </ProviderMark>
               Using Google
             </Button>
           )}
@@ -82,8 +97,10 @@ export function Login() {
               isPending={social.isPending && social.variables === "github"}
               onPress={() => social.mutate("github")}
             >
-              <GitHubLight aria-hidden className="dark:hidden" />
-              <GitHubDark aria-hidden className="hidden dark:block" />
+              <ProviderMark>
+                <GitHubLight aria-hidden className="dark:hidden" />
+                <GitHubDark aria-hidden className="hidden dark:block" />
+              </ProviderMark>
               Using GitHub
             </Button>
           )}
