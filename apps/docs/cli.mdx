@@ -18,11 +18,11 @@ description: "Every command, flag and variable of `npx wurmhol`."
 
 `npx wurmhol host` keeps this computer connected to your wall. In Create pipe, **Create from this
 computer** gives you the command to run, with a one-time setup code that logs this computer in as
-you, then lists the web servers running on it, by port and page title; pick one and its pipe
-opens. Run without `--code` and with no token yet, it logs in first: approve it at the link it
-prints. Only
-you see your computers, and only ports they report can be opened. Pipes it opens keep running
-when you stop it; end them with `wurmhol stop` or Terminate on the wall.
+you, then lists the web servers running on it, by port and page title; pick one and its pipe opens.
+Debuggers such as Node's inspector are left out; set `WURMHOL_HOST_IGNORE` to leave out other ports.
+Run without `--code` and with no token yet, it logs in first: approve it at the link it prints. Only
+you see your computers, and only ports they report can be opened. Pipes it opens keep running when
+you stop it; end them with `wurmhol stop` or Terminate on the wall.
 
 ## Flags
 
@@ -41,6 +41,7 @@ when you stop it; end them with `wurmhol stop` or Terminate on the wall.
 | --------------------- | -------------------------------------------------------- |
 | `WURMHOL_TOKEN`       | Your org's token. Wins over one saved by `wurmhol login` |
 | `WURMHOL_URL`         | Your own install, if you [self-host](/self-hosting)      |
+| `WURMHOL_HOST_IGNORE` | Ports `wurmhol host` never lists, like `9229,5555`       |
 | `HTTPS_PROXY`         | The proxy to go through                                  |
 | `NODE_EXTRA_CA_CERTS` | Your proxy's certificate                                 |
 
