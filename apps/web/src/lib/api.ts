@@ -42,6 +42,7 @@ export interface Share {
   title: string | null;
   favicon: boolean;
   lastRequestAt: number | null;
+  views: { name: string; lastSeenAt: number }[];
   state: "live" | "away";
 }
 

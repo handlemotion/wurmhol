@@ -36,6 +36,7 @@ const SAMPLE: Share[] = [1, 2, 3].map((n) => ({
   title: "A dev server",
   favicon: false,
   lastRequestAt: null,
+  views: [],
   state: "live",
 }));
 
@@ -135,6 +136,9 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
   );
 }
 
+/** Viewers named on a card; the rest are counted. */
+const VIEWS_SHOWN = 2;
+
 function ShareCard({ share }: { share: Share }) {
   const now = useNow();
   const terminate = useTerminate();
@@ -145,6 +149,12 @@ function ShareCard({ share }: { share: Share }) {
     ago(share.startedAt, now),
     share.lastRequestAt ? `last request ${ago(share.lastRequestAt, now)}` : "no requests yet",
     share.state === "away" ? "reconnecting" : null,
+  ].filter(Boolean);
+  // Who opened it, most recent first: "Ana, 2 min ago · Bo, 1 h ago · +3".
+  const shown = share.views.slice(0, VIEWS_SHOWN);
+  const views = [
+    ...shown.map((view) => `${view.name}, ${ago(view.lastSeenAt, now)}`),
+    share.views.length > shown.length ? `+${share.views.length - shown.length}` : null,
   ].filter(Boolean);
 
   return (
@@ -172,9 +182,14 @@ function ShareCard({ share }: { share: Share }) {
           {share.title ?? host}
         </Link>
       </div>
-      <Text className="line-clamp-2 text-xs text-muted-foreground tabular-nums">
-        {details.join(" · ")}
-      </Text>
+      <div className="flex flex-col gap-1">
+        {views.length > 0 && (
+          <Text className="truncate text-xs text-foreground tabular-nums">{views.join(" · ")}</Text>
+        )}
+        <Text className="line-clamp-2 text-xs text-muted-foreground tabular-nums">
+          {details.join(" · ")}
+        </Text>
+      </div>
       <div className="absolute end-4 top-4">
         {/* xs, not sm: Intent UI's sm grows to a 36px touch target, larger than md. */}
         <Button

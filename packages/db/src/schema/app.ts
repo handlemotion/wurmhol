@@ -1,7 +1,14 @@
 // Wurmhol's own tables. Every one belongs to an org (`org_id`). Better Auth's tables are in
 // `auth.ts`, generated; never edit that file by hand.
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 import { organizations, users } from "./auth.ts";
 
 const now = sql`(cast(unixepoch('subsecond') * 1000 as integer))`;
@@ -82,5 +89,31 @@ export const inviteLinks = sqliteTable(
   (table) => [
     uniqueIndex("invite_links_hash_idx").on(table.hash),
     index("invite_links_org_idx").on(table.orgId),
+  ],
+);
+
+/**
+ * The view log (ADR 0008): per share and viewer, when they first and last opened it and how
+ * many requests they made. Events only: no paths, IPs or user agents. Goes with its share.
+ */
+export const shareViews = sqliteTable(
+  "share_views",
+  {
+    shareId: text("share_id")
+      .notNull()
+      .references(() => shares.id, { onDelete: "cascade" }),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    firstSeenAt: integer("first_seen_at", { mode: "timestamp_ms" }).notNull(),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
+    requests: integer("requests").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.shareId, table.userId] }),
+    index("share_views_org_idx").on(table.orgId),
   ],
 );

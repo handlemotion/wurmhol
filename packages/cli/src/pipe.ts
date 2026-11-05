@@ -40,6 +40,11 @@ export interface OpenPipeOptions {
   server?: string;
   /** Where the dev server listens. Default `127.0.0.1`; it still sees `Host: localhost:<port>`. */
   host?: string;
+  /**
+   * Emails of the org members who may open the pipe. They must be members of the token's org, or
+   * `openPipe` rejects. Default: every member of the org.
+   */
+  viewers?: string[];
   /** Aborting rejects a pending `openPipe`, or closes an open pipe. */
   signal?: AbortSignal;
 }
@@ -125,6 +130,7 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
     token,
     port: options.port,
     host: options.host ?? "127.0.0.1",
+    viewers: options.viewers ?? [],
     version: pkg.version,
     log,
     onRequest: (event) => pipe?.emit("request", event),
