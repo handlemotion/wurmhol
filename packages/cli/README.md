@@ -27,6 +27,9 @@ that only reaches listed hosts, allow `api.wurmhol.com`: it is the only host the
 A pipe ends after 4 hours. `--ttl` asks for another lifetime, like `90m` or `8h`, up to 12 hours
 on wurmhol.com.
 
+By default every member of the token's org can open a pipe. `--only ana@x.com,bo@y.com` narrows it
+to those members.
+
 `WURMHOL_URL` points at a self-hosted install. Node 20+. MIT.
 
 ## From your own process
@@ -45,9 +48,10 @@ await pipe.close();
 
 Options: `server` (a self-hosted install), `host` (where the dev server listens, default
 `127.0.0.1`), `ttl` (seconds, or a duration like `"8h"`; `pipe.endsAt` says when it ends),
-`signal` (an `AbortSignal` that closes the pipe) and `log` (`(event, fields) => {}`, the
-connection's connects, drops and reconnects; never request contents). `openPipe` rejects with a
-`FixError` whose message is the one-line fix the CLI prints. ESM only.
+`viewers` (emails of the org members who may open it, like `--only`), `signal` (an `AbortSignal`
+that closes the pipe) and `log` (`(event, fields) => {}`, the connection's connects, drops and
+reconnects; never request contents). `openPipe` rejects with a `FixError` whose message is the
+one-line fix the CLI prints. ESM only.
 
 ## Teach your agent
 

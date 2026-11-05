@@ -1,6 +1,6 @@
 // Orgs, members and invite links. Every query names its org; callers check the caller's
 // membership first.
-import { and, asc, eq, gt, isNull } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import type { Db } from "./client.ts";
 import { randomSecret, sha256Hex } from "./crypto.ts";
@@ -166,4 +166,20 @@ export async function acceptInvite(db: Db, code: string, userId: string) {
     createdAt: new Date(),
   });
   return { status: "joined" as const, orgId: invite.orgId };
+}
+
+/**
+ * The members of `orgId` with these emails (case-insensitive), and the emails that matched no
+ * member. Per-pipe access (ADR 0008) names viewers by email.
+ */
+export async function findMembersByEmail(db: Db, orgId: string, emails: string[]) {
+  const wanted = [...new Set(emails.map((email) => email.trim().toLowerCase()))];
+  if (!wanted.length) return { members: [], unknown: [] };
+  const rows = await db
+    .select({ userId: users.id, email: users.email })
+    .from(members)
+    .innerJoin(users, eq(users.id, members.userId))
+    .where(and(eq(members.organizationId, orgId), inArray(sql`lower(${users.email})`, wanted)));
+  const found = new Set(rows.map((row) => row.email.toLowerCase()));
+  return { members: rows, unknown: wanted.filter((email) => !found.has(email)) };
 }

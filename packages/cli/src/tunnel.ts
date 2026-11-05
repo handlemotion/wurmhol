@@ -51,6 +51,8 @@ export interface TunnelOptions {
   host: string;
   /** The lifetime a new share asks for, in seconds; the relay's default when absent. */
   ttl?: number;
+  /** Emails of the org members who may open a new share (`--only`); empty: the whole org. */
+  viewers: string[];
   version: string;
   log: Logger;
   onRequest: (event: RequestEvent) => void;
@@ -174,6 +176,10 @@ export class Tunnel {
       const socket = new WebSocket(url, {
         headers: {
           authorization: `Bearer ${this.#options.token}`,
+          // Who may open a new share; a reconnect keeps the list the share started with.
+          ...(!this.#share && this.#options.viewers.length
+            ? { "wurmhol-viewers": this.#options.viewers.join(",") }
+            : {}),
           "user-agent": `wurmhol/${this.#options.version} node/${process.versions.node}`,
         },
         agent: proxy ? new HttpsProxyAgent(proxy) : undefined,

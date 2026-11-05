@@ -1,9 +1,9 @@
 // Share history. The live state of an open share is its Durable Object; these rows record that
 // a share existed (ids are never reused) and how it ended.
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { Db } from "./client.ts";
 import { randomShareId } from "./crypto.ts";
-import { shares, users } from "./schema/index.ts";
+import { shares, shareViews, users } from "./schema/index.ts";
 
 /**
  * Records a new share under a fresh id. The primary key makes an id unique forever; on the
@@ -59,4 +59,39 @@ export async function openSharesOfToken(db: Db, tokenId: string) {
     .select({ id: shares.id })
     .from(shares)
     .where(and(eq(shares.tokenId, tokenId), isNull(shares.endedAt)));
+}
+
+export interface ShareView {
+  userId: string;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  requests: number;
+}
+
+/** Writes a share's view log: one row per viewer, replaced with the Share DO's latest counts. */
+export async function recordShareViews(
+  db: Db,
+  share: { id: string; orgId: string },
+  views: ShareView[],
+) {
+  if (!views.length) return;
+  await db
+    .insert(shareViews)
+    .values(
+      views.map((view) => ({
+        shareId: share.id,
+        orgId: share.orgId,
+        userId: view.userId,
+        firstSeenAt: new Date(view.firstSeenAt),
+        lastSeenAt: new Date(view.lastSeenAt),
+        requests: view.requests,
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [shareViews.shareId, shareViews.userId],
+      set: {
+        lastSeenAt: sql`excluded.last_seen_at`,
+        requests: sql`excluded.requests`,
+      },
+    });
 }
