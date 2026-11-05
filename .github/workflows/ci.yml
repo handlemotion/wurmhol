@@ -67,6 +67,10 @@ jobs:
         if: steps.scope.outputs.full == 'true'
         run: pnpm check-types
 
+      - name: Build site
+        if: steps.scope.outputs.full == 'true'
+        run: pnpm --filter @wurmhol/site build
+
       - name: Unit tests
         if: steps.scope.outputs.full == 'true'
         run: pnpm test:all

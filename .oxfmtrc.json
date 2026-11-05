@@ -6,6 +6,7 @@
     ".claude/worktrees/**",
     "**/dist/**",
     "**/.wrangler/**",
+    "**/.astro/**",
     "**/migrations/**",
     "docs/spec/**",
     "pnpm-lock.yaml",

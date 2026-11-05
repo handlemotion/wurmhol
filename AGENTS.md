@@ -17,6 +17,7 @@ extends this file and wins where they differ. Explicit user instructions overrid
 | ------------------- | ------------------- | ------------------------------------------------------------------------- |
 | `apps/worker`       | `@wurmhol/worker`   | The Worker: Hono API, auth, Stripe, relay routing, DOs; serves `apps/web` |
 | `apps/web`          | `@wurmhol/web`      | Vite SPA: login and the shares wall                                       |
+| `apps/site`         | `@wurmhol/site`     | Marketing site at the apex domain (Astro, static)                         |
 | `packages/cli`      | `wurmhol` (npm)     | The CLI                                                                   |
 | `packages/protocol` | `@wurmhol/protocol` | Frame codec and stream multiplexer. Pure, no I/O                          |
 | `packages/auth`     | `@wurmhol/auth`     | Better Auth config (from Omni)                                            |

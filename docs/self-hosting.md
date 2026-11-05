@@ -95,6 +95,19 @@ WURMHOL_URL=https://example.com WURMHOL_TOKEN=wh_… npx wurmhol 8787
 
 In a sandbox with a Limited network policy, allowlist `example.com` and `*.pipe.example.com`.
 
+## 7. Marketing site (optional)
+
+`apps/site` is hosted Wurmhol's landing page: a static Astro build that its own Worker
+(`wurmhol-site`) serves with Workers static assets. Nothing in the app depends on it, so most
+installs skip it. To run one anyway, change its copy and links, then:
+
+```bash
+pnpm --filter @wurmhol/site build
+cd apps/site && pnpm exec wrangler deploy --domain example.com
+```
+
+If you deploy it on the apex, give the app its own host (for example `app.example.com`).
+
 ## Local
 
 ```bash
