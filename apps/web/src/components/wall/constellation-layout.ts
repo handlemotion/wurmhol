@@ -26,6 +26,9 @@ const GAP = 16;
 /** The ring's least spread around the anchor alone, so a few pipes don't huddle on it. */
 const MIN_RX = 260;
 const MIN_RY = 150;
+/** Clear space around an open card (a pipe's, or Create pipe's): it grew, so the pipes around
+ * it stand further off than they do from one another. */
+const CLEAR = 72;
 
 /** A stable number in [-1, 1) from a string (FNV-1a), for per-pipe jitter. */
 export function hash(id: string, salt = 0) {
@@ -44,10 +47,13 @@ export function layout(input: {
   pipes: { id: string; size: Size }[];
   /** The pipe whose card is open, if any. Its size is the card's. */
   open: { id: string; size: Size } | null;
+  /** The anchor is open as the Create pipe card; its size is the card's. */
+  anchorOpen?: boolean;
 }): { at: Map<string, Point>; top: number; bottom: number } {
   const { width, anchor, pipes, open } = input;
   const at = new Map<string, Point>();
   const fixed = new Set<string>([ANCHOR]);
+  const roomy = new Set<string>(input.anchorOpen ? [ANCHOR] : []);
   const sizes = new Map<string, Size>([[ANCHOR, anchor]]);
 
   // The hub: the anchor alone, or the open card with the anchor above it.
@@ -60,6 +66,7 @@ export function layout(input: {
     at.set(open.id, { x: 0, y: 0 });
     sizes.set(open.id, card);
     fixed.add(open.id);
+    roomy.add(open.id);
     const top = anchorY - anchor.h / 2;
     const bottom = card.h / 2;
     hub = {
@@ -73,8 +80,9 @@ export function layout(input: {
   if (n > 0) {
     const widest = Math.max(...pipes.map((p) => p.size.w));
     const tallest = Math.max(...pipes.map((p) => p.size.h));
-    let rx = Math.max(open ? 0 : MIN_RX, hub.halfW + GAP * 3 + widest / 2);
-    let ry = Math.max(open ? 0 : MIN_RY, hub.halfH + GAP * 3 + tallest / 2);
+    const clear = roomy.size > 0 ? CLEAR : GAP * 3;
+    let rx = Math.max(open ? 0 : MIN_RX, hub.halfW + clear + widest / 2);
+    let ry = Math.max(open ? 0 : MIN_RY, hub.halfH + clear + tallest / 2);
     // Room on the ring for every pipe: grow both radii until its length holds them.
     const need = n * (widest * 0.55 + tallest + GAP * 2);
     const ring = () => 2 * Math.PI * Math.sqrt((rx * rx + ry * ry) / 2);
@@ -94,7 +102,9 @@ export function layout(input: {
     pipes.forEach((pipe, i) => {
       // Start at the top and go clockwise; the jitter stays inside a quarter of a slot.
       const angle = -Math.PI / 2 + (i + 0.5) * step + hash(pipe.id, 1) * step * 0.25;
-      const reach = 1 + hash(pipe.id, 2) * 0.14;
+      // Around an open card the jitter only reaches outwards, never into its clear space.
+      const jitter = hash(pipe.id, 2) * 0.14;
+      const reach = 1 + (roomy.size > 0 ? Math.abs(jitter) : jitter);
       at.set(pipe.id, {
         x: Math.cos(angle) * rx * reach,
         y: hub.y + Math.sin(angle) * ry * reach,
@@ -103,7 +113,7 @@ export function layout(input: {
     });
   }
 
-  relax(at, sizes, fixed, width);
+  relax(at, sizes, fixed, roomy, width);
 
   let top = Infinity;
   let bottom = -Infinity;
@@ -120,6 +130,7 @@ function relax(
   at: Map<string, Point>,
   sizes: Map<string, Size>,
   fixed: Set<string>,
+  roomy: Set<string>,
   width: number,
 ) {
   const ids = [...at.keys()];
@@ -139,8 +150,9 @@ function relax(
         const [sa, sb] = [sizes.get(a)!, sizes.get(b)!];
         const dx = pb.x - pa.x;
         const dy = pb.y - pa.y;
-        const ox = (sa.w + sb.w) / 2 + GAP - Math.abs(dx);
-        const oy = (sa.h + sb.h) / 2 + GAP - Math.abs(dy);
+        const gap = roomy.has(a) || roomy.has(b) ? CLEAR : GAP;
+        const ox = (sa.w + sb.w) / 2 + gap - Math.abs(dx);
+        const oy = (sa.h + sb.h) / 2 + gap - Math.abs(dy);
         if (ox <= 0 || oy <= 0) continue;
         moved = true;
         // Sideways only when there is room for it: on a narrow screen, stack instead.

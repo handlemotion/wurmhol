@@ -34,6 +34,10 @@ it. It holds no values: colors, sizes, and radii live in code, so they cannot dr
   marketing site (`apps/site`) follows the same rule.
 - **Background vs. surface.** `background` is the app canvas. `surface` is anything raised on it:
   cards, popovers, sidebars.
+- **Two edge colours.** `border` for every neutral edge: cards, pills, buttons, fields, dividers,
+  the wall's spokes. `primary` (with `ring`, its focus twin) for what is selected or focused.
+  Filled buttons (primary, danger) keep an edge of their own fill's colour, and `danger` marks
+  invalid fields. No other border colour, and no hover shift of an edge.
 - **Brand.** `primary` is the brand color: primary buttons and selected/active components, with
   `primary-foreground` text on it. Use it sparingly; most controls are neutral.
 - **Inputs stay calm.** Focus shows as a `ring`-colored border only: no glow, no tint.
@@ -66,8 +70,8 @@ it. It holds no values: colors, sizes, and radii live in code, so they cannot dr
   nudge for optics, leave a short comment saying so.
 - **Tactility.** Depth, press and motion follow the `tactile-design` skill
   (`.claude/skills/tactile-design`), layered on the Figma look without restyling it: cards keep
-  their border and add the crisp `--shadow-raised` drop; buttons are flat: a simple border a
-  step darker than the fill, no highlight and no drop (depth fights the sharp corners); overlays use
+  their border and add the crisp `--shadow-raised` drop; buttons are flat: a simple border
+  in `border`, no highlight and no drop (depth fights the sharp corners); overlays use
   `--shadow-overlay`, never a big soft blur; buttons squeeze to `scale(.97)` on native `:active`
   (not React Aria's `pressed`), except menu triggers; menus
   grow from their trigger; motion uses the `ease-out` curve and has a reduced-motion path. The

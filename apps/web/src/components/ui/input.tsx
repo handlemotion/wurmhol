@@ -22,7 +22,7 @@ export function Input({ className, ref, size = "md", ...props }: InputProps) {
           "relative block w-full appearance-none rounded-lg bg-(--control-bg,var(--color-background))",
           size === "md" ? "h-8 px-2" : "h-9 px-2.5",
           "text-sm text-foreground placeholder:text-subtle-foreground",
-          "border border-input enabled:hover:border-muted-foreground/30",
+          "border border-input",
           // The border eases like a button's fill, so hover reads the same on every control.
           "transition-[border-color] duration-150 ease-out",
           "outline-hidden focus:border-ring/70 focus:enabled:hover:border-ring/80",

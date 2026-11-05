@@ -6,12 +6,17 @@ import {
   IconChevronsUpDown,
   IconCreditCard,
   IconEllipsis,
+  IconCheck,
   IconExternalLink,
+  IconLaptop,
   IconPlus,
+  IconSparkles,
+  IconSquareTerminal,
   IconKey,
   IconLogOut,
   IconUsers,
 } from "@/components/icons/lucide";
+import { ActionItem, ActionList } from "@/components/ui/action-list";
 import { Button } from "@/components/ui/button";
 import { CopyField } from "@/components/ui/copy-field";
 import { SkeletonProvider } from "@/components/ui/skeleton-provider";
@@ -27,6 +32,7 @@ import {
   useTerminate,
   useWall,
 } from "@/hooks/use-app";
+import { useClipboard } from "@/hooks/use-clipboard";
 import type { Me, Share } from "@/lib/api";
 import { ago } from "@/lib/time";
 import { MembersDialog } from "./members-dialog";
@@ -250,27 +256,50 @@ function Network({ shares }: { shares: Share[] }) {
   );
 }
 
+const LOGIN = "npx wurmhol login && npx wurmhol <port>";
+
+/** The ways to start a pipe, each copied in one press. */
+const CREATE = [
+  { id: "prompt", label: "Copy prompt", value: PROMPT, Icon: IconSparkles },
+  { id: "command", label: "Copy npx command", value: COMMAND, Icon: IconSquareTerminal },
+  // Approves this computer in the browser first, then shares the port from it.
+  { id: "machine", label: "From this machine", value: LOGIN, Icon: IconLaptop },
+] as const;
+
 /**
- * The ways to start a pipe, each copied in one click. A fixed square, so options can be added
- * without the card changing shape.
+ * Create pipe, open: a muted label over the ways to start one. A fixed square, so options can be
+ * added without the card changing shape. A row says "Copied" for a moment after its press.
  */
 function CreateCard() {
-  const card = useRef<HTMLElement>(null);
-  useEffect(() => card.current?.focus({ preventScroll: true }), []);
+  const { copy, copied } = useClipboard();
+  const [last, setLast] = useState<string | null>(null);
   return (
     <section
-      ref={card}
-      tabIndex={-1}
       data-open
       aria-label="Create pipe"
-      className="flex size-72 animate-in flex-col gap-4 border border-primary bg-background p-4 outline-0 duration-200 ease-out fade-in zoom-in-95 motion-reduce:animate-none"
+      className="flex size-72 animate-in flex-col gap-0.5 border border-border bg-background p-2 duration-200 ease-out fade-in zoom-in-95 motion-reduce:animate-none"
     >
-      <span className="text-sm text-foreground">Create pipe</span>
-      {/* The labels share one width, so the fields' dividers line up. */}
-      <div className="flex flex-col gap-2 [--copy-label-width:--spacing(20)]">
-        <CopyField label="Prompt" value={PROMPT} />
-        <CopyField label="Command" value={COMMAND} />
-      </div>
+      <span aria-hidden className="flex h-8 items-center px-2 text-xs text-subtle-foreground">
+        Create pipe
+      </span>
+      {/* Focus lands on the first row, so arrows, Enter and Escape work from the start. */}
+      <ActionList
+        aria-label="Create pipe"
+        autoFocus="first"
+        onAction={(key) => {
+          const option = CREATE.find((item) => item.id === key);
+          if (!option) return;
+          setLast(option.id);
+          void copy(option.value);
+        }}
+      >
+        {CREATE.map(({ id, label, Icon }) => (
+          <ActionItem key={id} id={id} textValue={label}>
+            {copied && last === id ? <IconCheck /> : <Icon />}
+            {copied && last === id ? "Copied" : label}
+          </ActionItem>
+        ))}
+      </ActionList>
     </section>
   );
 }

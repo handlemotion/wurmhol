@@ -55,6 +55,7 @@ export function Constellation(props: {
       anchor: size(ANCHOR),
       pipes: ids.filter((id) => id !== open).map((id) => ({ id, size: size(id) })),
       open: open && ids.includes(open) ? { id: open, size: size(open) } : null,
+      anchorOpen: open === ANCHOR,
     });
     // Fill the viewport below the header, or grow past it when the network needs more.
     const room = innerHeight - box.getBoundingClientRect().top - scrollY - PAD / 2;

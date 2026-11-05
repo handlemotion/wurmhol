@@ -33,7 +33,9 @@
      lighter. Mixed from the fills, so they follow the theme. */
   --primary-button-border: color-mix(in oklab, var(--primary-button) 85%, black);
   --primary-button-hover: color-mix(in oklab, var(--primary-foreground) 10%, var(--primary-button));
-  --secondary-border: color-mix(in oklab, var(--secondary) 88%, black);
+  /* Two edge colours in the whole app: `border` for every neutral edge, `primary` (and `ring`)
+     for what is selected or focused. Filled buttons keep an edge of their own colour. */
+  --secondary-border: var(--border);
   --secondary-hover: color-mix(in oklab, var(--secondary-foreground) 4%, var(--secondary));
   --danger-border: color-mix(in oklab, var(--danger) 80%, black);
   --danger-hover: color-mix(in oklab, white 10%, var(--danger));
@@ -46,7 +48,7 @@
   /* A well: sunk one step into its surface (the copy field). */
   --well: #f0f0f0;
   --well-hover: #e8e8e8;
-  --hairline-line: #d9d9d9;
+  --hairline-line: var(--border);
   /* Selected text: a saturated, opaque blue under near-black ink, in both themes. */
   --selection: #5ea2ff;
   --selection-foreground: #0a0a0a;
@@ -105,7 +107,6 @@
   --shadow-ink: 0 0 0;
   --well: #1c1c1c;
   --well-hover: #242424;
-  --hairline-line: #333333;
   --secondary: #222222;
   --muted: #333333;
   --danger-subtle-foreground: oklch(0.75 0.16 25);
