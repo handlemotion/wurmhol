@@ -79,6 +79,7 @@ Environment:
   WURMHOL_TOKEN   A token from your org (${DEFAULT_CONSOLE}, menu → Tokens); wins over login
   WURMHOL_HOME    Where wurmhol keeps its state (default ~/.wurmhol)
   WURMHOL_URL     A self-hosted install (default ${DEFAULT_SERVER})
+  WURMHOL_HOST_IGNORE  Ports wurmhol host never lists, like 9229,5555
 
 The wall shows where each pipe came from: the git repo, branch and commit of the
 directory it was opened in, and the agent session, when the environment names one.

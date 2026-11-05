@@ -146,16 +146,27 @@ export function Constellation(props: {
           .style.setProperty("--grow-origin", `${size.w / 2 - dx}px ${size.h / 2 - dy}px`);
       }
 
-      // The camera: an open card in the middle of what is visible of the canvas, else at rest.
+      // The camera: an open pipe's card in the middle of what is visible of the canvas, else at
+      // rest. Create pipe's card opens where its button stands, centred on it: the camera moves
+      // only as far as it takes to keep the card in view (a short window).
       const focus = open ? centres.get(open) : undefined;
       const goal = { x: 0, y: 0 };
       if (focus && box && view) {
         const top = Math.max(0, -view.top);
         const bottom = Math.min(box.clientHeight, innerHeight - view.top);
         const card = live.get(open!)!;
-        goal.x = box.clientWidth / 2 - (origin.current.x + focus.x);
-        goal.y =
-          Math.max((top + bottom) / 2, top + card.h / 2 + PAD / 2) - (origin.current.y + focus.y);
+        const x = origin.current.x + focus.x;
+        const y = origin.current.y + focus.y;
+        if (open === ANCHOR) {
+          const room = (bottom - top - card.h) / 2;
+          const clear = Math.min(PAD / 2, Math.max(0, room));
+          goal.y =
+            Math.max(0, top + clear - (y - card.h / 2)) -
+            Math.max(0, y + card.h / 2 - (bottom - clear));
+        } else {
+          goal.x = box.clientWidth / 2 - x;
+          goal.y = Math.max((top + bottom) / 2, top + card.h / 2 + PAD / 2) - y;
+        }
       }
       const cam = camera.current;
       cam.x += (goal.x - cam.x) * kPan;
@@ -173,12 +184,13 @@ export function Constellation(props: {
         el.style.transform = `translate3d(${left}px, ${top}px, 0)`;
         el.style.visibility = "visible";
       }
-      // The backdrop follows the anchor's place as it eases and as the camera pans, but not its
-      // drift: a whole drawing swaying with the button would read as the page moving.
+      // The backdrop holds still on the anchor's resting place: it ignores the camera's pan and the
+      // Create pipe card's offset, so opening the card only scales it up where it stands. Nor does
+      // it follow the anchor's drift: a whole drawing swaying would read as the page moving.
       const seat = sim.current.get(ANCHOR);
       if (backdrop.current && seat) {
-        const x = snap(ox + seat.x);
-        const y = snap(oy + seat.y);
+        const x = snap(origin.current.x + seat.x);
+        const y = snap(origin.current.y + seat.y);
         backdrop.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
         backdrop.current.style.visibility = "visible";
       }

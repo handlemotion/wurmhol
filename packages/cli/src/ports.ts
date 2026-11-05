@@ -1,6 +1,6 @@
 // The ports this computer serves web pages on, for `wurmhol host` (ADR 0018). Listening TCP
 // ports come from the OS (Linux's /proc, `lsof` on macOS, `netstat` on Windows); each new one is
-// asked for `/` once, and only those that answer HTTP are offered, with their page's <title>.
+// asked for `/` once, and offered with its page's <title> when it answers like a dev server.
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import http from "node:http";
@@ -70,41 +70,84 @@ function titleOf(html: string) {
   return text.slice(0, 200) || null;
 }
 
-/** Whether the port answers HTTP, and the title of its `/` when it is HTML. Null if not HTTP. */
-function probe(port: number): Promise<LocalPort | null> {
+/** `GET path` on the port, or null when nothing answers HTTP in time. */
+function get(port: number, path: string): Promise<http.IncomingMessage | null> {
   return new Promise((resolve) => {
-    let answered = false;
     const req = http.get(
-      {
-        host: "127.0.0.1",
-        port,
-        path: "/",
-        headers: { host: `localhost:${port}` },
-        timeout: PROBE_MS,
-      },
-      (res) => {
-        answered = true;
-        if (!/text\/html/i.test(res.headers["content-type"] ?? "")) {
-          res.resume();
-          return resolve({ port, title: null });
-        }
-        let html = "";
-        res.setEncoding("utf8");
-        res.on("data", (chunk: string) => {
-          html += chunk;
-          // The title is in the head; no need to read a whole page.
-          if (html.length > 64 * 1024 || /<\/title>/i.test(html)) res.destroy();
-        });
-        res.on("close", () => resolve({ port, title: titleOf(html) }));
-      },
+      // A `localhost` Host passes dev servers' host checks (Vite's, webpack's).
+      { host: "127.0.0.1", port, path, headers: { host: `localhost:${port}` }, timeout: PROBE_MS },
+      resolve,
     );
     req.on("timeout", () => req.destroy());
-    // Once it answered, a reset is only the page cut short after its title.
-    req.on("error", () => answered || resolve(null));
+    // After a response this is only its body cut short, which `read` ends on.
+    req.on("error", () => resolve(null));
   });
 }
 
-/** A port that did not answer HTTP is asked again after this: a dev server may still be starting. */
+/** The start of a response's body: up to 64 KiB, or less once `enough` says so. */
+function read(res: http.IncomingMessage, enough: (text: string) => boolean = () => false) {
+  return new Promise<string>((resolve) => {
+    let text = "";
+    res.setEncoding("utf8");
+    res.on("data", (chunk: string) => {
+      text += chunk;
+      if (text.length > 64 * 1024 || enough(text)) res.destroy();
+    });
+    res.on("close", () => resolve(text));
+  });
+}
+
+/**
+ * Whether the port is a DevTools debugger (Node's, Deno's, Chrome's, workerd's and wrangler's
+ * inspectors): they all describe themselves at `/json/version` with a `Protocol-Version`.
+ */
+async function isDebugger(port: number) {
+  const res = await get(port, "/json/version");
+  if (!res) return false;
+  try {
+    return "Protocol-Version" in JSON.parse(await read(res));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The port as offered, or null. A dev server answers `/` with a page, a redirect or JSON; an API
+ * with no root route answers 404, so a 404 is offered too unless the port is a debugger. Other
+ * errors are what debuggers (400, 500), proxies (405) and helpers that want a key (401, 403)
+ * answer, and are not offered.
+ */
+async function probe(port: number): Promise<LocalPort | null> {
+  const res = await get(port, "/");
+  if (!res) return null;
+  const status = res.statusCode ?? 0;
+  let title: string | null = null;
+  if (/text\/html/i.test(res.headers["content-type"] ?? "")) {
+    // The title is in the head; no need to read a whole page.
+    title = titleOf(await read(res, (text) => /<\/title>/i.test(text)));
+  } else {
+    res.resume();
+  }
+  if (status < 400 || (status === 404 && !(await isDebugger(port)))) return { port, title };
+  return null;
+}
+
+/**
+ * Ports never to offer: those in WURMHOL_HOST_IGNORE (`9229,5555`), and the CLI's own server's
+ * when WURMHOL_URL is a local one, since a pipe to it would loop back through itself.
+ */
+function ignored() {
+  const ports = (process.env.WURMHOL_HOST_IGNORE ?? "").split(/[\s,]+/).map(Number);
+  try {
+    const own = new URL(process.env.WURMHOL_URL ?? "");
+    if (["localhost", "127.0.0.1", "[::1]"].includes(own.hostname)) ports.push(Number(own.port));
+  } catch {
+    // Unset or not a URL: the CLI's own check reports that.
+  }
+  return ports.filter((port) => Number.isInteger(port) && port > 0);
+}
+
+/** A port that was not offered is asked again after this: a dev server may still be starting. */
 const RETRY_MS = 30_000;
 
 /** Watches this computer's web ports; remembers each port's answer while it stays open. */
@@ -112,9 +155,9 @@ export class PortScanner {
   #known = new Map<number, { answer: LocalPort | null; at: number }>();
   readonly #skip: Set<number>;
 
-  /** `skip`: ports never to offer, like a pipe's own local listener. */
+  /** `skip`: ports never to offer, besides those `ignored` names. */
   constructor(skip: Iterable<number> = []) {
-    this.#skip = new Set(skip);
+    this.#skip = new Set([...skip, ...ignored()]);
   }
 
   async scan(): Promise<LocalPort[]> {

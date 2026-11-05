@@ -7,13 +7,12 @@ import {
   IconArrowLeft,
   IconChevronsUpDown,
   IconCreditCard,
-  IconDoorOpen,
   IconEllipsis,
   IconArrowUpRight,
   IconCheck,
   IconExternalLink,
   IconLaptop,
-  IconPencil,
+  IconSettings,
   IconPlus,
   IconSparkles,
   IconTrash,
@@ -31,7 +30,6 @@ import { Loader } from "@/components/ui/loader";
 import {
   Menu,
   MenuDescription,
-  MenuHeader,
   MenuItem,
   MenuLabel,
   MenuSection,
@@ -92,7 +90,7 @@ export function Wall({ me }: { me: Me }) {
     // Clipped at the page's edges, not the canvas's: a network the camera pans runs on under the
     // floating header and off the sides of the window, never against an invisible box.
     <div className="min-h-dvh overflow-clip bg-background">
-      <Header me={me} onOpen={setDialog} />
+      <Header me={me} onOpen={setDialog} fade={shares?.length !== 0} />
       <main className="w-full px-4 sm:px-8">
         {me.standing && !me.standing.ok && <NeedsPlan owner={me.role === "owner"} />}
         <Skeleton id="wall" data={shares} sample={SAMPLE} label="Loading pipes">
@@ -110,7 +108,16 @@ export function Wall({ me }: { me: Me }) {
  * org's dialogs in the middle, logging out on the right. On a phone the middle and right fold
  * into one menu. The same 16px above the pills as beside them, so the row sits balanced.
  */
-function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens") => void }) {
+function Header({
+  me,
+  onOpen,
+  fade,
+}: {
+  me: Me;
+  onOpen: (dialog: "members" | "tokens") => void;
+  /** Off on the empty wall: no pill can pan under the header, and the backdrop runs on to the top. */
+  fade: boolean;
+}) {
   const switchOrg = useSwitchOrg();
   const signOut = useSignOut();
   const billing = useOpenBilling();
@@ -123,10 +130,12 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between gap-3 p-4">
       {/* No bar, but a fade: pills the camera pans up dissolve under the header's pills. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[calc(100%+2rem)] bg-linear-to-b from-background from-50% to-transparent"
-      />
+      {fade && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[calc(100%+2rem)] bg-linear-to-b from-background from-50% to-transparent"
+        />
+      )}
       <MenuTrigger>
         <Button
           intent="secondary"
@@ -140,53 +149,52 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
         </Button>
         <Menu
           placement="bottom start"
-          selectionMode="single"
-          selectedKeys={me.activeOrgId ? [me.activeOrgId] : []}
           onAction={(key) => {
             const action = ORG_ACTIONS.find((a) => a.id === key);
             if (action) setOrgAction(action.id);
             else switchOrg.mutate(String(key));
           }}
-          popover={{ className: "max-w-72" }}
         >
-          <MenuSection aria-label="Signed in as">
-            <MenuHeader className="flex items-center gap-3 p-2.5">
-              <Avatar
-                size="md"
-                src={me.user.image}
-                initials={initials(me.user.name, me.user.email)}
-                alt=""
-              />
-              <span className="flex min-w-0 flex-col">
-                <span className="truncate text-sm text-foreground">
-                  {me.user.name || me.user.email}
-                </span>
-                {me.user.name && (
-                  <span className="truncate text-xs text-muted-foreground">{me.user.email}</span>
-                )}
-              </span>
-            </MenuHeader>
-          </MenuSection>
-          <MenuSeparator />
-          <MenuSection aria-label="Orgs" items={me.orgs}>
+          {/* The orgs lead: switching is what the menu is for. Then starting one, then what can be
+              done to the active one, with deleting set apart at the bottom. */}
+          <MenuSection
+            aria-label="Orgs"
+            items={me.orgs}
+            // Only the orgs are chosen between; the rows below are plain actions.
+            selectionMode="single"
+            selectedKeys={me.activeOrgId ? [me.activeOrgId] : []}
+          >
             {(org) => (
               <MenuItem id={org.id} textValue={org.name}>
-                {/* One letter: two would be specks at 20px. */}
-                <Avatar initials={initials(org.name).slice(0, 1)} alt="" />
+                {/* Your own personal org wears your picture; any other org, its initials. */}
+                <Avatar
+                  src={org.personal && org.role === "owner" ? me.user.image : null}
+                  initials={initials(org.name)}
+                  alt=""
+                />
                 <MenuLabel>{org.name}</MenuLabel>
                 <MenuDescription>{org.role === "owner" ? "Owner" : "Member"}</MenuDescription>
               </MenuItem>
             )}
           </MenuSection>
-          {active && <MenuSeparator />}
-          {active && (
-            <MenuSection aria-label={active.name}>
-              {ORG_ACTIONS.filter((a) => owner || !a.owner).map(({ id, label, Icon, danger }) => (
-                <MenuItem key={id} id={id} intent={danger ? "danger" : undefined}>
-                  <Icon />
-                  <MenuLabel>{label}</MenuLabel>
-                </MenuItem>
-              ))}
+          <MenuSeparator />
+          <MenuSection aria-label="Org actions">
+            {ORG_ACTIONS.filter(
+              (a) => !a.danger && (owner || !a.owner) && (active || a.id === "create"),
+            ).map(({ id, label, Icon }) => (
+              <MenuItem key={id} id={id}>
+                <Icon />
+                <MenuLabel>{label}</MenuLabel>
+              </MenuItem>
+            ))}
+          </MenuSection>
+          {active && owner && <MenuSeparator />}
+          {active && owner && (
+            <MenuSection aria-label={`Delete ${active.name}`}>
+              <MenuItem id="delete" intent="danger">
+                <IconTrash />
+                <MenuLabel>Delete org</MenuLabel>
+              </MenuItem>
             </MenuSection>
           )}
         </Menu>
@@ -194,6 +202,7 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
       <OrgDialog
         action={orgAction}
         orgName={active?.name ?? ""}
+        isOwner={owner}
         onClose={() => setOrgAction(null)}
       />
       <nav
@@ -255,10 +264,10 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
   );
 }
 
-/** What the switcher offers for the active org; owners rename and delete. */
+/** What the switcher offers: anyone starts an org or opens its settings; owners delete it. */
 const ORG_ACTIONS = [
-  { id: "rename", label: "Rename org", Icon: IconPencil, owner: true, danger: false },
-  { id: "leave", label: "Leave org", Icon: IconDoorOpen, owner: false, danger: false },
+  { id: "create", label: "New org", Icon: IconPlus, owner: false, danger: false },
+  { id: "settings", label: "Org settings", Icon: IconSettings, owner: false, danger: false },
   { id: "delete", label: "Delete org", Icon: IconTrash, owner: true, danger: true },
 ] as const;
 

@@ -62,21 +62,24 @@ export const menuStyles = tv({
 const MENU_ITEM_SELECTOR = "[role='menuitem'], [role='menuitemradio'], [role='menuitemcheckbox']";
 
 /**
- * The widest row sets the menu's width (fit-content): the longest label, then 36px to the edge
- * (the menu's 4px padding plus the row's 32px end padding); icons sit 12px in. Short menus keep a 132px floor so
- * they don't look pinched; past 240px labels truncate. Don't fix a menu's width; a menu whose
- * rows carry more (an avatar and two lines) raises only the cap with `max-w-*`.
+ * The widest row sets the menu's width (fit-content): its last mark (the label, or the check on
+ * a chosen row), then the row's 24px end padding, so the longest row breathes on the right; icons
+ * sit 12px in. Short menus keep a 132px floor so they don't look pinched, and a menu of pivot
+ * rows (an avatar over two lines: orgs, people) a 272px one, so a few short names still read as
+ * the menu's main rows; past 300px labels truncate instead of wrapping. The floor beats the popover's own `min-w-(--trigger-width)`, so
+ * a wide trigger doesn't stretch its menu. Don't fix a menu's width or override its cap.
  */
-const MENU_WIDTH = "w-max min-w-33 max-w-60";
+const MENU_WIDTH = "w-max min-w-33 has-[[slot=description]]:min-w-68 max-w-75";
 
 export function Menu<T extends object>({ className, placement, popover, ...props }: MenuProps<T>) {
   // One fill springs between the rows (transitive's magnetic hover); the rows paint none.
   const hover = useMagneticHover({ itemSelector: MENU_ITEM_SELECTOR });
+  const { className: popoverClassName, ...popoverProps } = popover ?? {};
   return (
     <Popover
-      className={cx(MENU_WIDTH, "*:data-[slot=popover-inner]:overflow-hidden", popover?.className)}
       placement={placement}
-      {...popover}
+      {...popoverProps}
+      className={cx(MENU_WIDTH, "*:data-[slot=popover-inner]:overflow-hidden", popoverClassName)}
     >
       <div className="relative flex max-h-[inherit] min-h-0 flex-col" {...hover.containerProps}>
         <FluidHoverHighlight
@@ -94,8 +97,8 @@ export function Menu<T extends object>({ className, placement, popover, ...props
 export interface MenuItemProps
   extends MenuItemPrimitiveProps, VariantProps<typeof dropdownItemStyles> {}
 
-/** 32px after the label (36px to the menu's edge with its padding): see `MENU_WIDTH`. */
-const ITEM_END = "pe-8";
+/** 24px after the row's last mark: see `MENU_WIDTH`. */
+const ITEM_END = "pe-6";
 
 export function MenuItem({ className, intent, children, ...props }: MenuItemProps) {
   const textValue = props.textValue || (typeof children === "string" ? children : undefined);
@@ -128,7 +131,13 @@ export function MenuItem({ className, intent, children, ...props }: MenuItemProp
       {(values) => (
         <>
           {values.isSelected && ["single", "multiple"].includes(values.selectionMode) && (
-            <CheckIcon />
+            // The row's last mark, centred on the row like the avatar it mirrors. Its 16px box
+            // ends 22px from the row's edge: the glyph's ~2.5px of side air puts the ink 24px in,
+            // the same end room as every row's label (measured).
+            <CheckIcon
+              data-slot="check-indicator"
+              className="absolute end-5.5 top-1/2 size-4 -translate-y-1/2 text-foreground"
+            />
           )}
 
           {typeof children === "function" ? (

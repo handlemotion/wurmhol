@@ -167,6 +167,10 @@ you pick a variant instead of guessing. `--tsx Name` writes a React component of
   tagged `container` and `browser`; the innermost ellipse is the hole the open Create pipe card
   fits in, and the hyperbolas start at its rim.
 
+- **Ended** (`ended`): the Worker's own pages on a share host (ended, reconnecting, refused). A
+  square duct in one-point perspective, frames growing by √φ from a closed end wall; the message
+  sits on that wall, and every line stops at it.
+
 When lines converge on a point, stop them short of it (as `corridor` does). A fan of 20 lines
 into one pixel reads as a smudge.
 

@@ -26,7 +26,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
 
 export interface Me {
   user: { id: string; email: string; name: string; image: string | null };
-  orgs: { id: string; name: string; role: string }[];
+  orgs: { id: string; name: string; role: string; personal: boolean }[];
   activeOrgId: string | null;
   role: "owner" | "member" | null;
   standing: { ok: boolean; reason: "billing_off" | "subscribed" | "no_subscription" } | null;
