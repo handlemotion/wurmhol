@@ -20,6 +20,8 @@
   --accent: #f3f3f3;
   /* The fluid hover highlight: a faint wash of the foreground. */
   --hover: color-mix(in oklab, var(--foreground) 3%, transparent);
+  /* An outline button's fill under the pointer: one visible step up from the canvas. */
+  --outline-hover: color-mix(in oklab, var(--foreground) 4%, var(--background));
   --primary: #0d3eef;
   --primary-button: #1a4bff;
   /* What dims the app under a dialog: flat black, no blur. */
@@ -80,6 +82,8 @@
     --subtle-foreground: #6b6b6b;
     --border: #262626;
     --accent: #1f1f1f;
+    /* On pitch black a 4% wash is invisible, and oklab crushes small mixes near black: mix in sRGB. */
+    --outline-hover: color-mix(in srgb, var(--foreground) 10%, var(--background));
     --primary: #5b7cff;
     --primary-button: #3d63ff;
     --scrim: oklch(0 0 0 / 45%);
@@ -142,6 +146,7 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-accent: var(--accent);
   --color-hover: var(--hover);
+  --color-outline-hover: var(--outline-hover);
   --color-accent-foreground: var(--accent-foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
@@ -185,6 +190,11 @@
   ::backdrop,
   ::file-selector-button {
     border-color: var(--border, currentColor);
+  }
+  html,
+  body {
+    /* An app, not a document: no rubber-band bounce or scroll chaining past the page's edges. */
+    overscroll-behavior: none;
   }
   html {
     -webkit-font-smoothing: antialiased;
