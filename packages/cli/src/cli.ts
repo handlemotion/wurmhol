@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // wurmhol: share a local dev server at a private HTTPS URL (spec section 7).
 //
-//   npx wurmhol <port> [--json]   start a share; prints its URL first, then returns
+//   npx wurmhol <port> [--ttl 8h] [--json]   start a share; prints its URL first, then returns
 //   wurmhol ls [--json]           open shares on this machine
 //   wurmhol stop <port|id>        end one; `--all` ends every one
 //   wurmhol init                  tell the repo's agents how to share
@@ -10,6 +10,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { formatDuration, parseDuration } from "@wurmhol/protocol";
 import pkg from "../package.json" with { type: "json" };
 import { FixError } from "./errors.ts";
 import { DEFAULT_CONSOLE, DEFAULT_SERVER, openPipe, type Pipe } from "./pipe.ts";
@@ -20,6 +21,7 @@ const HELP = `wurmhol ${pkg.version}: a private HTTPS URL for a local dev server
 
 Usage:
   npx wurmhol <port> [--json]   Open a pipe to a port; prints the URL, then returns
+    --ttl <duration>            How long it lasts, like 90m or 8h (default 4h, at most 12h)
   wurmhol ls [--json]           List open pipes
   wurmhol stop <port|id>        End a pipe (--all ends every one)
   wurmhol init                  Add a line about wurmhol to AGENTS.md or CLAUDE.md
@@ -30,7 +32,9 @@ Environment:
   HTTPS_PROXY     Dial out through this proxy; NODE_EXTRA_CA_CERTS adds its CA
 `;
 
-type ReadyMessage = { type: "ready"; id: string; url: string } | { type: "error"; message: string };
+type ReadyMessage =
+  | { type: "ready"; id: string; url: string; endsAt: string }
+  | { type: "error"; message: string };
 
 function fail(message: string): never {
   process.stderr.write(`wurmhol: ${message}\n`);
@@ -64,10 +68,11 @@ function token() {
 }
 
 /** Starts the detached daemon and waits for it to report the URL (or the reason it could not). */
-async function share(port: number, json: boolean) {
+async function share(port: number, ttl: number | undefined, json: boolean) {
   token();
   const entry = fileURLToPath(import.meta.url);
-  const child = spawn(process.execPath, [entry, "__daemon", String(port)], {
+  const args = [entry, "__daemon", String(port), ...(ttl === undefined ? [] : [String(ttl)])];
+  const child = spawn(process.execPath, args, {
     detached: true,
     stdio: ["ignore", "ignore", "ignore", "ipc"],
     env: process.env,
@@ -85,12 +90,13 @@ async function share(port: number, json: boolean) {
   if (message.type === "error") fail(message.message);
   child.disconnect();
   child.unref();
-  const out = json ? JSON.stringify({ url: message.url, port, id: message.id }) : message.url;
+  const { url, id, endsAt } = message;
+  const out = json ? JSON.stringify({ url, port, id, endsAt }) : url;
   process.stdout.write(`${out}\n`);
 }
 
 /** The daemon: holds the share's pipe until it ends. Reports readiness over IPC. */
-async function daemon(port: number) {
+async function daemon(port: number, ttl: number | undefined) {
   const report = (message: ReadyMessage) => process.send?.(message);
   const log = (shareId: string | null, event: string, fields: Record<string, unknown>) => {
     try {
@@ -104,7 +110,7 @@ async function daemon(port: number) {
   };
   let pipe: Pipe;
   try {
-    pipe = await openPipe({ server: server(), token: token(), port }, { log });
+    pipe = await openPipe({ server: server(), token: token(), port, ttl }, { log });
   } catch (error) {
     report({ type: "error", message: error instanceof FixError ? error.message : String(error) });
     process.exit(1);
@@ -119,12 +125,13 @@ async function daemon(port: number) {
     port,
     pid: process.pid,
     startedAt: new Date().toISOString(),
+    endsAt: pipe.endsAt.toISOString(),
   });
   const stop = () => void pipe.close();
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
   process.on("SIGHUP", () => {}); // The terminal that started it may close.
-  report({ type: "ready", id: pipe.id, url: pipe.url });
+  report({ type: "ready", id: pipe.id, url: pipe.url, endsAt: pipe.endsAt.toISOString() });
   process.disconnect?.();
 }
 
@@ -132,7 +139,7 @@ function ls(json: boolean) {
   const states = listStates();
   if (json) {
     process.stdout.write(
-      `${JSON.stringify(states.map(({ id, url, port, startedAt }) => ({ id, url, port, startedAt })))}\n`,
+      `${JSON.stringify(states.map(({ id, url, port, startedAt, endsAt }) => ({ id, url, port, startedAt, endsAt })))}\n`,
     );
     return;
   }
@@ -140,7 +147,11 @@ function ls(json: boolean) {
     process.stdout.write("No open pipes. Start one with: npx wurmhol <port>\n");
     return;
   }
-  for (const s of states) process.stdout.write(`${s.port}\t${s.url}\t${s.id}\n`);
+  for (const s of states) {
+    const left = Math.max(0, Math.round((Date.parse(s.endsAt) - Date.now()) / 60_000)) * 60;
+    const ends = left ? `ends in ${formatDuration(left)}` : "ends in under a minute";
+    process.stdout.write(`${s.port}\t${s.url}\t${s.id}\t${ends}\n`);
+  }
 }
 
 async function stop(target: string | undefined, all: boolean) {
@@ -208,6 +219,7 @@ async function main() {
     options: {
       json: { type: "boolean", default: false },
       all: { type: "boolean", default: false },
+      ttl: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", short: "v", default: false },
     },
@@ -215,13 +227,22 @@ async function main() {
   const [command, argument] = positionals;
   if (values.version) return void process.stdout.write(`${pkg.version}\n`);
   if (values.help || !command) return void process.stdout.write(HELP);
-  if (command === "__daemon") return daemon(parsePort(argument) ?? fail("bad port"));
+  if (command === "__daemon") {
+    const ttl = positionals[2] === undefined ? undefined : Number(positionals[2]);
+    return daemon(parsePort(argument) ?? fail("bad port"), ttl);
+  }
   if (command === "ls") return ls(values.json);
   if (command === "stop") return stop(argument, values.all);
   if (command === "init") return init();
   const port = parsePort(command);
   if (port === null) fail(`Not a port or a command: ${command}. See: wurmhol --help`);
-  return share(port, values.json);
+  let ttl: number | undefined;
+  if (values.ttl !== undefined) {
+    ttl =
+      parseDuration(values.ttl) ??
+      fail(`Not a lifetime: ${values.ttl}. Use --ttl 90m or --ttl 8h.`);
+  }
+  return share(port, ttl, values.json);
 }
 
 await main();

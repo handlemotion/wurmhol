@@ -230,13 +230,14 @@ describe("a pipe's lifetime", () => {
     expect(Math.abs(Date.parse(started.endsAt) - before - 2000)).toBeLessThan(2000);
     const pid = pidOf(env, started.id);
     await waitFor(() => !alive(pid), { timeoutMs: 4000, what: "--ttl 2s to end the pipe" });
-    const log = readFileSync(join(env.WURMHOL_HOME!, "logs", `${started.id}.log`), "utf8");
-    const ended = log
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as { event: string; reason?: string })
-      .find((line) => line.event === "ended");
-    expect(ended?.reason).toBe("expired");
+    const db = stack.db();
+    try {
+      expect(db.prepare("select end_reason from shares where id = ?").get(started.id)).toEqual({
+        end_reason: "expired",
+      });
+    } finally {
+      db.close();
+    }
     const page = await browserFetch(`${started.url}/`);
     expect(page.status).toBe(410);
     expect(await page.text()).toContain("This pipe has ended.");
