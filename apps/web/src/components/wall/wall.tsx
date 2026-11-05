@@ -356,25 +356,29 @@ function name(share: Share, short = false) {
 
 /** The pipe's mark: its favicon, or a filled square; hollow while its CLI reconnects. */
 function Mark({ share }: { share: Share }) {
-  if (share.favicon) {
-    return (
-      <img
-        src={`/api/shares/${share.id}/favicon`}
-        alt=""
-        width={16}
-        height={16}
-        className="size-4 shrink-0"
-      />
-    );
-  }
+  // A favicon that won't load falls back to the square rather than a broken image.
+  const [broken, setBroken] = useState(false);
+  // One 16px slot for both, so every pill's label starts at the same place.
   return (
-    <span
-      aria-hidden
-      className={cn(
-        "size-3 shrink-0 border border-muted-foreground",
-        share.state === "live" && "bg-muted-foreground",
+    <span aria-hidden className="flex size-4 shrink-0 items-center justify-center">
+      {share.favicon && !broken ? (
+        <img
+          src={`/api/shares/${share.id}/favicon`}
+          alt=""
+          width={16}
+          height={16}
+          className="size-4"
+          onError={() => setBroken(true)}
+        />
+      ) : (
+        <span
+          className={cn(
+            "size-3 border border-muted-foreground",
+            share.state === "live" && "bg-muted-foreground",
+          )}
+        />
       )}
-    />
+    </span>
   );
 }
 
