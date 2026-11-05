@@ -1,0 +1,106 @@
+import { useState } from "react";
+import { Skeleton } from "skullet/react";
+import { Button } from "@/components/ui/button";
+import { CopyField } from "@/components/ui/copy-field";
+import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Text } from "@/components/ui/text";
+import { TextField } from "@/components/ui/text-field";
+import { useCreateToken, useNow, useRevokeToken, useTokens } from "@/hooks/use-app";
+import { ago } from "@/lib/time";
+
+/** Tokens (spec section 3): create one (shown once), list by name and last use, revoke. */
+export function TokensDialog({
+  isOpen,
+  onOpenChange,
+}: {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const tokens = useTokens(isOpen);
+  const create = useCreateToken();
+  const revoke = useRevokeToken();
+  const now = useNow();
+  const [name, setName] = useState("");
+
+  return (
+    <Dialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) {
+          create.reset();
+          setName("");
+        }
+        onOpenChange(open);
+      }}
+      size="lg"
+    >
+      <DialogHeader>
+        <DialogTitle>Tokens</DialogTitle>
+      </DialogHeader>
+      <DialogBody className="flex flex-col gap-5">
+        <form
+          className="flex gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            create.mutate(name, { onSuccess: () => setName("") });
+          }}
+        >
+          <TextField
+            aria-label="Token name"
+            isRequired
+            value={name}
+            onChange={setName}
+            className="flex-1"
+          >
+            <Input placeholder="Name, like “cloud sessions”" />
+          </TextField>
+          <Button type="submit" isPending={create.isPending}>
+            Create
+          </Button>
+        </form>
+        {create.data && (
+          <div className="flex flex-col gap-2">
+            <CopyField label="WURMHOL_TOKEN" value={create.data.token} />
+            <Text className="text-xs text-muted-foreground">
+              Shown once. Set it where your agent runs.
+            </Text>
+          </div>
+        )}
+        <Skeleton
+          id="tokens"
+          data={tokens.data?.tokens}
+          sample={[
+            { id: "a", name: "cloud sessions", createdAt: "", lastUsedAt: null, createdBy: null },
+          ]}
+          label="Loading tokens"
+        >
+          {(list) =>
+            list.length === 0 ? null : (
+              <ul className="flex flex-col divide-y divide-border">
+                {list.map((token) => (
+                  <li key={token.id} className="flex items-center justify-between gap-3 py-2.5">
+                    <div className="flex min-w-0 flex-col">
+                      <span className="truncate text-sm text-foreground">{token.name}</span>
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {token.lastUsedAt ? `Used ${ago(token.lastUsedAt, now)}` : "Never used"}
+                      </span>
+                    </div>
+                    <Button
+                      intent="danger"
+                      size="xs"
+                      isPending={revoke.isPending && revoke.variables === token.id}
+                      onPress={() => revoke.mutate(token.id)}
+                    >
+                      Revoke
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )
+          }
+        </Skeleton>
+      </DialogBody>
+    </Dialog>
+  );
+}

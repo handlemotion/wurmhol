@@ -1,0 +1,233 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/inter";
+
+@plugin "tailwindcss-react-aria-components";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Design tokens (from Omni). Raw values live here and nowhere else; DESIGN.md says how to use
+   them. Light by default; the dark block below swaps the raw values, never the class names. */
+:root {
+  color-scheme: light;
+  --background: #ffffff;
+  --surface: #fdfdfd;
+  --foreground: #171717;
+  --muted-foreground: #858585;
+  --subtle-foreground: #a6a6a6;
+  --border: #e8e8e8;
+  --accent: #f3f3f3;
+  /* The fluid hover highlight: a faint wash of the foreground. */
+  --hover: color-mix(in oklab, var(--foreground) 3%, transparent);
+  --primary: #0d3eef;
+  --primary-button: #1a4bff;
+  /* What dims the app under a dialog: flat black, no blur. */
+  --scrim: oklch(0 0 0 / 7%);
+  --primary-foreground: #ffffff;
+
+  /* Tactility: crisp, never a big soft blur. Drawn in the foreground's ink. */
+  --shadow-ink: 23 23 23;
+  /* A well: sunk one step into its surface (the copy field). */
+  --well: #f0f0f0;
+  --well-hover: #e8e8e8;
+  --hairline-line: #d9d9d9;
+  --shadow-raised: 0 1px 2px 0 rgb(var(--shadow-ink) / 0.06);
+  --shadow-button: inset 0 1px 0 rgb(255 255 255 / 0.15);
+  --shadow-overlay:
+    0 1px 2px -1px rgb(var(--shadow-ink) / 0.04), 0 6px 10px -6px rgb(var(--shadow-ink) / 0.07);
+
+  /* Intent UI's names, mapped onto the tokens above. */
+  --secondary: #eeeeee;
+  --muted: #d9d9d9;
+  --input: var(--border);
+  --ring: var(--primary);
+  --card: var(--background);
+  --card-foreground: var(--foreground);
+  --overlay: var(--surface);
+  --overlay-foreground: var(--foreground);
+  --secondary-foreground: var(--foreground);
+  --accent-foreground: var(--foreground);
+  --primary-subtle: color-mix(in oklab, var(--primary) 12%, transparent);
+  --primary-subtle-foreground: var(--primary);
+
+  --danger: #ef2a51;
+  --danger-foreground: #ffffff;
+  --danger-subtle: oklch(0.637 0.237 25.331 / 0.15);
+  --danger-subtle-foreground: oklch(0.505 0.213 27.518);
+  --success: oklch(0.596 0.145 163.225);
+  --success-foreground: oklch(1 0 0);
+  --success-subtle: oklch(0.696 0.17 162.48 / 0.15);
+  --success-subtle-foreground: oklch(0.508 0.118 165.612);
+  --warning: oklch(0.828 0.189 84.429);
+  --warning-foreground: oklch(0.279 0.077 45.635);
+  --warning-subtle: oklch(0.828 0.189 84.429 / 0.2);
+  --warning-subtle-foreground: oklch(0.555 0.163 48.998);
+  --info: oklch(0.585 0.233 277.117);
+  --info-subtle: oklch(0.685 0.169 237.323 / 0.15);
+  --info-subtle-foreground: oklch(0.5 0.134 242.749);
+}
+
+/* Dark: the same roles, inverted ink. Surfaces step up in lightness as they rise. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: #0e0e0e;
+    --surface: #141414;
+    --foreground: #ededed;
+    --muted-foreground: #8f8f8f;
+    --subtle-foreground: #6b6b6b;
+    --border: #262626;
+    --accent: #1f1f1f;
+    --primary: #5b7cff;
+    --primary-button: #3d63ff;
+    --scrim: oklch(0 0 0 / 45%);
+    --shadow-ink: 0 0 0;
+    --well: #1c1c1c;
+    --well-hover: #242424;
+    --hairline-line: #333333;
+    --shadow-button: inset 0 1px 0 rgb(255 255 255 / 0.08);
+    --secondary: #222222;
+    --muted: #333333;
+    --danger-subtle-foreground: oklch(0.75 0.16 25);
+    --success-subtle-foreground: oklch(0.78 0.13 165);
+  }
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  /* Inter's recommended web setting (rsms.me/inter): ligatures and contextual alternates. */
+  --font-sans--font-feature-settings: "liga" 1, "calt" 1;
+
+  --text-xs: 11px;
+  --text-xs--line-height: 13px;
+  --text-sm: 13px;
+  --text-sm--line-height: 16px;
+  --text-lg: 17px;
+  --text-lg--line-height: 21px;
+
+  --radius-sm: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+
+  --spacing-icon: 15px;
+
+  --color-background: var(--background);
+  --color-scrim: var(--scrim);
+  --color-surface: var(--surface);
+  --color-info: var(--info);
+  --color-well: var(--well);
+  --color-well-hover: var(--well-hover);
+  --color-hairline-line: var(--hairline-line);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-button: var(--primary-button);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-subtle: var(--primary-subtle);
+  --color-primary-subtle-foreground: var(--primary-subtle-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-hover: var(--hover);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-overlay: var(--overlay);
+  --color-overlay-foreground: var(--overlay-foreground);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-danger-subtle-foreground: var(--danger-subtle-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-subtle: var(--success-subtle);
+  --color-success-subtle-foreground: var(--success-subtle-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-warning-subtle-foreground: var(--warning-subtle-foreground);
+  --color-info-subtle: var(--info-subtle);
+  --color-info-subtle-foreground: var(--info-subtle-foreground);
+}
+
+/* The strong ease-out for anything the user causes, defined once (tactile-design). */
+@theme {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* A toast's countdown bar empties over its duration. */
+@keyframes toast-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--border, currentColor);
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+}
+
+/* Intent UI: a 44px hit area around small controls on touch screens. */
+@utility touch-target {
+  position: relative;
+  &::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 100%;
+    height: 100%;
+    min-height: 44px;
+    min-width: 44px;
+    z-index: 9999;
+  }
+}
+
+/* Loading text: a highlight sweeps across the text in its own color. */
+@utility shimmer {
+  background: linear-gradient(
+      90deg,
+      currentColor 40%,
+      color-mix(in oklab, currentColor 35%, transparent) 50%,
+      currentColor 60%
+    )
+    0 0 / 300% 100%;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 1.6s linear infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
