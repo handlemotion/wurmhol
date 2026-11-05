@@ -243,8 +243,8 @@ importers:
         specifier: ^4.3.4
         version: 4.3.4(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       '@tanstack/react-query':
-        specifier: ^5.105.3
-        version: 5.105.3(@types/react@19.3.0)(react@19.3.1)
+        specifier: ^5.106.0
+        version: 5.106.0(@types/react@19.3.0)(react@19.3.1)
       '@wurmhol/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -255,11 +255,11 @@ importers:
         specifier: ^0.5.2
         version: 0.5.2
       lucide-react:
-        specifier: ^1.67.0
-        version: 1.67.0(@types/react@19.3.0)(react@19.3.1)
+        specifier: ^1.68.0
+        version: 1.68.0(@types/react@19.3.0)(react@19.3.1)
       motion:
-        specifier: ^14.9.0
-        version: 14.9.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        specifier: ^14.9.1
+        version: 14.9.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -2392,11 +2392,11 @@ packages:
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7 || ^8
 
-  '@tanstack/query-core@5.105.3':
-    resolution: {integrity: sha512-v1rbNy7MB/4Akth7CQH+CerV13K7Ok9hAusEsfz4sCjDdu3/kOSJPoWfoB+YjdEX1eBFBWKNAGE5nqZCgdlHDw==}
+  '@tanstack/query-core@5.106.0':
+    resolution: {integrity: sha512-3GuqVrhCG0bBfmLt4AU0SIm8UuZ1rzeRjDiQBnYuzW3lkri1RdawWN73jZYvB4kC8WyDUoDgBx3kyO3TbNH/6Q==}
 
-  '@tanstack/react-query@5.105.3':
-    resolution: {integrity: sha512-dj5hGWZmwoc9NG4enoXuYbiYwb5FxgJYPVv06eUgicMTfEMTRXn08Xv9D/r1V8TfjAv+BpxdvZFzJ1h3hSWZcQ==}
+  '@tanstack/react-query@5.106.0':
+    resolution: {integrity: sha512-OuP/ST9dEMBwHhisE5A/bBSWMhMmB/xKPfeZ2U0Wy8W/txb9QiGd7iXhxJPQ7jGbfcKlV13sJUHip9Nki54yyg==}
     peerDependencies:
       '@types/react': ^18 || ^19
       react: ^18 || ^19
@@ -3383,8 +3383,8 @@ packages:
     resolution: {integrity: sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow==}
     engines: {node: '>= 0.6'}
 
-  framer-motion@14.9.0:
-    resolution: {integrity: sha512-g1hZu8WoTwgsoVAaqEEcefhvR03cKGtkmrKaRrWpXhnM3LGR8jl1u2qyJ1PMVlO7LKQHE8TTRQYUlMmnrY4L+g==}
+  framer-motion@14.9.1:
+    resolution: {integrity: sha512-WDWNT2ixHdmpvGg02BZWI/SWwRYzPiMUf4aIkTBgrxxD8RYFdZO3fCM4pnLMo6j8mUpj0+BuJRHQBChI4v3Anw==}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
@@ -3748,8 +3748,8 @@ packages:
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
 
-  lucide-react@1.67.0:
-    resolution: {integrity: sha512-z7kd21YNm/Gw3E7mTnq5dTuvV+yc+OEwA//oDENSG1SbZ/NVgKdjxALJFNdGoC0Ji7HaJR2Dha9ev7VUPxy9CQ==}
+  lucide-react@1.68.0:
+    resolution: {integrity: sha512-9i7NKWm2QlOprMhcwkhBOlIt9zB7cp2GIyFY+oMue0EsprolUFxva5rkdBbyfs4k1eejpa0JRnRgVOGiart+Xg==}
     peerDependencies:
       '@types/react': '*'
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
@@ -3811,14 +3811,14 @@ packages:
     resolution: {integrity: sha512-wghSXG3KHzMbAYvcrHFxN6JNI1Or3LSxpBe1qHdnFXFOPIDIlXCNvsRVF2J97rXsfFSJr7EzxRSjoUCmgVDEUA==}
     engines: {node: '>=22.0.0'}
 
-  motion-dom@14.9.0:
-    resolution: {integrity: sha512-wGjKbNDMHd75aLStkxLCKZ+T8/wusZHklmNLK1Ak68UrdBt2X8I4yweYR/0WonxGnBsw6oloDTIV8pN+UTvzzA==}
+  motion-dom@14.9.1:
+    resolution: {integrity: sha512-2eCCGXH2Yv09lM8GHK3TdfChrcvHxzVY19LD9VraoHEaQl5+PuGnTNnmJaBAR+5MdxUVdsLFXygFJjR9RwRSxw==}
 
   motion-utils@14.7.0:
     resolution: {integrity: sha512-woO0/Nb7ys75f94fjvQi/6leiHGvZUYkeHUPEZ3vxsV+9OpEVhkxp01x8MlRwX0zt31EqgXsKDAoBoJLC148Tw==}
 
-  motion@14.9.0:
-    resolution: {integrity: sha512-Oc+jjq/AyhwsnEUaAq2xEu/SsfKTphgsXqoxddTSLzgTdXZc6FwHcp9RLGSECccTykN1/p3gWUN4kMJAamm+1g==}
+  motion@14.9.1:
+    resolution: {integrity: sha512-u58zTNOs6vefAwvPncTJ8vkQm+P08V4+mhNgap8p/mFZjl8+gWp7SG4cMTamebVSgpX6PcDtqzWpZngqKcfd7A==}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
@@ -6542,11 +6542,11 @@ snapshots:
       tailwindcss: 4.3.4
       vite: 8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
 
-  '@tanstack/query-core@5.105.3': {}
+  '@tanstack/query-core@5.106.0': {}
 
-  '@tanstack/react-query@5.105.3(@types/react@19.3.0)(react@19.3.1)':
+  '@tanstack/react-query@5.106.0(@types/react@19.3.0)(react@19.3.1)':
     dependencies:
-      '@tanstack/query-core': 5.105.3
+      '@tanstack/query-core': 5.106.0
       react: 19.3.1
     optionalDependencies:
       '@types/react': 19.3.0
@@ -7474,9 +7474,9 @@ snapshots:
 
   forwarded@0.2.0: {}
 
-  framer-motion@14.9.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
+  framer-motion@14.9.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
     dependencies:
-      motion-dom: 14.9.0
+      motion-dom: 14.9.1
       motion-utils: 14.7.0
       tslib: 2.9.1
     optionalDependencies:
@@ -7772,7 +7772,7 @@ snapshots:
     dependencies:
       yallist: 3.1.1
 
-  lucide-react@1.67.0(@types/react@19.3.0)(react@19.3.1):
+  lucide-react@1.68.0(@types/react@19.3.0)(react@19.3.1):
     dependencies:
       react: 19.3.1
     optionalDependencies:
@@ -7846,15 +7846,15 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  motion-dom@14.9.0:
+  motion-dom@14.9.1:
     dependencies:
       motion-utils: 14.7.0
 
   motion-utils@14.7.0: {}
 
-  motion@14.9.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
+  motion@14.9.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
     dependencies:
-      framer-motion: 14.9.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      framer-motion: 14.9.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       tslib: 2.9.1
     optionalDependencies:
       react: 19.3.1
