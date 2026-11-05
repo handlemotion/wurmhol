@@ -149,6 +149,10 @@ asks for no lifetime lasts `DEFAULT_SHARE_SECONDS` (4 h), capped at `LIMIT_SHARE
 WURMHOL_URL=https://api.example.com WURMHOL_TOKEN=wh_… npx wurmhol 8787
 ```
 
+Or `WURMHOL_URL=https://api.example.com npx wurmhol login`: it prints a code to approve at
+`<BETTER_AUTH_URL>/device` and stores the token in `~/.wurmhol/credentials.json`. Both of its
+calls go to the CLI's host, so nothing else needs allowlisting.
+
 In a sandbox with a Limited network policy, allowlist `api.example.com` (the only host the CLI
 dials).
 

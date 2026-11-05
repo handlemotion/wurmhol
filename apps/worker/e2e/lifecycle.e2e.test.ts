@@ -130,7 +130,7 @@ describe("the wall and Terminate", () => {
     });
     expect(missing.code).toBe(1);
     expect(missing.stderr).toBe(
-      `wurmhol: Set WURMHOL_TOKEN to a token from ${stack.url} (menu → Tokens).\n`,
+      `wurmhol: Run wurmhol login, or set WURMHOL_TOKEN to a token from ${stack.url} (menu → Tokens).\n`,
     );
     const wrong = await cli(["8080"], { ...env, WURMHOL_TOKEN: "wh_not-a-real-token" });
     expect(wrong.code).toBe(1);
