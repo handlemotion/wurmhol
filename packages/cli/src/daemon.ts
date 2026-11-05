@@ -3,9 +3,10 @@
 // itself with `DAEMON_COMMAND` and the share's options, and the daemon reports over IPC once it
 // has the URL or knows why it cannot.
 import { spawn } from "node:child_process";
+import { setTimeout as sleep } from "node:timers/promises";
 import { FixError } from "./errors.ts";
 import { appendLog, appendRequest } from "./logs.ts";
-import { openPipe, type Pipe } from "./pipe.ts";
+import { openPipe, type Pipe, type PipeSource } from "./pipe.ts";
 import { detectSource } from "./source.ts";
 import { pipeName } from "@wurmhol/protocol";
 import { logFile, removeState, type ShareRequest, writeState } from "./state.ts";
@@ -75,40 +76,102 @@ export async function startDaemon(
   return message;
 }
 
-/** The daemon: holds the share's pipe until it ends. `argument` is what `startDaemon` passed. */
+/** Bounds of the wait between reopen attempts: doubling, capped. */
+const REOPEN_FIRST_MS = 1000;
+const REOPEN_MAX_MS = 60_000;
+
+/** Ends the daemon once its pipe has ended for good. */
+function exit(pipe: Pipe): never {
+  removeState(pipe.id);
+  process.exit(0);
+}
+
+/**
+ * The daemon: holds the share's pipe until it ends. `argument` is what `startDaemon` passed.
+ *
+ * A pipe that ends `disconnected` (the relay's reconnect grace ran out, e.g. while a laptop slept)
+ * is opened again for the same port and options, with backoff, until one opens or the daemon is
+ * stopped: a named pipe gets its URL back, an unnamed one a new URL. The new pipe keeps the old
+ * one's end time. Every other reason, and a refusal no retry can get past, ends the daemon.
+ */
 export async function runDaemon(argument: string, connection: { server: string; token: string }) {
   const options = JSON.parse(argument) as ShareOptions;
-  const { port, ttl, only, name, link, note } = options;
+  const { port, only, name, link, note } = options;
   const report = (message: ReadyMessage) => process.send?.(message);
   const log = (shareId: string | null, event: string, fields: Record<string, unknown>) =>
     appendLog(shareId ?? `port-${port}`, event, { port, ...fields });
+  // SIGTERM (`wurmhol stop`) aborts: it closes the open pipe, or ends a wait to reopen one.
+  const stopping = new AbortController();
+  const { signal } = stopping;
+  const viewers = only
+    ?.split(",")
+    .map((email) => email.trim())
+    .filter(Boolean);
+  let source: Partial<PipeSource>;
+  const open = (ttl: number | undefined) =>
+    openPipe({ ...connection, port, ttl, viewers, name, source, signal }, { log });
+  const hold = (pipe: Pipe) => {
+    pipe.on("request", (request) => appendRequest(pipe.id, request, { port }));
+    pipe.once("close", (reason) => {
+      if (reason === "disconnected" && !signal.aborted) void reopen(pipe);
+      else exit(pipe);
+    });
+    writeState({
+      id: pipe.id,
+      url: pipe.url,
+      port,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      endsAt: pipe.endsAt.toISOString(),
+      request: shareRequest(options),
+    });
+  };
+
+  // The old pipe's state file stays until the new one is written, so `wurmhol stop` and
+  // `wurmhol logs` still find this daemon by its port, id or name while it retries.
+  const reopen = async (old: Pipe) => {
+    log(old.id, "reopening", {});
+    let wait = REOPEN_FIRST_MS;
+    while (!signal.aborted) {
+      try {
+        await sleep(wait, undefined, { signal });
+      } catch {
+        break;
+      }
+      wait = Math.min(wait * 2, REOPEN_MAX_MS);
+      const left = Math.ceil((old.endsAt.getTime() - Date.now()) / 1000);
+      if (left < 1) {
+        log(old.id, "reopen.ended", { reason: "expired" });
+        break;
+      }
+      let pipe: Pipe;
+      try {
+        pipe = await open(left);
+      } catch (error) {
+        if (signal.aborted) break;
+        const message = error instanceof Error ? error.message : String(error);
+        log(old.id, "reopen.failed", { message });
+        if (error instanceof FixError && error.final) break;
+        continue;
+      }
+      for (const id of [old.id, pipe.id]) log(id, "reopened", { from: old.id, to: pipe.id });
+      hold(pipe);
+      if (pipe.id !== old.id) removeState(old.id);
+      return;
+    }
+    exit(old);
+  };
+
   let pipe: Pipe;
   try {
-    const viewers = only
-      ?.split(",")
-      .map((email) => email.trim())
-      .filter(Boolean);
-    const source = { ...(await detectSource(process.cwd(), process.env)), link, note };
-    pipe = await openPipe({ ...connection, port, ttl, viewers, name, source }, { log });
+    source = { ...(await detectSource(process.cwd(), process.env)), link, note };
+    pipe = await open(options.ttl);
   } catch (error) {
     report({ type: "error", message: error instanceof FixError ? error.message : String(error) });
     process.exit(1);
   }
-  pipe.on("request", (request) => appendRequest(pipe.id, request, { port }));
-  pipe.once("close", () => {
-    removeState(pipe.id);
-    process.exit(0);
-  });
-  writeState({
-    id: pipe.id,
-    url: pipe.url,
-    port,
-    pid: process.pid,
-    startedAt: new Date().toISOString(),
-    endsAt: pipe.endsAt.toISOString(),
-    request: shareRequest(options),
-  });
-  const stop = () => void pipe.close();
+  hold(pipe);
+  const stop = () => stopping.abort();
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
   process.on("SIGHUP", () => {}); // The terminal that started it may close.

@@ -77,4 +77,9 @@ Run the same `wurmhol <port>` again and it prints the pipe that is already open 
 a second one. A different `--name`, `--only`, `--link` or `--note`, or any `--ttl`, opens a new
 pipe; for a new URL with the same flags, `wurmhol stop <port>` first.
 
+A pipe rides out short drops on the same link. When the connection is gone longer than the relay
+waits for it (a laptop asleep, a network down), `wurmhol <port>` opens the pipe again as soon as
+it can reach the relay, until its end time: a `--name` pipe gets its link back, any other pipe a
+new link, which `wurmhol ls` shows. `wurmhol logs` records it as `reopened`.
+
 When something fails, the error is one line with what to do about it. Node 22 or later.
