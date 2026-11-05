@@ -96,6 +96,7 @@ dashboard, or `WORKER_VAR_<NAME>` build variables for the deploy script.
 | `AUTH_TRUSTED_ORIGINS`                 | empty (or extra origins allowed to call auth) |
 | `ENVIRONMENT`                          | `production`                                  |
 | `GOOGLE_CLIENT_ID`, `GITHUB_CLIENT_ID` | optional OAuth clients                        |
+| `DOCS_URL`                             | optional, your docs (default the hosted docs) |
 
 Secrets (`wrangler secret put <NAME>`): `BETTER_AUTH_SECRET` (`openssl rand -base64 32`), and
 optionally `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET`, `STRIPE_SECRET_KEY`,

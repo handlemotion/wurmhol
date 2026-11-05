@@ -81,6 +81,11 @@ export interface SignInMethods {
   magicLink: boolean;
 }
 
+/** The Worker's config for the app (apps/worker/src/app.ts `appConfig`). */
+export interface AppConfig {
+  docsUrl: string;
+}
+
 /** A `wurmhol login` waiting for approval (apps/worker/src/routes/device.ts). */
 export interface DeviceLogin {
   code: string;

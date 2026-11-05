@@ -2,6 +2,7 @@ import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/r
 import { useEffect, useState } from "react";
 import {
   api,
+  type AppConfig,
   type Member,
   type Share,
   type SignInMethods,
@@ -15,6 +16,7 @@ import { meQuery } from "@/lib/me";
 export const keys = {
   me: meQuery.queryKey,
   methods: ["sign-in-methods"] as const,
+  config: ["app-config"] as const,
   tokens: ["tokens"] as const,
   members: ["members"] as const,
 };
@@ -24,27 +26,37 @@ export function useMe() {
 }
 
 /**
- * The Worker writes the sign-in methods into the page it serves (`#sign-in-methods`), so the
- * login form renders complete on its first paint. Without them (the Vite dev server), the
- * query fetches as usual.
+ * The Worker writes the sign-in methods (`#sign-in-methods`) and the app config (`#app-config`)
+ * into the page it serves, so the login form and the wall render complete on their first paint.
+ * Without them (the Vite dev server), the queries fetch as usual.
  */
-function inlineSignInMethods(): SignInMethods | undefined {
-  const text = document.getElementById("sign-in-methods")?.textContent;
+function inline<T>(id: string): T | undefined {
+  const text = document.getElementById(id)?.textContent;
   if (!text) return undefined;
   try {
-    return JSON.parse(text) as SignInMethods;
+    return JSON.parse(text) as T;
   } catch {
     return undefined;
   }
 }
 
+export function useAppConfig() {
+  const config = inline<AppConfig>("app-config");
+  return useQuery({
+    queryKey: keys.config,
+    queryFn: () => api<AppConfig>("/api/app-config"),
+    initialData: config,
+    staleTime: config ? Infinity : 0,
+  });
+}
+
 export function useSignInMethods() {
-  const inline = inlineSignInMethods();
+  const methods = inline<SignInMethods>("sign-in-methods");
   return useQuery({
     queryKey: keys.methods,
     queryFn: () => api<SignInMethods>("/api/sign-in-methods"),
-    initialData: inline,
-    staleTime: inline ? Infinity : 0,
+    initialData: methods,
+    staleTime: methods ? Infinity : 0,
   });
 }
 

@@ -42,6 +42,8 @@
     "AUTH_TRUSTED_ORIGINS": "",
     "AUTH_PASSKEY_RP_ID": "",
     "APP_NAME": "Wurmhol",
+    // Where the wall's Docs links go. Empty: the hosted docs, https://wurmhol.com/docs.
+    "DOCS_URL": "",
     // Sender of magic-link mail (ADR 0005), on a domain onboarded to Email Service.
     "MAIL_FROM": "",
     "GOOGLE_CLIENT_ID": "",

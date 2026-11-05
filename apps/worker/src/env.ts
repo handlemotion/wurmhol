@@ -94,6 +94,13 @@ const configSchema = z
           .map((host) => host.trim().toLowerCase())
           .filter(Boolean),
       ),
+    /** Where the wall's Docs links go. The hosted docs by default; a self-hosted install may
+     * point it at its own copy. */
+    DOCS_URL: z
+      .string()
+      .optional()
+      .transform((value) => value || "https://wurmhol.com/docs")
+      .pipe(z.url({ protocol: /^https?$/ })),
     /** Fair-use limits per org (spec section 4), enforced by the Durable Objects. */
     LIMIT_ACTIVE_SHARES: positive(5),
     /** Bytes relayed per org per calendar month (UTC), both directions. 100 GB by default. */
