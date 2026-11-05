@@ -22,6 +22,9 @@ SHARE_DOMAIN=pipe.localhost
 # oauth.example-pipes.dev) the pipes' wildcard route and certificate already cover it, and no pipe
 # may take that label as its name. Empty: no relay.
 OAUTH_RELAY_HOST=
+# Optional. Where the wall's Docs links go, e.g. https://docs.example.com. Empty: the hosted
+# docs, https://wurmhol.com/docs.
+DOCS_URL=
 # production (default), development or test. development turns on magic-link sign-in with the
 # link printed to the wrangler console ({"event":"auth.dev_link",...}) and shown on the login page,
 # with or without MAIL_FROM.

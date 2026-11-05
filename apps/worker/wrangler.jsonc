@@ -39,6 +39,8 @@
     "AUTH_TRUSTED_ORIGINS": "http://localhost:5173",
     "AUTH_PASSKEY_RP_ID": "",
     "APP_NAME": "Wurmhol",
+    // Where the wall's Docs links go. Empty: the hosted docs, https://wurmhol.com/docs.
+    "DOCS_URL": "",
     // Sender of magic-link mail (ADR 0005), on a domain onboarded to Email Service. Empty: no
     // magic links in production (development and test log the link instead).
     "MAIL_FROM": "",

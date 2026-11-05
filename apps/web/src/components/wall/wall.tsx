@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/menu";
 import { Text } from "@/components/ui/text";
 import {
+  useAppConfig,
   useMe,
   useNow,
   useOpenBilling,
@@ -328,8 +329,6 @@ function Network({ shares }: { shares: Share[] }) {
 }
 
 const LOGIN = "npx wurmhol login && npx wurmhol <port>";
-/** The project's public docs: the same for hosted and self-hosted installs. */
-const DOCS = "https://wurmhol.com/docs";
 
 /** npm's mark (svgl) at 13px inside the rows' 15px icon slot, as the design draws it. */
 function NpmMark() {
@@ -376,6 +375,7 @@ const CREATE = [
 function CreateCard() {
   const { copy, copied } = useClipboard();
   const [last, setLast] = useState<string | null>(null);
+  const docs = useAppConfig().data?.docsUrl;
   return (
     <section
       data-open
@@ -404,15 +404,17 @@ function CreateCard() {
         ))}
       </ActionList>
       {/* The footer mirrors the label above: same row, same muted type, pinned to the bottom. */}
-      <Link
-        href={DOCS}
-        target="_blank"
-        rel="noopener"
-        className="mt-auto flex h-8 items-center gap-1 px-2 text-xs text-subtle-foreground hover:text-foreground"
-      >
-        Docs
-        <IconArrowUpRight className="size-3" />
-      </Link>
+      {docs && (
+        <Link
+          href={docs}
+          target="_blank"
+          rel="noopener"
+          className="mt-auto flex h-8 items-center gap-1 px-2 text-xs text-subtle-foreground hover:text-foreground"
+        >
+          Docs
+          <IconArrowUpRight className="size-3" />
+        </Link>
+      )}
     </section>
   );
 }
