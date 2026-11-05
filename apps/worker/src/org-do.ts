@@ -2,6 +2,7 @@
 // wall, pushed to every open wall over WebSockets (hibernation API, no polling), and the counts
 // behind the org's fair-use limits: active shares and bytes relayed this month.
 import { DurableObject } from "cloudflare:workers";
+import type { PipeSource } from "@wurmhol/protocol";
 
 /** One card on the wall. */
 export interface ShareCard {
@@ -20,6 +21,8 @@ export interface ShareCard {
   views: { name: string; lastSeenAt: number }[];
   /** `away`: its CLI dropped and has up to 60 s to come back. */
   state: "live" | "away";
+  /** Where it came from (ADR 0015): repo, branch, commit, agent session, link and note. */
+  source: PipeSource | null;
 }
 
 export type WallEvent =
@@ -40,10 +43,10 @@ function month(at = Date.now()) {
 
 /**
  * A stored card in the current shape. Cards written by an older Worker lack the fields added
- * since (`views`, ADR 0008); they get those fields' empty values so walls can rely on the shape.
+ * since (`views`, ADR 0008; `source`, ADR 0015); they get those fields' empty values so walls can rely on the shape.
  */
 function current(card: Partial<ShareCard> & Pick<ShareCard, "id">): ShareCard {
-  return { views: [], ...card } as ShareCard;
+  return { views: [], source: null, ...card } as ShareCard;
 }
 
 export class Org extends DurableObject<Env> {

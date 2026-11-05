@@ -23,6 +23,7 @@ import {
   type WsOpenPayload,
 } from "@wurmhol/protocol";
 import WebSocket from "ws";
+import type { PipeSource } from "./pipe.ts";
 import { FixError, explainConnectError, explainRefusal } from "./errors.ts";
 
 export interface ShareInfo {
@@ -55,6 +56,8 @@ export interface TunnelOptions {
   viewers: string[];
   /** A named pipe's name (`--name`): the same host every time. */
   name?: string;
+  /** Where a new share comes from (ADR 0015); a reconnect keeps what the share started with. */
+  source: PipeSource | null;
   version: string;
   log: Logger;
   onRequest: (event: RequestEvent) => void;
@@ -182,6 +185,9 @@ export class Tunnel {
           // Who may open a new share; a reconnect keeps the list the share started with.
           ...(!this.#share && this.#options.viewers.length
             ? { "wurmhol-viewers": this.#options.viewers.join(",") }
+            : {}),
+          ...(!this.#share && this.#options.source
+            ? { "wurmhol-source": encodeURIComponent(JSON.stringify(this.#options.source)) }
             : {}),
           "user-agent": `wurmhol/${this.#options.version} node/${process.versions.node}`,
         },
