@@ -8,10 +8,13 @@ import { z } from "zod";
 import pkg from "../package.json" with { type: "json" };
 import { consoleUrl, findToken, server } from "./config.ts";
 import { FixError } from "./errors.ts";
+import { appendRequest, recentRequests } from "./logs.ts";
 import { openPipe, type Pipe } from "./pipe.ts";
+import { listStates, matches } from "./state.ts";
 
 const INSTRUCTIONS = `Wurmhol gives a local dev server a private HTTPS URL that only members of the user's org can open, in their own browser, on any device.
 When the user wants to see or try a server running here, call open_pipe with its port and send them the URL. Call stop_pipe when they are done. Pipes end when this MCP session ends.
+When the user says something is broken on the page they opened, call recent_requests to see what their browser asked for and what the dev server answered.
 Errors say the fix in one line: pass them on to the user as they are.`;
 
 /** How long shutdown waits for the relay to confirm each pipe ended. */
@@ -120,6 +123,7 @@ export function createServer(pipes: Map<string, Held>) {
         });
         const held: Held = { pipe, name: name ? pipeName(name) : null, startedAt: new Date() };
         pipes.set(pipe.id, held);
+        pipe.on("request", (request) => appendRequest(pipe.id, request, { port }));
         pipe.once("close", () => pipes.delete(pipe.id));
         const result = describe(held);
         return ok(`${pipe.url}\nPort ${port}, ends ${result.endsAt}. Id ${pipe.id}.`, result);
@@ -144,6 +148,72 @@ export function createServer(pipes: Map<string, Held>) {
         ? list.map((p) => `${p.port}\t${p.url}\t${p.id}\tends ${p.endsAt}`).join("\n")
         : "No open pipes. Open one with open_pipe.";
       return ok(text, { pipes: list });
+    },
+  );
+
+  mcp.registerTool(
+    "recent_requests",
+    {
+      title: "Recent requests",
+      description:
+        "The last requests the user's browser made through a pipe on this machine, oldest first: method, path (query values left out), the dev server's status and how long it took. Use it to see what failed, e.g. a 500 on /api/checkout. Works for pipes opened here and with `npx wurmhol`.",
+      inputSchema: {
+        target: z.string().describe("The pipe's port, id or name"),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe("How many requests, newest last. Default 20"),
+      },
+      outputSchema: {
+        id: z.string(),
+        url: z.string(),
+        requests: z.array(
+          z.object({
+            time: z.string().describe("When the request finished (ISO 8601)"),
+            method: z.string(),
+            path: z.string(),
+            status: z.number().int(),
+            durationMs: z.number(),
+          }),
+        ),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async ({ target, limit }) => {
+      try {
+        const wanted = target.trim().toLowerCase();
+        const own = [...pipes.values()]
+          .filter(
+            ({ pipe, name }) =>
+              pipe.id === target ||
+              String(pipe.port) === wanted ||
+              name === wanted ||
+              new URL(pipe.url).hostname.split(".")[0] === wanted,
+          )
+          .map(({ pipe }) => ({ id: pipe.id, url: pipe.url }));
+        const found =
+          own.at(-1) ??
+          listStates()
+            .filter((s) => matches(s, target))
+            .at(-1);
+        if (!found) {
+          throw new FixError(
+            `No open pipe for ${target} on this machine. See list_pipes, or \`wurmhol ls\`.`,
+          );
+        }
+        const requests = recentRequests(found.id, limit ?? 20) ?? [];
+        const text = requests.length
+          ? requests
+              .map((r) => `${r.time}  ${r.method} ${r.path}  ${r.status}  ${r.durationMs} ms`)
+              .join("\n")
+          : `No requests through ${found.url} yet.`;
+        return ok(text, { id: found.id, url: found.url, requests });
+      } catch (error) {
+        return failure(error);
+      }
     },
   );
 

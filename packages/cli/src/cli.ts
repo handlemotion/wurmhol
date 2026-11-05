@@ -6,6 +6,7 @@
 //                                 start a share; prints its URL first, then returns
 //   wurmhol ls [--json]           open shares on this machine
 //   wurmhol stop <port|id|name>   end one; `--all` ends every one
+//   wurmhol logs <port|id|name>   a pipe's recent requests and events (`--follow`, `--json`)
 //   wurmhol init [--skill]        tell the repo's agents how to share
 //   wurmhol host                  connect this computer to the wall; open pipes from the browser
 //                                 (--install runs it at login, --uninstall removes that)
@@ -36,9 +37,10 @@ import { FixError } from "./errors.ts";
 import { host as runHost } from "./host.ts";
 import { init } from "./init.ts";
 import { login as deviceLogin, redeem } from "./login.ts";
+import { followLog, isRequest, type LogRecord, readLog, toRequest } from "./logs.ts";
 import { checkService, installService, stableEntry, uninstallService } from "./service.ts";
 import { DEFAULT_CONSOLE, DEFAULT_SERVER } from "./pipe.ts";
-import { alive, listStates, logFile, removeState, type ShareState } from "./state.ts";
+import { alive, listStates, logFile, matches, removeState, type ShareState } from "./state.ts";
 
 /** This file: the daemon and the login service run it again. */
 const entry = fileURLToPath(import.meta.url);
@@ -58,6 +60,10 @@ Usage:
     --note <text>               One line to show with the pipe on the wall
   wurmhol ls [--json]           List open pipes
   wurmhol stop <port|id|name>   End a pipe (--all ends every one)
+  wurmhol logs <port|id|name>   A pipe's recent requests (method, path, status, time) and
+                                connection events, kept on this machine only
+    -f, --follow                Keep printing new lines
+    --json                      One JSON object a line
   wurmhol init [--skill]        Tell this repo's agents how to share (AGENTS.md or
                                 CLAUDE.md); --skill also writes .claude/skills/wurmhol
   wurmhol host                  Connect this computer to the wall, to open pipes to its
@@ -69,7 +75,8 @@ Usage:
   wurmhol login                 Approve this computer in the browser; stores a token
   wurmhol logout                Delete the stored token
   wurmhol mcp                   Run an MCP server on stdio (open_pipe, list_pipes,
-                                stop_pipe); pipes end when the MCP session ends
+                                recent_requests, stop_pipe); pipes end when the MCP
+                                session ends
 
 Environment:
   WURMHOL_TOKEN   A token from your org (${DEFAULT_CONSOLE}, menu → Tokens); wins over login
@@ -270,16 +277,7 @@ function ls(json: boolean) {
 
 async function stop(target: string | undefined, all: boolean) {
   const states = listStates();
-  const port = parsePort(target);
-  const chosen = all
-    ? states
-    : states.filter(
-        (s) =>
-          s.id === target ||
-          (port !== null && s.port === port) ||
-          // A named pipe, by the first label of its host.
-          new URL(s.url).hostname.split(".")[0] === target?.toLowerCase(),
-      );
+  const chosen = all ? states : states.filter((s) => target !== undefined && matches(s, target));
   if (!all && !target) fail("Say which share: wurmhol stop <port|id|name>, or --all.");
   if (!chosen.length) {
     if (all) return;
@@ -299,6 +297,36 @@ async function stop(target: string | undefined, all: boolean) {
   }
   for (const s of chosen) removeState(s.id);
   for (const s of chosen) process.stdout.write(`stopped ${s.url}\n`);
+}
+
+/** Lines `wurmhol logs` prints before it follows. */
+const LOG_LINES = 50;
+
+/** The log `target` names: an open pipe's (the newest one on a port), or an ended pipe's id. */
+function logOf(target: string): string | null {
+  const open = listStates().filter((s) => matches(s, target));
+  if (open.length) return open.at(-1)!.id;
+  return /^[a-z0-9]{1,40}$/.test(target) && readLog(target) ? target : null;
+}
+
+function formatRecord(record: LogRecord) {
+  if (isRequest(record)) {
+    const { time, method, path, status, durationMs } = toRequest(record);
+    return `${time}  ${method} ${path}  ${status}  ${durationMs} ms`;
+  }
+  const { time, event, port: _port, ...fields } = record;
+  return `${time}  ${event}${Object.keys(fields).length ? ` ${JSON.stringify(fields)}` : ""}`;
+}
+
+/** `wurmhol logs <port|id|name>`: the pipe's recent requests and connection events. */
+function logs(target: string | undefined, json: boolean, follow: boolean) {
+  if (!target) fail("Say which pipe: wurmhol logs <port|id|name>.");
+  const name = logOf(target);
+  if (!name) fail(`No log for ${target}. See: wurmhol ls`);
+  const print = (record: LogRecord) =>
+    process.stdout.write(`${json ? JSON.stringify(record) : formatRecord(record)}\n`);
+  for (const record of (readLog(name) ?? []).slice(-LOG_LINES)) print(record);
+  if (follow) followLog(name, print, new AbortController().signal);
 }
 
 const SEE_FLAGS = "Run `npx wurmhol@latest --help` to see the flags.";
@@ -340,6 +368,7 @@ function parseCommandLine(args = process.argv.slice(2)) {
         link: { type: "string" },
         note: { type: "string" },
         all: { type: "boolean", default: false },
+        follow: { type: "boolean", short: "f", default: false },
         skill: { type: "boolean", default: false },
         install: { type: "boolean", default: false },
         uninstall: { type: "boolean", default: false },
@@ -364,6 +393,7 @@ async function main() {
   }
   if (command === "ls") return ls(values.json);
   if (command === "stop") return stop(argument, values.all);
+  if (command === "logs") return logs(argument, values.json, values.follow);
   if (command === "init") return init(values.skill);
   if (command === "login") return login();
   if (command === "host" && values.install) return installHost();

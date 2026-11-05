@@ -8,6 +8,7 @@ description: "Every command, flag and variable of `npx wurmhol`."
 | `wurmhol <port>`                | Open a pipe to a port, print its link and return                                    |
 | `wurmhol ls`                    | List open pipes and when each one ends                                              |
 | `wurmhol stop <port\|id\|name>` | End one, or every one with `--all`                                                  |
+| `wurmhol logs <port\|id\|name>` | Recent requests and connection events; `--follow`, `--json`                         |
 | `wurmhol init`                  | Tell this repo's agents how to share, `--skill` adds the skill                      |
 | `wurmhol host`                  | Connect this computer, to open pipes from Create pipe; `--install` keeps it running |
 | `wurmhol login`                 | Approve this computer in the browser and save a token                               |
@@ -41,6 +42,14 @@ On macOS it is a launch agent, `~/Library/LaunchAgents/com.wurmhol.host.plist`. 
 a systemd user service, `wurmhol-host` (`systemctl --user status wurmhol-host`); without systemd,
 keep `wurmhol host` open in a terminal. Windows is not supported yet. If you switch Node versions
 and remove the old one, run `wurmhol host --install` again.
+
+## Logs
+
+`wurmhol logs 5173` prints a pipe's last 50 lines: each request your viewers made, as method, path,
+status and time taken, and when the pipe connected or dropped. `--follow` keeps printing new ones.
+Query values, bodies, headers and cookies are never written; `/cb?code=abc` is logged as
+`/cb?code=`. The log stays on this computer, in `~/.wurmhol/logs`, at most about 2 MB per pipe,
+and Wurmhol's servers keep none of it.
 
 ## Flags
 
