@@ -25,23 +25,23 @@ export const buttonStyles = tv({
   ],
   variants: {
     intent: {
-      // Every button shares the danger button's build: an edge a step darker than its fill, a
-      // faint top highlight inside (`--shadow-button`), no outer drop.
+      // Every button shares the danger button's build: flat, with an edge a step darker than its
+      // fill. No highlight or drop: depth doesn't sit well on sharp corners.
       primary:
-        "shadow-(--shadow-button) [--btn-bg:var(--color-primary-button)] [--btn-border:color-mix(in_oklab,var(--color-primary-button)_85%,black)] [--btn-foreground:var(--color-primary-foreground)] [--btn-icon-active:var(--primary-foreground)]/80 [--btn-icon:var(--primary-foreground)]/60 [--btn-overlay:color-mix(in_oklab,var(--color-primary-foreground)_10%,var(--color-primary-button)_90%)]",
+        "[--btn-bg:var(--color-primary-button)] [--btn-border:color-mix(in_oklab,var(--color-primary-button)_85%,black)] [--btn-foreground:var(--color-primary-foreground)] [--btn-icon-active:var(--primary-foreground)]/80 [--btn-icon:var(--primary-foreground)]/60 [--btn-overlay:color-mix(in_oklab,var(--color-primary-foreground)_10%,var(--color-primary-button)_90%)]",
       secondary:
-        "shadow-(--shadow-button) [--btn-border:color-mix(in_oklab,var(--color-secondary)_88%,black)] [--btn-bg:var(--color-secondary)] [--btn-foreground:var(--color-secondary-foreground)] [--btn-icon:var(--color-muted-foreground)] [--btn-outline:var(--color-secondary-foreground)] [--btn-overlay:color-mix(in_oklab,var(--color-secondary-foreground)_4%,var(--color-secondary))] [--btn-ring:var(--color-muted-foreground)]/20",
+        "[--btn-border:color-mix(in_oklab,var(--color-secondary)_88%,black)] [--btn-bg:var(--color-secondary)] [--btn-foreground:var(--color-secondary-foreground)] [--btn-icon:var(--color-muted-foreground)] [--btn-outline:var(--color-secondary-foreground)] [--btn-overlay:color-mix(in_oklab,var(--color-secondary-foreground)_4%,var(--color-secondary))] [--btn-ring:var(--color-muted-foreground)]/20",
       warning:
-        "shadow-(--shadow-button) [--btn-border:color-mix(in_oklab,var(--color-warning)_80%,black)] [--btn-bg:var(--color-warning)] [--btn-foreground:var(--color-warning-foreground)] [--btn-icon:var(--color-warning-foreground)]/60 [--btn-overlay:color-mix(in_oklab,var(--color-white)_10%,var(--color-warning)_90%)]",
+        "[--btn-border:color-mix(in_oklab,var(--color-warning)_80%,black)] [--btn-bg:var(--color-warning)] [--btn-foreground:var(--color-warning-foreground)] [--btn-icon:var(--color-warning-foreground)]/60 [--btn-overlay:color-mix(in_oklab,var(--color-white)_10%,var(--color-warning)_90%)]",
       // Filled red with a 1px darker edge and a faint top highlight (onboarding reference).
       danger:
-        "[--btn-bg:var(--color-danger)] [--btn-border:color-mix(in_oklab,var(--color-danger)_80%,black)] [--btn-foreground:var(--color-danger-foreground)] [--btn-icon:var(--color-danger-foreground)] [--btn-overlay:color-mix(in_oklab,var(--color-white)_10%,var(--color-danger)_90%)] shadow-(--shadow-button)",
+        "[--btn-bg:var(--color-danger)] [--btn-border:color-mix(in_oklab,var(--color-danger)_80%,black)] [--btn-foreground:var(--color-danger-foreground)] [--btn-icon:var(--color-danger-foreground)] [--btn-overlay:color-mix(in_oklab,var(--color-white)_10%,var(--color-danger)_90%)]",
       success:
-        "shadow-(--shadow-button) [--btn-border:color-mix(in_oklab,var(--color-success)_80%,black)] [--btn-bg:var(--color-success)] [--btn-foreground:var(--color-success-foreground)] [--btn-icon:color-mix(in_oklab,var(--color-success-foreground)_60%,var(--success)_40%)] [--btn-overlay:color-mix(in_oklab,var(--color-white)_10%,var(--color-success)_90%)]",
+        "[--btn-border:color-mix(in_oklab,var(--color-success)_80%,black)] [--btn-bg:var(--color-success)] [--btn-foreground:var(--color-success-foreground)] [--btn-icon:color-mix(in_oklab,var(--color-success-foreground)_60%,var(--success)_40%)] [--btn-overlay:color-mix(in_oklab,var(--color-white)_10%,var(--color-success)_90%)]",
       // Raised: a crisp 1px drop under the border, so it reads as something to press. Hover and
       // press are a quiet 4% wash of the foreground (as on secondary), not a grey fill.
       outline:
-        "shadow-(--shadow-button) border-border [--btn-bg:var(--color-background)] [--btn-foreground:var(--color-foreground)] [--btn-icon:var(--color-muted-foreground)] [--btn-outline:var(--color-ring)] [--btn-overlay:var(--color-outline-hover)] [--btn-ring:var(--color-ring)]/20",
+        "border-border [--btn-bg:var(--color-background)] [--btn-foreground:var(--color-foreground)] [--btn-icon:var(--color-muted-foreground)] [--btn-outline:var(--color-ring)] [--btn-overlay:var(--color-outline-hover)] [--btn-ring:var(--color-ring)]/20",
       plain:
         "border-0 [--btn-bg:transparent] [--btn-foreground:var(--color-foreground)] [--btn-icon:var(--color-muted-foreground)] [--btn-outline:var(--color-ring)] [--btn-overlay:transparent] [--btn-ring:var(--color-ring)]/20",
     },

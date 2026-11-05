@@ -18,12 +18,19 @@
     "directory": "packages/cli"
   },
   "bin": {
-    "wurmhol": "./dist/cli.js"
+    "wurmhol": "dist/cli.js"
   },
   "files": [
     "dist"
   ],
   "type": "module",
+  "exports": {
+    "./sdk": {
+      "types": "./dist/sdk.d.ts",
+      "default": "./dist/sdk.js"
+    },
+    "./package.json": "./package.json"
+  },
   "scripts": {
     "build": "tsdown",
     "prepublishOnly": "pnpm build"

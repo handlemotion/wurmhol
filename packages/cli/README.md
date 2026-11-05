@@ -21,6 +21,24 @@ that only reaches listed hosts, allow `api.wurmhol.com`: it is the only host the
 
 `WURMHOL_URL` points at a self-hosted install. Node 20+. MIT.
 
+## From your own process: `wurmhol/sdk`
+
+For orchestrators that open pipes for many agents. No daemon: the pipe lives in your process.
+
+```ts
+import { openPipe } from "wurmhol/sdk";
+
+const pipe = await openPipe({ port: 5173, token: process.env.WURMHOL_TOKEN! });
+pipe.url; // send it to the humans
+pipe.on("request", ({ method, path, status, durationMs }) => {}); // stays in this process
+pipe.on("close", (reason) => {}); // "stopped", "terminated", "expired", "revoked", ...
+await pipe.close();
+```
+
+Options: `server` (a self-hosted install), `host` (where the dev server listens, default
+`127.0.0.1`) and `signal` (an `AbortSignal` that closes the pipe). `openPipe` rejects with a
+`FixError` whose message is the one-line fix the CLI prints.
+
 ## Teach your agent
 
 `wurmhol init`, run in a project, appends one line to `AGENTS.md` (or `CLAUDE.md` if that is
