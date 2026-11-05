@@ -6,9 +6,9 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { PIPE_NAME_RULE, parseDuration, pipeName } from "@wurmhol/protocol";
 import { z } from "zod";
 import pkg from "../package.json" with { type: "json" };
-import { readCredentials } from "./credentials.ts";
+import { consoleUrl, findToken, server } from "./config.ts";
 import { FixError } from "./errors.ts";
-import { DEFAULT_CONSOLE, DEFAULT_SERVER, openPipe, type Pipe } from "./pipe.ts";
+import { openPipe, type Pipe } from "./pipe.ts";
 
 const INSTRUCTIONS = `Wurmhol gives a local dev server a private HTTPS URL that only members of the user's org can open, in their own browser, on any device.
 When the user wants to see or try a server running here, call open_pipe with its port and send them the URL. Call stop_pipe when they are done. Pipes end when this MCP session ends.
@@ -32,26 +32,12 @@ const pipeShape = {
   endsAt: z.string().describe("When the pipe ends on its own (ISO 8601)"),
 };
 
-/** The install the CLI talks to: WURMHOL_URL, or wurmhol.com. */
-function server() {
-  const url = process.env.WURMHOL_URL || DEFAULT_SERVER;
-  try {
-    return new URL(url).origin;
-  } catch {
-    throw new FixError(`WURMHOL_URL is not a URL: ${url}`);
-  }
-}
-
-/** The CLI's own rule: WURMHOL_TOKEN when set, else the token `wurmhol login` stored. */
+/** The CLI's own token, or a fix that fits an agent's MCP session. */
 function token() {
-  const value = process.env.WURMHOL_TOKEN?.trim();
-  if (value) return value;
-  const origin = server();
-  const stored = readCredentials();
-  if (stored && stored.server === origin) return stored.token;
-  const console = process.env.WURMHOL_URL ? origin : DEFAULT_CONSOLE;
+  const found = findToken();
+  if (found) return found;
   throw new FixError(
-    `No Wurmhol token. Run \`npx wurmhol login\` in a terminal, or set WURMHOL_TOKEN to a token from ${console} (menu → Tokens) in this MCP server's environment, then call the tool again.`,
+    `No Wurmhol token. Run \`npx wurmhol login\` in a terminal, or set WURMHOL_TOKEN to a token from ${consoleUrl()} (menu → Tokens) in this MCP server's environment, then call the tool again.`,
   );
 }
 

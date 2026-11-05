@@ -1,10 +1,8 @@
-// The share's connection: one WebSocket to `<WURMHOL_URL>/connect`, dialed through HTTPS_PROXY
-// when one is set (and trusting NODE_EXTRA_CA_CERTS, which Node reads itself). Every viewer
+// The share's connection: one WebSocket to `<WURMHOL_URL>/connect`, dialed like every call to the
+// server (dial.ts). Every viewer
 // request arrives on it as a stream and is forwarded to the dev server (127.0.0.1:<port> unless
 // the owner names another host).
 import http from "node:http";
-import { HttpsProxyAgent } from "https-proxy-agent";
-import { getProxyForUrl } from "proxy-from-env";
 import {
   chunk,
   decodeFrame,
@@ -23,8 +21,9 @@ import {
   type WsOpenPayload,
 } from "@wurmhol/protocol";
 import WebSocket from "ws";
-import type { PipeSource } from "./pipe.ts";
-import { FixError, explainConnectError, explainRefusal } from "./errors.ts";
+import { dial } from "./dial.ts";
+import { FixError } from "./errors.ts";
+import type { CloseReason, PipeSource } from "./pipe.ts";
 
 export interface ShareInfo {
   id: string;
@@ -66,7 +65,7 @@ export interface TunnelOptions {
 }
 
 /** Close codes from the Share DO that end the share: never reconnect after these. */
-const FINAL_CLOSE: Record<number, string> = {
+const FINAL_CLOSE: Record<number, CloseReason> = {
   4001: "terminated",
   4002: "expired",
   4003: "revoked",
@@ -83,7 +82,7 @@ interface LocalHttp {
   method: string;
   path: string;
   startedAt: number;
-  /** The status sent to the relay, once a response has started. */
+  /** The status sent to the relay, once a response (the dev server's or a 502) has started. */
   status: number | null;
   reported: boolean;
   request: http.ClientRequest;
@@ -92,7 +91,6 @@ interface LocalHttp {
   receive: ReceiveWindow;
   bodyEnded: boolean;
   cancelled: boolean;
-  answered: boolean;
 }
 
 interface LocalWs {
@@ -163,7 +161,6 @@ export class Tunnel {
 
   #url() {
     const url = new URL("/connect", this.#options.server);
-    url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
     if (this.#share) url.searchParams.set("share", this.#share.id);
     else {
       url.searchParams.set("port", String(this.#options.port));
@@ -174,58 +171,28 @@ export class Tunnel {
   }
 
   #dial(): Promise<WebSocket> {
-    const url = this.#url();
-    const httpUrl = url.toString().replace(/^ws/, "http");
-    const proxy = getProxyForUrl(httpUrl);
-    return new Promise((resolve, reject) => {
-      const socket = new WebSocket(url, {
-        headers: {
-          authorization: `Bearer ${this.#options.token}`,
-          // Who may open a new share; a reconnect keeps the list the share started with.
-          ...(!this.#share && this.#options.viewers.length
-            ? { "wurmhol-viewers": this.#options.viewers.join(",") }
-            : {}),
-          ...(!this.#share && this.#options.source
-            ? { "wurmhol-source": encodeURIComponent(JSON.stringify(this.#options.source)) }
-            : {}),
-          "user-agent": `wurmhol/${this.#options.version} node/${process.versions.node}`,
-        },
-        agent: proxy ? new HttpsProxyAgent(proxy) : undefined,
-        perMessageDeflate: false,
-        handshakeTimeout: 15_000,
-        maxPayload: 2 * MAX_WS_MESSAGE_BYTES,
-      });
-      socket.binaryType = "nodebuffer";
-      socket.once("upgrade", (response) => {
+    const { server, token, version, viewers, source } = this.#options;
+    return dial(this.#url(), {
+      server,
+      token,
+      version,
+      // Who may open a new share and where it comes from; a reconnect keeps what it started with.
+      headers: {
+        ...(!this.#share && viewers.length ? { "wurmhol-viewers": viewers.join(",") } : {}),
+        ...(!this.#share && source
+          ? { "wurmhol-source": encodeURIComponent(JSON.stringify(source)) }
+          : {}),
+      },
+      maxPayload: 2 * MAX_WS_MESSAGE_BYTES,
+      onUpgrade: (response) => {
         const id = response.headers["x-wurmhol-share-id"];
         const shareUrl = response.headers["x-wurmhol-share-url"];
         const endsAt = response.headers["x-wurmhol-share-ends-at"];
         if (typeof id === "string" && typeof shareUrl === "string" && typeof endsAt === "string") {
           this.#share = { id, url: shareUrl, endsAt };
         }
-      });
-      // Listening from the open event itself: the relay may send a request in the same packet as
-      // the upgrade, and `ws` emits it before an awaiting caller would get to attach.
-      socket.once("open", () => {
-        this.#attach(socket);
-        resolve(socket);
-      });
-      socket.once("unexpected-response", (_request, response) => {
-        const chunks: Buffer[] = [];
-        response.on("data", (c: Buffer) => chunks.push(c));
-        response.on("end", () => {
-          reject(
-            explainRefusal(response.statusCode ?? 0, Buffer.concat(chunks).toString("utf8"), {
-              server: this.#options.server,
-              viaProxy: Boolean(proxy),
-            }),
-          );
-          socket.terminate();
-        });
-      });
-      socket.once("error", (error) => {
-        reject(explainConnectError(error, { server: this.#options.server, proxy }));
-      });
+      },
+      onOpen: (socket) => this.#attach(socket),
     });
   }
 
@@ -358,12 +325,10 @@ export class Tunnel {
       receive: new ReceiveWindow(),
       bodyEnded: false,
       cancelled: false,
-      answered: false,
     };
     this.#streams.set(id, stream);
     request.on("response", (response) => {
       stream.response = response;
-      stream.answered = true;
       stream.status = response.statusCode ?? 502;
       this.#send({
         stream: id,
@@ -374,8 +339,7 @@ export class Tunnel {
     });
     request.on("error", (error: NodeJS.ErrnoException) => {
       if (stream.cancelled) return;
-      if (!stream.answered) {
-        stream.answered = true;
+      if (stream.status === null) {
         stream.status = 502;
         const refused = error.code === "ECONNREFUSED";
         const body = Buffer.from(

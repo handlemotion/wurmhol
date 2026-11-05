@@ -67,15 +67,15 @@ export type CloseReason =
   | "disconnected"
   | "no_subscription";
 
-const REASONS = new Set<string>([
-  "stopped",
-  "terminated",
-  "expired",
-  "revoked",
-  "limit",
-  "disconnected",
-  "no_subscription",
-]);
+const REASONS: Record<CloseReason, true> = {
+  stopped: true,
+  terminated: true,
+  expired: true,
+  revoked: true,
+  limit: true,
+  disconnected: true,
+  no_subscription: true,
+};
 
 export interface OpenPipeOptions {
   /** The local port the dev server listens on. */
@@ -193,7 +193,8 @@ class OpenPipe implements Pipe {
   }
 }
 
-function originOf(server: string) {
+/** A server URL's origin, or a FixError naming WURMHOL_URL, where the CLI's server comes from. */
+export function originOf(server: string) {
   try {
     return new URL(server).origin;
   } catch {
@@ -252,7 +253,7 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
       signal?.removeEventListener("abort", onAbort);
       // A refusal on reconnect can carry the relay's own words; any of those means the pipe
       // could not be resumed.
-      const reason = (REASONS.has(raw) ? raw : "disconnected") as CloseReason;
+      const reason = Object.hasOwn(REASONS, raw) ? (raw as CloseReason) : "disconnected";
       markClosed(reason);
       pipe?.emit("close", reason);
     },
