@@ -3,16 +3,16 @@ title: "CLI"
 description: "Every command, flag and variable of `npx wurmhol`."
 ---
 
-| Command                         | Does                                                           |
-| ------------------------------- | -------------------------------------------------------------- |
-| `wurmhol <port>`                | Open a pipe to a port, print its link and return               |
-| `wurmhol ls`                    | List open pipes and when each one ends                         |
-| `wurmhol stop <port\|id\|name>` | End one, or every one with `--all`                             |
-| `wurmhol init`                  | Tell this repo's agents how to share, `--skill` adds the skill |
-| `wurmhol host`                  | Connect this computer, to open pipes from Create pipe          |
-| `wurmhol login`                 | Approve this computer in the browser and save a token          |
-| `wurmhol logout`                | Delete the saved token                                         |
-| `wurmhol mcp`                   | Run the [MCP server](/mcp) on stdio                            |
+| Command                         | Does                                                                                |
+| ------------------------------- | ----------------------------------------------------------------------------------- |
+| `wurmhol <port>`                | Open a pipe to a port, print its link and return                                    |
+| `wurmhol ls`                    | List open pipes and when each one ends                                              |
+| `wurmhol stop <port\|id\|name>` | End one, or every one with `--all`                                                  |
+| `wurmhol init`                  | Tell this repo's agents how to share, `--skill` adds the skill                      |
+| `wurmhol host`                  | Connect this computer, to open pipes from Create pipe; `--install` keeps it running |
+| `wurmhol login`                 | Approve this computer in the browser and save a token                               |
+| `wurmhol logout`                | Delete the saved token                                                              |
+| `wurmhol mcp`                   | Run the [MCP server](/mcp) on stdio                                                 |
 
 ## Open pipes from the browser
 
@@ -22,6 +22,24 @@ opens. Debuggers such as Node's inspector are left out; set `WURMHOL_HOST_IGNORE
 other ports. It logs in first if this computer has no token yet: approve it at the link it prints. Only
 you see your computers, and only ports they report can be opened. Pipes it opens keep running
 when you stop it; end them with `wurmhol stop` or Terminate on the wall.
+
+### Keep it running
+
+`wurmhol host --install` starts it now and at every login, and restarts it if it stops. It needs
+Wurmhol installed, not run through npx, so the service finds it after a restart:
+
+```bash
+npm install -g wurmhol
+wurmhol host --install
+```
+
+It uses the token `wurmhol login` saved, and logs in first if there is none. Its output goes to
+`~/.wurmhol/logs/host.log`. `wurmhol host --uninstall` removes it; pipes it opened keep running.
+
+On macOS it is a launch agent, `~/Library/LaunchAgents/com.wurmhol.host.plist`. On Linux it is
+a systemd user service, `wurmhol-host` (`systemctl --user status wurmhol-host`); without systemd,
+keep `wurmhol host` open in a terminal. Windows is not supported yet. If you switch Node versions
+and remove the old one, run `wurmhol host --install` again.
 
 ## Flags
 
