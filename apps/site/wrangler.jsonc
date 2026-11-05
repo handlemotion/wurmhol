@@ -24,8 +24,9 @@
     ],
   },
   "vars": {
-    // The Mintlify deployment `/docs` proxies to, `<subdomain>.mintlify.site`. Empty: no docs,
-    // `/docs` is the 404 page. Hosted Wurmhol: handlemotion.mintlify.site.
-    "DOCS_HOST": "",
+    // The Mintlify deployment `/docs` proxies to, `<subdomain>.mintlify.site`: hosted Wurmhol's,
+    // like the rest of this site's copy and links. Change it, or set it empty for no docs
+    // (`/docs` is then the 404 page). A value here overrides one set in the dashboard.
+    "DOCS_HOST": "handlemotion.mintlify.site",
   },
 }
