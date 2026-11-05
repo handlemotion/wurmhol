@@ -1,20 +1,27 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
 import { Skeleton } from "skullet/react";
 import { ConsentPlate } from "@/components/auth/consent-plate";
 import { Button } from "@/components/ui/button";
 import { Heading } from "@/components/ui/heading";
 import { SkeletonProvider } from "@/components/ui/skeleton-provider";
-import { IconCheck } from "@/components/icons/lucide";
-import { Text } from "@/components/ui/text";
-import { Tooltip, TooltipTrigger } from "@/components/ui/tooltip";
-import { api, ApiError } from "@/lib/api";
+import {
+  IconBan,
+  IconCircleAlert,
+  IconCircleStop,
+  IconCornerDownLeft,
+  IconEye,
+  IconUser,
+} from "@/components/icons/lucide";
+import { Text, TextLink } from "@/components/ui/text";
+import { api, ApiError, type Me } from "@/lib/api";
 
-/** What each scope lets the assistant do (ADR 0014), one line each. */
-const SCOPE_TEXT: Record<string, string> = {
-  "pipes:read": "See your open pipes",
-  "pipes:write": "Stop any of them",
-};
+/** Orgs as one phrase: "Handlemotion and your personal org". */
+function orgList(orgs: Me["orgs"]) {
+  const names = orgs.map((o) => (o.personal ? "your personal org" : o.name));
+  return names.length < 2
+    ? (names[0] ?? "")
+    : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
 
 interface PublicClient {
   client_id: string;
@@ -30,6 +37,41 @@ function toLogin() {
   location.assign(`/login?next=${encodeURIComponent(`${location.pathname}${location.search}`)}`);
 }
 
+type Glyph = React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+
+/**
+ * One line with a muted glyph before it. The glyph sits in a 16px box on the text's 16px line,
+ * so its centre and the line's centre share an axis.
+ */
+function Row({ icon: Icon, children }: { icon: Glyph; children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-2">
+      <span className="flex h-4 shrink-0 items-center">
+        <Icon aria-hidden className="size-icon text-muted-foreground" />
+      </span>
+      <Text className="leading-4">{children}</Text>
+    </div>
+  );
+}
+
+/**
+ * A permission: its glyph on the title's line, the title in the foreground and one muted line
+ * under it (16px lines, 2px apart), as the rows on Google's and GitHub's consent screens.
+ */
+function Permission({ icon: Icon, title, detail }: { icon: Glyph; title: string; detail: string }) {
+  return (
+    <li className="flex items-start gap-2">
+      <span className="flex h-4 shrink-0 items-center">
+        <Icon aria-hidden className="size-icon text-muted-foreground" />
+      </span>
+      <div className="flex flex-col gap-0.5">
+        <Text className="leading-4 text-foreground">{title}</Text>
+        <Text className="leading-4">{detail}</Text>
+      </div>
+    </li>
+  );
+}
+
 /**
  * `/oauth/consent`, where the OAuth flow of the hosted MCP server (ADR 0014) asks a signed-in
  * person whether an assistant may reach their orgs' pipes. The query is Better Auth's, signed;
@@ -38,21 +80,23 @@ function toLogin() {
 function Review() {
   const search = new URLSearchParams(location.search);
   const clientId = search.get("client_id") ?? "";
-  const scopes = (search.get("scope") ?? "").split(" ").filter((s) => s in SCOPE_TEXT);
+  const scopes = new Set((search.get("scope") ?? "").split(" "));
   /** Where the code goes, as the provider checked it against the client's registered URIs. */
   const redirect = search.get("redirect_uri") ?? "";
   const redirectHost = URL.canParse(redirect) ? new URL(redirect).host : null;
   const review = useQuery({
     queryKey: ["consent", clientId],
     queryFn: async () => {
-      const client = await api<PublicClient>(
-        `/api/auth/oauth2/public-client?client_id=${encodeURIComponent(clientId)}`,
-      );
-      return { client };
+      const [client, me] = await Promise.all([
+        api<PublicClient>(
+          `/api/auth/oauth2/public-client?client_id=${encodeURIComponent(clientId)}`,
+        ),
+        api<Me>("/api/me"),
+      ]);
+      return { client, email: me.user.email, orgs: me.orgs };
     },
     retry: false,
   });
-  const [tip, setTip] = useState(false);
   const decide = useMutation({
     mutationFn: (accept: boolean) =>
       api<{ url: string }>("/api/auth/oauth2/consent", {
@@ -76,43 +120,54 @@ function Review() {
       data={review.data}
       sample={{
         client: { client_id: "https://claude.ai/oauth/mcp-client", client_name: "Claude" },
+        email: "ada@example.com",
+        orgs: [{ id: "", name: "Handlemotion", role: "member", personal: false }],
       }}
       label="Loading the request"
     >
-      {({ client }) => {
-        const name = client.client_name ?? clientHost(client.client_id) ?? "This app";
-        // Geometry, measured in ink: the heading sits 16px above its rows, the rows 15px apart
-        // (13px text on a 20px line, 8px between lines), the buttons 26px below the list and
-        // 8px apart. So the heading reads with its list and the buttons as their own group.
-        // Each check sits centred on its row's 20px line.
+      {({ client, email, orgs }) => {
+        const host = clientHost(client.client_id);
+        const name = client.client_name ?? host ?? "This app";
+        const reach = orgList(orgs);
         return (
           <div className="flex flex-col gap-6">
             <div className="flex flex-col gap-2">
               <Heading size="sm">{name} wants to reach your pipes</Heading>
-              <ul className="flex flex-col gap-2">
-                {scopes.map((scope) => (
-                  <li key={scope} className="flex items-center gap-2">
-                    <IconCheck aria-hidden className="size-icon shrink-0 text-muted-foreground" />
-                    <Text className="leading-5">{SCOPE_TEXT[scope]}</Text>
-                  </li>
-                ))}
+              <Row icon={IconUser}>
+                {email} · <TextLink onPress={toLogin}>Not you?</TextLink>
+              </Row>
+            </div>
+            {/* Ink, measured: the label sits 16px above its rows and 27px under the account
+                line; rows are 18 to 20px apart (descenders differ), title to detail 6px. */}
+            <div className="flex flex-col gap-2.5">
+              <Text className="leading-4">It will be able to</Text>
+              <ul className="flex flex-col gap-4">
+                {scopes.has("pipes:read") && (
+                  <Permission icon={IconEye} title="See your open pipes" detail={`In ${reach}`} />
+                )}
+                {scopes.has("pipes:write") && (
+                  <Permission
+                    icon={IconCircleStop}
+                    title="Stop any of them"
+                    detail="As Terminate on the wall does"
+                  />
+                )}
+                <Permission
+                  icon={IconBan}
+                  title="Never open pipes"
+                  detail="Or see what passes through them"
+                />
               </ul>
             </div>
             <div className="flex flex-col gap-2">
-              {/* React Aria opens a tooltip on hover only after the page has seen a press, and
-                  people arrive here straight from signing in: the button's own hover opens it. */}
-              <TooltipTrigger isOpen={tip} onOpenChange={setTip} isDisabled={!redirectHost}>
-                <Button
-                  size="lg"
-                  onHoverChange={setTip}
-                  isPending={decide.isPending && decide.variables === true}
-                  isDisabled={decide.isPending}
-                  onPress={() => decide.mutate(true)}
-                >
-                  Allow
-                </Button>
-                <Tooltip placement="end">Sends you back to {redirectHost}</Tooltip>
-              </TooltipTrigger>
+              <Button
+                size="lg"
+                isPending={decide.isPending && decide.variables === true}
+                isDisabled={decide.isPending}
+                onPress={() => decide.mutate(true)}
+              >
+                Allow
+              </Button>
               <Button
                 intent="outline"
                 size="lg"
@@ -124,9 +179,19 @@ function Review() {
               </Button>
             </div>
             {decide.error && !(decide.error instanceof ApiError && decide.error.status === 401) && (
-              <Text className="leading-5 text-danger-subtle-foreground">
+              <Text className="leading-4 text-danger-subtle-foreground">
                 {decide.error.message}
               </Text>
+            )}
+            {(redirectHost || host) && (
+              <div className="flex flex-col gap-2">
+                {redirectHost && (
+                  <Row icon={IconCornerDownLeft}>Sends you back to {redirectHost}</Row>
+                )}
+                {host && (
+                  <Row icon={IconCircleAlert}>Says it is from {host}, not verified by Wurmhol</Row>
+                )}
+              </div>
             )}
           </div>
         );
