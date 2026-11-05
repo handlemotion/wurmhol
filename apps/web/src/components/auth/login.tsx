@@ -14,6 +14,8 @@ import { safeNext, signInMagicLink, signInPasskey, signInSocial } from "@/lib/au
 
 const REASONS: Record<string, string> = {
   "not-member": "That pipe belongs to an org you're not in. Sign in with an account that is.",
+  "not-listed":
+    "That pipe is open only to the people it was shared with. Ask whoever started it to add you.",
 };
 
 /**

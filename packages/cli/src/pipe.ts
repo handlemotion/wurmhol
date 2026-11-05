@@ -46,6 +46,11 @@ export interface OpenPipeOptions {
    * wurmhol.com, at most 12; a longer one rejects with a fix that names the limit.
    */
   ttl?: number | string;
+  /**
+   * Emails of the org members who may open the pipe. They must be members of the token's org, or
+   * `openPipe` rejects. Default: every member of the org.
+   */
+  viewers?: string[];
   /** Aborting rejects a pending `openPipe`, or closes an open pipe. */
   signal?: AbortSignal;
 }
@@ -140,6 +145,7 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
     port: options.port,
     host: options.host ?? "127.0.0.1",
     ttl,
+    viewers: options.viewers ?? [],
     version: pkg.version,
     log,
     onRequest: (event) => pipe?.emit("request", event),

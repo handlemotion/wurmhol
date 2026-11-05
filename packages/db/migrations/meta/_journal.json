@@ -22,6 +22,13 @@
       "when": 1793855790401,
       "tag": "0002_lush_exodus",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793856675534,
+      "tag": "0003_easy_steve_rogers",
+      "breakpoints": true
     }
   ]
 }
