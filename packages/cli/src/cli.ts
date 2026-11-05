@@ -8,6 +8,7 @@
 //   wurmhol stop <port|id|name>   end one; `--all` ends every one
 //   wurmhol init [--skill]        tell the repo's agents how to share
 //   wurmhol host                  connect this computer to the wall; open pipes from the browser
+//                                 (--install runs it at login, --uninstall removes that)
 //   wurmhol mcp                   a stdio MCP server with the same tools, for agents
 import { spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -34,6 +35,7 @@ import {
 import { FixError } from "./errors.ts";
 import { host as runHost } from "./host.ts";
 import { login as deviceLogin } from "./login.ts";
+import { checkService, installService, stableEntry, uninstallService } from "./service.ts";
 import { DEFAULT_CONSOLE, DEFAULT_SERVER, openPipe, type Pipe } from "./pipe.ts";
 import { detectSource } from "./source.ts";
 import { alive, listStates, logFile, removeState, writeState } from "./state.ts";
@@ -65,6 +67,9 @@ Usage:
                                 CLAUDE.md); --skill also writes .claude/skills/wurmhol
   wurmhol host                  Connect this computer to the wall, to open pipes to its
                                 ports from Create pipe in the browser; logs in first if needed
+    --install                   Run it at login and keep it running (macOS, Linux with
+                                systemd); needs npm install -g wurmhol
+    --uninstall                 Stop running it at login
   wurmhol login                 Approve this computer in the browser; stores a token
   wurmhol logout                Delete the stored token
   wurmhol mcp                   Run an MCP server on stdio (open_pipe, list_pipes,
@@ -240,6 +245,40 @@ async function serveHost() {
         return message.url;
       },
     });
+  } catch (error) {
+    fail(error instanceof FixError ? error.message : String(error));
+  }
+}
+
+/**
+ * `wurmhol host --install`: logs in if this computer has no saved token (the service reads that
+ * file, never WURMHOL_TOKEN), then runs this installed CLI's `host` at login.
+ */
+async function installHost() {
+  try {
+    const entry = stableEntry(fileURLToPath(import.meta.url));
+    checkService();
+    const stored = readCredentials();
+    if (!stored || stored.server !== server()) await login();
+    const env: Record<string, string> = {};
+    for (const name of ["WURMHOL_HOME", "WURMHOL_URL"] as const) {
+      const value = process.env[name];
+      if (value) env[name] = value;
+    }
+    const log = logFile("host");
+    const file = installService({ node: process.execPath, entry, env, log });
+    process.stdout.write(
+      `Installed ${file}: wurmhol host is running and starts at login. Logs: ${log}\n`,
+    );
+  } catch (error) {
+    fail(error instanceof FixError ? error.message : String(error));
+  }
+}
+
+function uninstallHost() {
+  try {
+    const file = uninstallService();
+    process.stdout.write(file ? `Removed ${file}\n` : "wurmhol host is not installed.\n");
   } catch (error) {
     fail(error instanceof FixError ? error.message : String(error));
   }
@@ -464,6 +503,8 @@ function parseCommandLine(args = process.argv.slice(2)) {
         note: { type: "string" },
         all: { type: "boolean", default: false },
         skill: { type: "boolean", default: false },
+        install: { type: "boolean", default: false },
+        uninstall: { type: "boolean", default: false },
         ttl: { type: "string" },
         help: { type: "boolean", short: "h", default: false },
         version: { type: "boolean", short: "v", default: false },
@@ -490,6 +531,8 @@ async function main() {
   if (command === "stop") return stop(argument, values.all);
   if (command === "init") return init(values.skill);
   if (command === "login") return login();
+  if (command === "host" && values.install) return installHost();
+  if (command === "host" && values.uninstall) return uninstallHost();
   if (command === "host") return serveHost();
   if (command === "logout") return logout();
   if (command === "mcp") return (await import("./mcp.ts")).serve();
