@@ -22,6 +22,7 @@ import { type AppEnv, requireMember, requireOwner, resolveSession } from "../con
 import { SHARE_ID } from "../env.ts";
 import { limitPerMember } from "../rate-limiter.ts";
 import { billing } from "./billing.ts";
+import { machines, toOrg } from "./machines.ts";
 import { org } from "./org.ts";
 
 /** Where the CLI dials when WURMHOL_URL is unset (`DEFAULT_SERVER`, packages/cli/src/pipe.ts). */
@@ -115,7 +116,7 @@ export const api = new Hono<AppEnv>()
       return c.json({ error: "origin not allowed" }, 403);
     }
     const org = c.env.ORG.get(c.env.ORG.idFromName(c.var.member.orgId));
-    return org.fetch(c.req.raw);
+    return org.fetch(toOrg(c.req.raw, {}));
   })
   /** Terminate: ends the share at once and closes its CLI's socket. Any member may. */
   .post("/shares/:id/terminate", limitPerMember("manage"), async (c) => {
@@ -165,6 +166,7 @@ export const api = new Hono<AppEnv>()
     for (const share of await openSharesOfToken(c.var.db, tokenId)) {
       await c.env.SHARE.get(c.env.SHARE.idFromName(share.id)).terminate("revoked");
     }
+    await c.env.ORG.get(c.env.ORG.idFromName(c.var.member.orgId)).dropToken(tokenId);
     return c.json({ ok: true });
   })
   .get("/members", async (c) =>
@@ -187,5 +189,6 @@ export const api = new Hono<AppEnv>()
     const url = new URL(`/join/${code}`, c.var.config.auth.baseURL).toString();
     return c.json({ url, expiresAt: expiresAt.toISOString() }, 201);
   })
+  .route("/machines", machines)
   .route("/", org)
   .route("/", billing);

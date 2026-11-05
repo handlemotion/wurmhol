@@ -1,10 +1,12 @@
 // The wall in a real browser (ADR 0011): Chromium through Playwright, signed in to the real stack,
 // with pipes opened by the real CLI to real local HTTP servers. The network runs its reduced-motion
 // path (nodes hold still), so a press lands where the pill is rather than where it drifted from.
+import { spawn } from "node:child_process";
 import { type Browser, type BrowserContext, chromium, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   cliEnv,
+  cliPath,
   createToken,
   localServer,
   type Person,
@@ -102,7 +104,6 @@ describe("the wall in a browser", () => {
         "Start the dev server, then run `npx wurmhol <port>` with its port and send me the URL it prints.",
       ],
       ["Copy npx command", "npx wurmhol <port>"],
-      ["Copy setup for this computer", "npx wurmhol login && npx wurmhol <port>"],
     ];
     for (const [label, text] of rows) {
       await page.getByRole("menuitem", { name: label }).click();
@@ -207,5 +208,52 @@ describe("the wall in a browser", () => {
         return Math.hypot(back.x - before.x, back.y - before.y) < 1.5;
       })
       .toBe(true);
+  });
+
+  it("creates a pipe from this computer: shows the steps, then the ports it serves, and opens the picked one", async () => {
+    const local = await localServer((_req, res) =>
+      res.writeHead(200, { "content-type": "text/html" }).end("<title>From this computer</title>"),
+    );
+    servers.push(local);
+    await page.locator("[data-create]").click();
+    await page.getByRole("menuitem", { name: "Create from this computer" }).click();
+    const card = page.locator("section[data-open]");
+    // Catches: the steps opening without the command to run, or in a card of another size.
+    await expect
+      .poll(() => card.getByRole("button", { name: "Copy run: npx wurmhol host" }).count())
+      .toBe(1);
+    expect((await card.boundingBox())!.width).toBe((await card.boundingBox())!.height);
+
+    const host = spawn(process.execPath, [cliPath, "host"], {
+      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
+      stdio: "ignore",
+    });
+    try {
+      const row = card.getByRole("menuitem", { name: new RegExp(`:${local.port}`) });
+      // Catches: the card not hearing that the computer connected, or its ports.
+      await expect.poll(() => row.isVisible(), { timeout: 15_000 }).toBe(true);
+      expect(await row.textContent()).toContain("From this computer");
+      await row.click();
+      // Catches: a pick that opens nothing, or a pipe whose card never opens on the wall in
+      // place of Create pipe.
+      await expect
+        .poll(async () => (await card.count()) === 1 && (await card.textContent()), {
+          timeout: 15_000,
+        })
+        .toContain("Terminate");
+      expect(await card.textContent()).toContain("From this computer");
+
+      await page.keyboard.press("Escape");
+      await page.locator("[data-create]").click();
+      await page.getByRole("menuitem", { name: "Create from this computer" }).click();
+      await card.getByRole("button", { name: "Back" }).click();
+      // Catches: Back leaving the steps on screen instead of the ways to start a pipe.
+      await expect
+        .poll(() => page.getByRole("menuitem", { name: "Copy agent prompt" }).isVisible())
+        .toBe(true);
+      await page.keyboard.press("Escape");
+    } finally {
+      host.kill();
+    }
   });
 });
