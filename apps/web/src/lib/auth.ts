@@ -1,6 +1,7 @@
 // Better Auth's browser client: the same server as Omni's (packages/auth), on our own origin.
 // Kept private to this module; the app calls the few functions below.
 import { passkeyClient } from "@better-auth/passkey/client";
+import { sameOriginPath } from "@wurmhol/protocol";
 import { createAuthClient } from "better-auth/react";
 import {
   magicLinkClient,
@@ -46,10 +47,5 @@ export async function signOut(): Promise<void> {
   await client.signOut();
 }
 
-/** A path in this app (`/join/x`, `/open?share=…`), never another origin. */
-export function safeNext(value: string | null | undefined) {
-  if (!value || !value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) {
-    return "/";
-  }
-  return value;
-}
+/** A path in this app (`/join/x`, `/open?share=…`), never another site. */
+export const safeNext = sameOriginPath;

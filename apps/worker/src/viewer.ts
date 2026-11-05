@@ -2,7 +2,7 @@
 // `__Host-wurmhol` cookie for this share; without it a page navigation goes to the app to sign
 // in (`/open`), and comes back with a one-time code that this swaps for the cookie. The cookie
 // is stripped before anything reaches the dev server.
-import { readCookie, SHARE_COOKIE } from "@wurmhol/protocol";
+import { readCookie, sameOriginPath, SHARE_COOKIE } from "@wurmhol/protocol";
 import { loadConfig, shareOrigin } from "./env.ts";
 import { createLogger } from "./log.ts";
 import { errorPage } from "./pages.ts";
@@ -17,14 +17,6 @@ import { INTERNAL_HEADERS } from "./share-do.ts";
 
 /** Paths on a share host the relay keeps for itself. */
 export const RESERVED_PREFIX = "/__wurmhol/";
-
-/** A path in the share (`/a?b`), never another origin (`//evil.example`). */
-export function safePath(value: string | null | undefined) {
-  if (!value || !value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) {
-    return "/";
-  }
-  return value.slice(0, 2000);
-}
 
 function isNavigation(request: Request) {
   if (request.method !== "GET") return false;
@@ -56,7 +48,7 @@ export async function handleShareHost(request: Request, env: Env, shareId: strin
     return new Response(null, {
       status: 302,
       headers: {
-        location: safePath(url.searchParams.get("next")),
+        location: sameOriginPath(url.searchParams.get("next")),
         "set-cookie": shareCookieHeader(cookie),
         "cache-control": "no-store",
         "referrer-policy": "no-referrer",
