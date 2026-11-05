@@ -41,7 +41,7 @@ export const buttonStyles = tv({
       // Raised: a crisp 1px drop under the border, so it reads as something to press. Hover and
       // press are a quiet 4% wash of the foreground (as on secondary), not a grey fill.
       outline:
-        "shadow-(--shadow-button) border-border [--btn-bg:var(--color-background)] [--btn-foreground:var(--color-foreground)] [--btn-icon:var(--color-muted-foreground)] [--btn-outline:var(--color-ring)] [--btn-overlay:color-mix(in_oklab,var(--color-foreground)_4%,var(--color-background))] [--btn-ring:var(--color-ring)]/20",
+        "shadow-(--shadow-button) border-border [--btn-bg:var(--color-background)] [--btn-foreground:var(--color-foreground)] [--btn-icon:var(--color-muted-foreground)] [--btn-outline:var(--color-ring)] [--btn-overlay:var(--color-outline-hover)] [--btn-ring:var(--color-ring)]/20",
       plain:
         "border-0 [--btn-bg:transparent] [--btn-foreground:var(--color-foreground)] [--btn-icon:var(--color-muted-foreground)] [--btn-outline:var(--color-ring)] [--btn-overlay:transparent] [--btn-ring:var(--color-ring)]/20",
     },
