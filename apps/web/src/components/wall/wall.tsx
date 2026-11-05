@@ -88,7 +88,7 @@ export function Wall({ me }: { me: Me }) {
     // Clipped at the page's edges, not the canvas's: a network the camera pans runs on under the
     // floating header and off the sides of the window, never against an invisible box.
     <div className="min-h-dvh overflow-clip bg-background">
-      <Header me={me} onOpen={setDialog} />
+      <Header me={me} onOpen={setDialog} fade={shares?.length !== 0} />
       <main className="w-full px-4 sm:px-8">
         {me.standing && !me.standing.ok && <NeedsPlan owner={me.role === "owner"} />}
         <Skeleton id="wall" data={shares} sample={SAMPLE} label="Loading pipes">
@@ -106,7 +106,16 @@ export function Wall({ me }: { me: Me }) {
  * org's dialogs in the middle, logging out on the right. On a phone the middle and right fold
  * into one menu. The same 16px above the pills as beside them, so the row sits balanced.
  */
-function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens") => void }) {
+function Header({
+  me,
+  onOpen,
+  fade,
+}: {
+  me: Me;
+  onOpen: (dialog: "members" | "tokens") => void;
+  /** Off on the empty wall: no pill can pan under the header, and the backdrop runs on to the top. */
+  fade: boolean;
+}) {
   const switchOrg = useSwitchOrg();
   const signOut = useSignOut();
   const billing = useOpenBilling();
@@ -119,10 +128,12 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between gap-3 p-4">
       {/* No bar, but a fade: pills the camera pans up dissolve under the header's pills. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[calc(100%+2rem)] bg-linear-to-b from-background from-50% to-transparent"
-      />
+      {fade && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[calc(100%+2rem)] bg-linear-to-b from-background from-50% to-transparent"
+        />
+      )}
       <MenuTrigger>
         <Button
           intent="secondary"
