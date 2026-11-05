@@ -2,6 +2,7 @@
 // adds only its state file and log on top (ADR 0008, section 3).
 import { EventEmitter } from "node:events";
 import {
+  isEndReason,
   parseDuration,
   PIPE_NAME_RULE,
   pipeName,
@@ -57,7 +58,11 @@ function checkSource(raw: Partial<PipeSource> | undefined): PipeSource | null {
   return any ? source : null;
 }
 
-/** Why a pipe ended. Every reason is final: open a new pipe to share the port again. */
+/**
+ * Why a pipe ended. Every reason is final: open a new pipe to share the port again. Spelled out,
+ * not imported, so the public `.d.ts` stands alone; `onEnd` fails to compile if protocol's
+ * `EndReason` gains a reason this lacks.
+ */
 export type CloseReason =
   | "stopped"
   | "terminated"
@@ -66,16 +71,6 @@ export type CloseReason =
   | "limit"
   | "disconnected"
   | "no_subscription";
-
-const REASONS: Record<CloseReason, true> = {
-  stopped: true,
-  terminated: true,
-  expired: true,
-  revoked: true,
-  limit: true,
-  disconnected: true,
-  no_subscription: true,
-};
 
 export interface OpenPipeOptions {
   /** The local port the dev server listens on. */
@@ -253,7 +248,7 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
       signal?.removeEventListener("abort", onAbort);
       // A refusal on reconnect can carry the relay's own words; any of those means the pipe
       // could not be resumed.
-      const reason = Object.hasOwn(REASONS, raw) ? (raw as CloseReason) : "disconnected";
+      const reason: CloseReason = isEndReason(raw) ? raw : "disconnected";
       markClosed(reason);
       pipe?.emit("close", reason);
     },

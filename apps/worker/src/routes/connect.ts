@@ -17,6 +17,7 @@
 // Refusals answer with plain HTTP before the upgrade, as `{ error, fix }`: the CLI prints `fix`,
 // one line that says what to do.
 import {
+  CONNECT_HEADERS,
   formatDuration,
   parsePipeSource,
   PIPE_NAME_RULE,
@@ -37,11 +38,7 @@ import { reservedPipeName, shareOrigin, SHARE_ID } from "../env.ts";
 import { orgStub } from "../org-do.ts";
 import { type ShareInit, shareStub, toShare } from "../share-do.ts";
 
-/** The header that names a new share's viewers, comma-separated emails. */
-const VIEWERS_HEADER = "wurmhol-viewers";
 const MAX_VIEWERS = 50;
-/** The header that says where a new share came from (ADR 0015). */
-const SOURCE_HEADER = "wurmhol-source";
 /** Bigger than any source within `SOURCE_LIMITS`, URI-encoded. */
 const MAX_SOURCE_HEADER = 24 * 1024;
 
@@ -118,10 +115,10 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
   if (name && name === reservedPipeName(config)) {
     return refuse(409, "name reserved", `The pipe name ${name} is reserved. Pick another --name.`);
   }
-  const source = readSource(c.req.header(SOURCE_HEADER));
+  const source = readSource(c.req.header(CONNECT_HEADERS.source));
   if (!source.ok) return refuse(400, `bad ${source.field}`, source.fix);
   let viewers: string[] | null = null;
-  const named = (c.req.header(VIEWERS_HEADER) ?? "")
+  const named = (c.req.header(CONNECT_HEADERS.viewers) ?? "")
     .split(",")
     .map((email) => email.trim())
     .filter(Boolean);

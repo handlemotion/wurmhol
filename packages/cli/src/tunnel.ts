@@ -5,25 +5,28 @@
 import http from "node:http";
 import {
   chunk,
+  CONNECT_HEADERS,
   decodeFrame,
   encodeFrame,
-  type Frame,
+  endReasonFor,
   forwardable,
+  type Frame,
   type HeaderList,
   HEARTBEAT_MS,
   MAX_WS_MESSAGE_BYTES,
   PING_TEXT,
   PONG_TEXT,
-  RECONNECT_GRACE_MS,
   ReceiveWindow,
+  RECONNECT_GRACE_MS,
   type RequestHead,
   SendWindow,
+  SHARE_HEADERS,
   type WsOpenPayload,
 } from "@wurmhol/protocol";
 import WebSocket from "ws";
 import { dial } from "./dial.ts";
 import { FixError } from "./errors.ts";
-import type { CloseReason, PipeSource } from "./pipe.ts";
+import type { PipeSource } from "./pipe.ts";
 
 export interface ShareInfo {
   id: string;
@@ -63,16 +66,6 @@ export interface TunnelOptions {
   /** The share ended for good (stopped, terminated, expired, revoked, or the CLI gave up). */
   onEnd: (reason: string) => void;
 }
-
-/** Close codes from the Share DO that end the share: never reconnect after these. */
-const FINAL_CLOSE: Record<number, CloseReason> = {
-  4001: "terminated",
-  4002: "expired",
-  4003: "revoked",
-  4004: "limit",
-  4005: "disconnected",
-  4006: "no_subscription",
-};
 
 /** Above this many unsent bytes on the socket, body pumps wait: bounded memory here too. */
 const SOCKET_HIGH_WATER = 4 * 1024 * 1024;
@@ -178,16 +171,16 @@ export class Tunnel {
       version,
       // Who may open a new share and where it comes from; a reconnect keeps what it started with.
       headers: {
-        ...(!this.#share && viewers.length ? { "wurmhol-viewers": viewers.join(",") } : {}),
+        ...(!this.#share && viewers.length ? { [CONNECT_HEADERS.viewers]: viewers.join(",") } : {}),
         ...(!this.#share && source
-          ? { "wurmhol-source": encodeURIComponent(JSON.stringify(source)) }
+          ? { [CONNECT_HEADERS.source]: encodeURIComponent(JSON.stringify(source)) }
           : {}),
       },
       maxPayload: 2 * MAX_WS_MESSAGE_BYTES,
       onUpgrade: (response) => {
-        const id = response.headers["x-wurmhol-share-id"];
-        const shareUrl = response.headers["x-wurmhol-share-url"];
-        const endsAt = response.headers["x-wurmhol-share-ends-at"];
+        const id = response.headers[SHARE_HEADERS.id];
+        const shareUrl = response.headers[SHARE_HEADERS.url];
+        const endsAt = response.headers[SHARE_HEADERS.endsAt];
         if (typeof id === "string" && typeof shareUrl === "string" && typeof endsAt === "string") {
           this.#share = { id, url: shareUrl, endsAt };
         }
@@ -473,7 +466,7 @@ export class Tunnel {
     this.#dropStreams();
     this.#options.log("disconnected", { code, reason });
     if (this.#stopping) return;
-    const final = FINAL_CLOSE[code];
+    const final = endReasonFor(code);
     if (final) return this.#finish(final);
     if (code === 1000) return this.#finish(reason || "stopped");
     void this.#reconnect();

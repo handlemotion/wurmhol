@@ -23,22 +23,25 @@ import {
 } from "@wurmhol/db";
 import {
   chunk,
+  CLOSE_CODES,
   decodeFrame,
   encodeFrame,
-  type Frame,
+  type EndReason,
   forwardable,
+  type Frame,
   type HeaderList,
   HttpStreamOrder,
-  type PipeSource,
   PING_TEXT,
+  type PipeSource,
   PONG_TEXT,
   ProtocolError,
-  RECONNECT_GRACE_MS,
   ReceiveWindow,
+  RECONNECT_GRACE_MS,
   type RequestHead,
   type ResponseHead,
   SendWindow,
   SHARE_COOKIE,
+  SHARE_HEADERS,
   withoutCookie,
   type WsClosePayload,
   type WsOpenPayload,
@@ -92,25 +95,6 @@ interface Tombstone {
   endReason: EndReason;
 }
 
-export type EndReason =
-  | "stopped"
-  | "terminated"
-  | "expired"
-  | "revoked"
-  | "limit"
-  | "disconnected"
-  | "no_subscription";
-
-/** Close codes the CLI reads to tell why its share ended (and not to reconnect). */
-export const CLOSE_CODES: Record<EndReason, number> = {
-  stopped: 1000,
-  terminated: 4001,
-  expired: 4002,
-  revoked: 4003,
-  limit: 4004,
-  disconnected: 4005,
-  no_subscription: 4006,
-};
 /** An older socket of the same CLI, replaced by its reconnect. */
 const REPLACED = 4000;
 
@@ -421,11 +405,9 @@ export class Share extends DurableObject<Env> {
       status: 101,
       webSocket: client,
       headers: {
-        "x-wurmhol-share-id": meta.id,
-        "x-wurmhol-share-url": meta.url,
-        "x-wurmhol-share-ends-at": new Date(
-          meta.startedAt + meta.limits.seconds * 1000,
-        ).toISOString(),
+        [SHARE_HEADERS.id]: meta.id,
+        [SHARE_HEADERS.url]: meta.url,
+        [SHARE_HEADERS.endsAt]: new Date(meta.startedAt + meta.limits.seconds * 1000).toISOString(),
       },
     });
   }
