@@ -31,8 +31,15 @@ export async function signInSocial(
   );
 }
 
-export async function signInMagicLink(email: string, callbackURL: string): Promise<void> {
-  check(await client.signIn.magicLink({ email, callbackURL }), "could not send the link");
+/**
+ * Sends the sign-in link. A development stack sends no mail and returns the link itself
+ * (`devLink`), which this resolves to; otherwise it resolves to null.
+ */
+export async function signInMagicLink(email: string, callbackURL: string): Promise<string | null> {
+  const result = await client.signIn.magicLink({ email, callbackURL });
+  check(result, "could not send the link");
+  const data = result.data as { devLink?: unknown } | null;
+  return typeof data?.devLink === "string" ? data.devLink : null;
 }
 
 export async function setActiveOrg(organizationId: string): Promise<void> {

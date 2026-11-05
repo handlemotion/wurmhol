@@ -54,7 +54,9 @@ export function Login() {
   });
   const magicLink = useMutation({
     mutationFn: async () => {
-      await signInMagicLink(email, callbackURL);
+      const devLink = await signInMagicLink(email, callbackURL);
+      // A development stack has no mail to send: open the link it returned instead.
+      if (devLink) return location.assign(devLink);
       setSent(true);
     },
   });

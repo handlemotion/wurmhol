@@ -39,7 +39,10 @@ it("emails a link that signs the person in", async () => {
     true,
   );
   const before = sentEmails().length;
-  expect((await requestLink("ada@example.com")).status).toBe(200);
+  const sent = await requestLink("ada@example.com");
+  expect(sent.status).toBe(200);
+  // Catches: the development-only link leaking into a response outside development.
+  expect(await sent.json()).toEqual({ status: true });
   const email = await waitFor(() => sentEmails()[before], { what: "the email" });
   expect(email).toContain("Open this link to sign in to Wurmhol");
   const link = /(http:\/\/\S+magic-link\/verify\S+)/.exec(email)![1]!;
