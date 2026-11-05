@@ -69,6 +69,21 @@ const configSchema = z
           .regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, "use a hostname like api.example.com")
           .optional(),
       ),
+    /**
+     * The OAuth callback relay's host (ADR 0010), e.g. `oauth.wurmhol.dev`: one redirect URI per
+     * provider for every pipe. Same scheme and port as BETTER_AUTH_URL. Under SHARE_DOMAIN, its
+     * label is reserved: no pipe may take that name. Empty: no relay.
+     */
+    OAUTH_RELAY_HOST: z
+      .string()
+      .optional()
+      .transform((value) => value?.toLowerCase() || undefined)
+      .pipe(
+        z
+          .string()
+          .regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, "use a hostname like oauth.example-pipes.dev")
+          .optional(),
+      ),
     /** Hosts that permanently redirect to the app, e.g. `app.wurmhol.com`. Comma-separated. */
     APP_ALIASES: z
       .string()
@@ -126,6 +141,25 @@ const configSchema = z
         message: "must not contain the app's host: shares and the app are separate sites",
       });
     }
+    const relay = config.OAUTH_RELAY_HOST;
+    if (relay) {
+      if (relay === app || relay === config.CONNECT_HOST || config.APP_ALIASES.includes(relay)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["OAUTH_RELAY_HOST"],
+          message: "must be a host of its own, not the app's, the CLI's or an alias",
+        });
+      }
+      const suffix = `.${config.SHARE_DOMAIN}`;
+      const label = relay.endsWith(suffix) ? relay.slice(0, -suffix.length) : null;
+      if (label !== null && (label.includes(".") || SHARE_ID.test(label))) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["OAUTH_RELAY_HOST"],
+          message: `under SHARE_DOMAIN, use one label that is not 10 letters and digits, like oauth${suffix}`,
+        });
+      }
+    }
   });
 
 export type Config = z.output<typeof configSchema>;
@@ -174,17 +208,34 @@ export function shareLabelFromHost(config: Config, host: string | null): string 
 /** A share id: 10 lowercase letters and digits. */
 export const SHARE_ID = /^[a-z0-9]{10}$/;
 
+/** The relay's public origin (ADR 0010), on the app's scheme and port; null when it is off. */
+export function relayOrigin(config: Config) {
+  if (!config.OAUTH_RELAY_HOST) return null;
+  const app = new URL(config.auth.baseURL);
+  return `${app.protocol}//${config.OAUTH_RELAY_HOST}${app.port ? `:${app.port}` : ""}`;
+}
+
+/** The pipe name the relay's host takes from SHARE_DOMAIN, or null when it lives elsewhere. */
+export function reservedPipeName(config: Config) {
+  const suffix = `.${config.SHARE_DOMAIN}`;
+  const relay = config.OAUTH_RELAY_HOST;
+  return relay?.endsWith(suffix) ? relay.slice(0, -suffix.length) : null;
+}
+
 /** What a request's host is for (ADR 0006). */
 export type HostRole =
   | { role: "share"; label: string }
   | { role: "connect" }
+  | { role: "oauth" }
   | { role: "alias" }
   | { role: "app" };
 
 export function hostRole(config: Config, host: string | null): HostRole {
+  const hostname = (host ?? "").toLowerCase().replace(/:\d+$/, "");
+  // Before share labels: the relay may live under SHARE_DOMAIN, with its label reserved.
+  if (config.OAUTH_RELAY_HOST && hostname === config.OAUTH_RELAY_HOST) return { role: "oauth" };
   const label = shareLabelFromHost(config, host);
   if (label !== null) return { role: "share", label };
-  const hostname = (host ?? "").toLowerCase().replace(/:\d+$/, "");
   if (config.CONNECT_HOST && hostname === config.CONNECT_HOST) return { role: "connect" };
   if (config.APP_ALIASES.includes(hostname)) return { role: "alias" };
   return { role: "app" };

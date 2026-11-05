@@ -37,6 +37,8 @@
     "APP_ALIASES": "",
     // Pipes live at `<id>.<SHARE_DOMAIN>`: a domain of its own with a wildcard route.
     "SHARE_DOMAIN": "example-pipes.dev",
+    // The OAuth callback relay's host (ADR 0010), e.g. `oauth.wurmhol.dev`. Empty: no relay.
+    "OAUTH_RELAY_HOST": "",
     "AUTH_TRUSTED_ORIGINS": "",
     "AUTH_PASSKEY_RP_ID": "",
     "APP_NAME": "Wurmhol",

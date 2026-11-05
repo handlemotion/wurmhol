@@ -32,6 +32,22 @@ on wurmhol.com.
 register `https://my-app.wurmhol.dev/<your callback path>` with the provider once. The first org to
 use a name keeps it, and one pipe per name is open at a time.
 
+### OAuth with many pipes
+
+To run several pipes of one app at once (parallel agents, one per branch) without registering a
+redirect URI for each name, sign in through the relay at `https://oauth.wurmhol.dev`:
+
+1. Register `https://oauth.wurmhol.dev/<your callback path>` with the provider, once. For a GitHub
+   OAuth App, register `https://oauth.wurmhol.dev`: any callback path under it is accepted.
+2. Configure the app with that redirect URI (in Better Auth, the provider's `redirectURI`).
+3. Open as many pipes as you like, named or not. When the app sends a viewer to the provider, the
+   relay notes which pipe the sign-in's `state` came from, and sends the provider's callback back
+   to that pipe, at the same path and query.
+
+The relay reads only the redirect's `Location` header, keeps a hash of the `state` for at most 10
+minutes, and lets each one through once. The app must send the viewer off with a redirect or a
+`Location` header (Better Auth does both); `response_mode=form_post` is not supported.
+
 By default every member of the token's org can open a pipe. `--only ana@x.com,bo@y.com` narrows it
 to those members.
 

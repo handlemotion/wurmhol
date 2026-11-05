@@ -145,3 +145,27 @@ export const shareViews = sqliteTable(
     index("share_views_org_idx").on(table.orgId),
   ],
 );
+
+/**
+ * The OAuth callback relay (ADR 0010): an OAuth `state` a pipe's app sent its viewer off with,
+ * and the pipe the provider's callback goes back to. Stored only as a SHA-256 hash, taken once,
+ * gone after minutes. Never the code, the redirect or anything from a body.
+ */
+export const oauthStates = sqliteTable(
+  "oauth_states",
+  {
+    /** Lowercase hex SHA-256 of the `state` parameter. */
+    hash: text("hash").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    shareId: text("share_id")
+      .notNull()
+      .references(() => shares.id, { onDelete: "cascade" }),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("oauth_states_org_idx").on(table.orgId),
+    index("oauth_states_expires_idx").on(table.expiresAt),
+  ],
+);
