@@ -11,7 +11,7 @@ export { Share } from "./share-do.ts";
 export default {
   /**
    * One Worker, four kinds of host (ADR 0006): pipes (`<id>.wurmhol.dev`), the CLI's
-   * endpoint (`api.wurmhol.com`, `/connect` only), aliases that redirect to the app
+   * endpoint (`api.wurmhol.com`: `/connect` and the `/v1/pipes` API), aliases that redirect to the app
    * (`app.wurmhol.com`), and the app itself (`dirt.wurmhol.com`: console, API, sign-in).
    */
   async fetch(request, env, ctx) {
@@ -24,7 +24,13 @@ export default {
     }
     if (host.role === "connect") {
       const { pathname } = new URL(request.url);
-      if (pathname === "/connect" || pathname === "/health") return app.fetch(request, env, ctx);
+      if (
+        pathname === "/connect" ||
+        pathname === "/health" ||
+        /^\/v1\/pipes(\/|$)/.test(pathname)
+      ) {
+        return app.fetch(request, env, ctx);
+      }
       return Response.json(
         {
           error: "not found",

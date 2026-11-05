@@ -9,3 +9,11 @@ export function ago(at: number | string | null, now: number) {
   if (hours < 48) return `${hours} h ago`;
   return `${Math.round(hours / 24)} d ago`;
 }
+
+/** "Expires in 3 h", "Expires in 89 d", "Never expires", "Expired". */
+export function expiry(at: number | string | null, now: number) {
+  if (at === null) return "Never expires";
+  const hours = Math.round((new Date(at).getTime() - now) / 3_600_000);
+  if (hours <= 0) return "Expired";
+  return hours < 48 ? `Expires in ${hours} h` : `Expires in ${Math.round(hours / 24)} d`;
+}
