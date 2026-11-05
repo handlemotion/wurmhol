@@ -1,6 +1,6 @@
-// Billing (spec section 4): one plan per org, $3 a month or $30 a year, through Better Auth's
-// Stripe plugin. One menu item: the customer portal when the org has a plan, Checkout (yearly
-// first, the cheaper one to charge) when it has none. Owners only.
+// Billing (ADR 0004): one plan per org, bought before the first pipe, through Better Auth's Stripe
+// plugin. One menu item: the customer portal when the org has a plan, Checkout (yearly unless a
+// monthly price exists and is asked for) when it has none. Owners only.
 import { zValidator } from "@hono/zod-validator";
 import { PLAN_NAME } from "@wurmhol/auth";
 import { orgStanding, orgSubscription } from "@wurmhol/db";
@@ -20,13 +20,12 @@ export const billing = new Hono<AppEnv>()
     const plan = config.auth.billing;
     const standing = await orgStanding(db, member.orgId, {
       enabled: plan !== undefined,
-      trialDays: config.auth.trialDays,
     });
     const subscription = plan ? await orgSubscription(db, member.orgId) : null;
     return c.json({
       enabled: plan !== undefined,
       canManage: member.role === "owner",
-      yearly: Boolean(plan?.yearlyPriceId),
+      intervals: [plan?.yearlyPriceId && "year", plan?.monthlyPriceId && "month"].filter(Boolean),
       standing,
       subscription: subscription && {
         status: subscription.status,
@@ -53,14 +52,18 @@ export const billing = new Hono<AppEnv>()
       return c.json({ url: portal.url });
     }
     const interval = c.req.valid("json").interval ?? (plan.yearlyPriceId ? "year" : "month");
-    if (interval === "year" && !plan.yearlyPriceId) {
-      throw new HTTPException(400, { message: "yearly billing is not offered" });
+    if (
+      (interval === "year" && !plan.yearlyPriceId) ||
+      (interval === "month" && !plan.monthlyPriceId)
+    ) {
+      throw new HTTPException(400, { message: `${interval}ly billing is not offered` });
     }
     const session = await auth.api.upgradeSubscription({
       headers: c.req.raw.headers,
       body: {
         plan: PLAN_NAME,
-        annual: interval === "year",
+        // `annual` picks the plugin's annual price, which exists only beside a monthly one.
+        annual: interval === "year" && plan.monthlyPriceId !== undefined,
         customerType: "organization",
         referenceId: member.orgId,
         successUrl: back,

@@ -1,5 +1,5 @@
-// Billing (spec section 4) against Better Auth's real Stripe plugin: after the trial, shares
-// refuse to start until the org subscribes, and Stripe's webhooks (signed with the Stripe SDK's
+// Billing (ADR 0004) against Better Auth's real Stripe plugin: pipes refuse to start until the
+// org subscribes (there is no trial), and Stripe's webhooks (signed with the Stripe SDK's
 // own test helper, verified by the plugin) start and end the plan. Checkout and the portal call
 // Stripe itself: those run only with STRIPE_E2E_SECRET_KEY set (a test-mode key), never in CI.
 import { DatabaseSync } from "node:sqlite";
@@ -35,10 +35,8 @@ beforeAll(async () => {
   stack = await startStack({
     STRIPE_SECRET_KEY: process.env.STRIPE_E2E_SECRET_KEY ?? "sk_test_e2e_not_a_real_key",
     STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET,
-    STRIPE_PRICE_MONTHLY: process.env.STRIPE_E2E_PRICE_MONTHLY ?? "price_e2e_month",
+    // Yearly only, as hosted Wurmhol sells it (ADR 0004).
     STRIPE_PRICE_YEARLY: process.env.STRIPE_E2E_PRICE_YEARLY ?? "price_e2e_year",
-    // The trial is over the moment the org exists.
-    BILLING_TRIAL_DAYS: "0",
   });
   ada = await signIn(stack);
   orgId = (await me(stack, ada)).activeOrgId;
@@ -92,10 +90,10 @@ function subscription(status: string) {
 }
 
 describe("billing", () => {
-  it("refuses new shares once the trial is over, saying how to subscribe", async () => {
+  it("refuses pipes before the org buys a plan (no trial), saying how to subscribe", async () => {
     const refused = await cli([String(local.port)], env);
     expect(refused.code).toBe(1);
-    expect(refused.stderr).toContain("trial has ended");
+    expect(refused.stderr).toContain("no plan yet");
     expect(refused.stderr).toContain("Billing");
     const { body } = await api<{
       enabled: boolean;

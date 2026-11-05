@@ -320,13 +320,13 @@ export class Share extends DurableObject<Env> {
   /** One viewer request (HTTP or a browser WebSocket), already signed in by the Worker. */
   async #view(request: Request): Promise<Response> {
     const meta = this.#meta();
-    if (!meta || meta.state === "ended") return errorPage(410, "This share has ended.");
+    if (!meta || meta.state === "ended") return errorPage(410, "This pipe has ended.");
     const viewer = request.headers.get(INTERNAL_HEADERS.viewer);
     if (!viewer || !(await this.#isMember(viewer, meta.orgId))) {
       return new Response("not a member", { status: 403, headers: { "x-wurmhol-refused": "1" } });
     }
     if (!this.#cli() && !(await this.#waitForCli())) {
-      return errorPage(503, "The share's CLI is reconnecting. This page retries on its own.", {
+      return errorPage(503, "The pipe's CLI is reconnecting. This page retries on its own.", {
         refresh: 2,
       });
     }
@@ -421,7 +421,7 @@ export class Share extends DurableObject<Env> {
       this.#send({ stream: id, type: "request", payload: head });
     } catch {
       this.#streams.delete(id);
-      return errorPage(503, "The share's CLI is reconnecting. This page retries on its own.", {
+      return errorPage(503, "The pipe's CLI is reconnecting. This page retries on its own.", {
         refresh: 2,
       });
     }
@@ -609,7 +609,7 @@ export class Share extends DurableObject<Env> {
       });
     } catch {
       this.#streams.delete(id);
-      return errorPage(503, "The share's CLI is reconnecting.");
+      return errorPage(503, "The pipe's CLI is reconnecting.");
     }
     let opened: WsOpenPayload;
     try {

@@ -19,22 +19,40 @@ export interface AppEnv {
   };
 }
 
+/** Whether this install signs in by magic link: with a sender, or where links are logged. */
+export function magicLinksOn(config: Config) {
+  return config.MAIL_FROM !== undefined || config.ENVIRONMENT !== "production";
+}
+
 /** Builds Better Auth for one request scope. */
 export function authFor(env: Env, config: Config, db: Db): Auth {
   return createAuth({
     db,
     ...config.auth,
-    // No mail sender yet (spec open question 4): magic links only outside production, where
-    // the link is logged. The e2e suites read it from D1's `verifications` table.
-    sendMagicLink:
-      config.ENVIRONMENT === "production"
-        ? undefined
-        : async ({ email, url }) => {
-            if (config.ENVIRONMENT === "development") {
-              // oxlint-disable-next-line no-console -- the dev sign-in link, by design
-              console.log(JSON.stringify({ event: "auth.dev_link", email, url }));
-            }
-          },
+    sendMagicLink: magicLinksOn(config)
+      ? async ({ email, url }) => {
+          if (config.ENVIRONMENT === "development") {
+            // oxlint-disable-next-line no-console -- the dev sign-in link, by design
+            console.log(JSON.stringify({ event: "auth.dev_link", email, url }));
+          }
+          // Mail goes out whenever a sender is set (wrangler dev simulates the binding). The
+          // e2e suites leave it unset and read the link from D1 instead.
+          if (config.MAIL_FROM) await sendMagicLinkMail(env, config, email, url);
+        }
+      : undefined,
+  });
+}
+
+/** The sign-in email, through Cloudflare Email Service (ADR 0005). */
+async function sendMagicLinkMail(env: Env, config: Config, email: string, url: string) {
+  const app = config.auth.appName;
+  const escaped = url.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+  await env.EMAIL.send({
+    from: { email: config.MAIL_FROM!, name: app },
+    to: email,
+    subject: `Sign in to ${app}`,
+    text: `Open this link to sign in to ${app}:\n\n${url}\n\nIt works once, for 5 minutes. If you did not ask for it, ignore this email.`,
+    html: `<p>Open this link to sign in to ${app}:</p><p><a href="${escaped}">Sign in to ${app}</a></p><p>It works once, for 5 minutes. If you did not ask for it, ignore this email.</p>`,
   });
 }
 

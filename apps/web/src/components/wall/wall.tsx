@@ -29,7 +29,7 @@ import { TokensDialog } from "./tokens-dialog";
 
 const SAMPLE: Share[] = [1, 2, 3].map((n) => ({
   id: `sample${n}`,
-  url: "https://sample.on.wurmhol.com",
+  url: "https://sample.pipe.wurmhol.com",
   port: 5173,
   startedBy: "Someone",
   startedAt: 0,
@@ -48,13 +48,8 @@ export function Wall({ me }: { me: Me }) {
     <div className="min-h-dvh bg-background">
       <Header me={me} onOpen={setDialog} />
       <main className="mx-auto w-full max-w-6xl px-4 pt-6 pb-16 sm:px-8 sm:pt-10">
-        {me.standing && !me.standing.ok && (
-          <Text className="mb-6 text-sm text-warning-subtle-foreground">
-            The trial has ended: new shares need a plan.
-            {me.role === "owner" ? " Open Billing in the menu." : " Ask an owner to subscribe."}
-          </Text>
-        )}
-        <Skeleton id="wall" data={shares} sample={SAMPLE} label="Loading shares">
+        {me.standing && !me.standing.ok && <NeedsPlan owner={me.role === "owner"} />}
+        <Skeleton id="wall" data={shares} sample={SAMPLE} label="Loading pipes">
           {(list) =>
             list.length === 0 ? (
               <Empty />
@@ -195,10 +190,29 @@ function ShareCard({ share }: { share: Share }) {
   );
 }
 
+/** No plan yet (ADR 0004: no trial): pipes refuse to start until an owner subscribes. */
+function NeedsPlan({ owner }: { owner: boolean }) {
+  const billing = useOpenBilling();
+  return (
+    <div className="mb-8 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border p-5">
+      <Text>
+        {owner
+          ? "Subscribe to open pipes from your agents."
+          : "Pipes start once an owner of this org subscribes."}
+      </Text>
+      {owner && (
+        <Button isPending={billing.isPending} onPress={() => billing.mutate()}>
+          Subscribe
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function Empty() {
   return (
     <div className="mx-auto flex max-w-md flex-col gap-3 pt-16 text-center">
-      <Text>No open shares. From a dev server's machine, run:</Text>
+      <Text>No open pipes. From a dev server's machine, run:</Text>
       <CopyField label="Run" value="npx wurmhol <port>" />
     </div>
   );

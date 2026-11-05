@@ -44,13 +44,12 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
   }
   const standing = await orgStanding(db, token.orgId, {
     enabled: config.auth.billing !== undefined,
-    trialDays: config.auth.trialDays,
   });
   if (!standing.ok) {
     return refuse(
       402,
       "no subscription",
-      `The org's trial has ended. Subscribe at ${config.auth.baseURL} (menu → Billing).`,
+      `The org has no plan yet. Subscribe at ${config.auth.baseURL} (menu → Billing).`,
     );
   }
 
@@ -59,10 +58,10 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
   if (resume !== undefined) {
     const share = SHARE_ID.test(resume) ? await findShare(db, resume) : null;
     if (!share || share.orgId !== token.orgId || share.tokenId !== token.id) {
-      return refuse(404, "share not found", "Start a new share: npx wurmhol <port>.");
+      return refuse(404, "share not found", "Start a new pipe: npx wurmhol <port>.");
     }
     if (share.endedAt) {
-      return refuse(410, "share ended", "Start a new share: npx wurmhol <port>.", {
+      return refuse(410, "share ended", "Start a new pipe: npx wurmhol <port>.", {
         reason: share.endReason,
       });
     }
@@ -116,8 +115,8 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
     return reservation.reason === "active_limit"
       ? refuse(
           429,
-          "active share limit",
-          `The org already has ${reservation.limit} open shares. Stop one (wurmhol stop <port>) or terminate one on ${config.auth.baseURL}.`,
+          "active pipe limit",
+          `The org already has ${reservation.limit} open pipes. Stop one (wurmhol stop <port>) or terminate one on ${config.auth.baseURL}.`,
         )
       : refuse(
           429,

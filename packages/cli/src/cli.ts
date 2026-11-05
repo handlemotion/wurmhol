@@ -21,9 +21,9 @@ const INIT_LINE = "Share a local server with `npx wurmhol <port>` and send the u
 const HELP = `wurmhol ${pkg.version}: a private HTTPS URL for a local dev server
 
 Usage:
-  npx wurmhol <port> [--json]   Share a port; prints the URL, then returns
-  wurmhol ls [--json]           List open shares
-  wurmhol stop <port|id>        End a share (--all ends every one)
+  npx wurmhol <port> [--json]   Open a pipe to a port; prints the URL, then returns
+  wurmhol ls [--json]           List open pipes
+  wurmhol stop <port|id>        End a pipe (--all ends every one)
   wurmhol init                  Add a line about wurmhol to AGENTS.md or CLAUDE.md
 
 Environment:
@@ -74,7 +74,7 @@ async function share(port: number, json: boolean) {
     child.once("exit", (code) =>
       resolve({
         type: "error",
-        message: `the share process exited (${code}); see ${logFile("daemon")}`,
+        message: `the pipe process exited (${code}); see ${logFile("daemon")}`,
       }),
     );
   });
@@ -136,7 +136,7 @@ function ls(json: boolean) {
     return;
   }
   if (!states.length) {
-    process.stdout.write("No open shares. Start one with: npx wurmhol <port>\n");
+    process.stdout.write("No open pipes. Start one with: npx wurmhol <port>\n");
     return;
   }
   for (const s of states) process.stdout.write(`${s.port}\t${s.url}\t${s.id}\n`);
@@ -151,7 +151,7 @@ async function stop(target: string | undefined, all: boolean) {
   if (!all && !target) fail("Say which share: wurmhol stop <port|id>, or --all.");
   if (!chosen.length) {
     if (all) return;
-    fail(`No open share for ${target}. See: wurmhol ls`);
+    fail(`No open pipe for ${target}. See: wurmhol ls`);
   }
   for (const s of chosen) {
     try {

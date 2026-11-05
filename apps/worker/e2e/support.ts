@@ -102,6 +102,8 @@ export async function waitFor<T>(
 
 export interface Stack {
   url: string;
+  /** Everything wrangler dev printed so far (the simulated Email binding logs each email). */
+  output(): string;
   port: number;
   shareUrl(id: string): string;
   db(): DatabaseSync;
@@ -126,7 +128,7 @@ export async function startStack(vars: Record<string, string> = {}): Promise<Sta
     ENVIRONMENT: "test",
     BETTER_AUTH_URL: url,
     BETTER_AUTH_SECRET: "e2e-auth-secret-e2e-auth-secret-e2e-auth",
-    SHARE_DOMAIN: "on.localhost",
+    SHARE_DOMAIN: "pipe.localhost",
     AUTH_TRUSTED_ORIGINS: url,
     RATE_LIMIT_AUTH: "off",
     RATE_LIMIT_CONNECT: "off",
@@ -179,7 +181,8 @@ export async function startStack(vars: Record<string, string> = {}): Promise<Sta
   return {
     url,
     port,
-    shareUrl: (id) => `http://${id}.on.localhost:${port}`,
+    output: () => output,
+    shareUrl: (id) => `http://${id}.pipe.localhost:${port}`,
     db: () => new DatabaseSync(dbFile(), { readOnly: true }),
     stop: async () => {
       try {

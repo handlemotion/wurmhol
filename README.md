@@ -5,13 +5,14 @@ A private HTTPS URL for a coding agent's dev server, from inside sandboxed cloud
 
 ```bash
 npx wurmhol 8787
-# https://k3x9p2.on.wurmhol.com
+# https://k3x9p2.pipe.wurmhol.com
 ```
 
-The URL opens only for signed-in members of the org that owns the token, on any device. The CLI
+The URL (a pipe) opens only for signed-in members of the org that owns the token, on any device. The CLI
 needs one outbound WebSocket on 443 and works through an HTTPS CONNECT proxy (`HTTPS_PROXY`,
 `NODE_EXTRA_CA_CERTS`).
 
+- $12 a year per org (ADR 0004).
 - `wurmhol ls`, `wurmhol stop <port|id>`, `wurmhol stop --all`, `wurmhol init`
 - `WURMHOL_TOKEN`: a token from your org (menu → Tokens). `WURMHOL_URL`: a self-hosted install.
 
