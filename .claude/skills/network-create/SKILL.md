@@ -126,7 +126,8 @@ you pick a variant instead of guessing. `--tsx Name` writes a React component of
 
    **Favicon** (`favicon`): named candidates (`lens`, `holding`, `chain`, `flower`, `bezel`,
    `tangents`, `tunnel`, `spiral`, `portal`, `graph`, `funnel`), each one construction cut to
-   what survives at 16px; `SHIPPED` names the live one. Render one with `--set name=<name>`, all
+   what survives at 16px; `SHIPPED` names the live one (`--set name=tangents --set tile=on
+   --stroke 0.75`: black on a white tile, barely rounded, the same on every tab bar). Render one with `--set name=<name>`, all
    with `--seeds 11`. On a 32px grid. `--stroke 1` with
    `scaleStroke` (a hairline at any size) and `scheme` (inks switch with the viewer's color
    scheme inside the file). Copy it to `apps/web/public/` and `apps/site/public/`. Preview it at

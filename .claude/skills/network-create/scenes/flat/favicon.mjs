@@ -46,7 +46,7 @@ const CANDIDATES = {
   },
   /** A small and a large circle, their inner tangents crossing at the centre of similitude. */
   tangents(p) {
-    const c1 = [5.5, 16];
+    const c1 = [4.5, 16];
     const r1 = 3.5;
     const c2 = [22, 16];
     const r2 = 9;
@@ -58,7 +58,7 @@ const CANDIDATES = {
       const k = r1 / r2;
       p.line([I[0] - (t[0] - I[0]) * k, I[1] - (t[1] - I[1]) * k], t);
     }
-    p.node(I, { shape: "dot", size: 3.5, accent: true });
+    p.node(I, { shape: "dot", size: 2.75, accent: true });
   },
   /** One-point perspective: frames shrinking by 1/φ to the vanishing point, corner rays. */
   tunnel(p) {
@@ -141,8 +141,8 @@ const CANDIDATES = {
 };
 
 export const NAMES = Object.keys(CANDIDATES);
-/** The favicon that ships. */
-export const SHIPPED = "lens";
+/** The favicon that ships: `--set name=tangents --set tile=on --stroke 0.75`. */
+export const SHIPPED = "tangents";
 
 export default (o) => {
   const p = plate({
@@ -159,7 +159,7 @@ export default (o) => {
             scaleStroke: true,
             paper: "#ffffff",
             paperRadius: 3,
-            inset: 3,
+            inset: 2,
           }
         : {
             ink: o.ink,
