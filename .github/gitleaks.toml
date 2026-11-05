@@ -8,3 +8,11 @@ description = "Idempotency-Key request headers are random request ids, not crede
 targetRules = ["generic-api-key"]
 regexTarget = "match"
 regexes = ['''(?i)idempotency[-_]key''']
+
+[[allowlists]]
+description = "PEM armor in the code that rewraps a GitHub App key as PKCS#8 (ADR 0016): a regex and a template, no key material"
+targetRules = ["private-key"]
+condition = "AND"
+paths = ['''^apps/worker/src/github\.ts$''']
+regexTarget = "match"
+regexes = ['''\(\[\\s\\S\]\+\?\)''']
