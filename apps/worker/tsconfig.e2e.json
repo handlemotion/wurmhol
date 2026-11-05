@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": ".tsbuild/e2e",
+    "lib": ["es2024", "dom"],
+    "types": ["node"],
+    "allowImportingTsExtensions": true
+  },
+  "include": ["e2e"]
+}

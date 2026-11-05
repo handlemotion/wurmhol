@@ -1,0 +1,168 @@
+// The app's API, for members of the active org: the wall, tokens, members and invite links.
+import { zValidator } from "@hono/zod-validator";
+import {
+  acceptInvite,
+  createInvite,
+  createToken,
+  findShare,
+  listMembers,
+  listOrgsForUser,
+  listTokens,
+  openSharesOfToken,
+  orgStanding,
+  peekInvite,
+  removeMember,
+  revokeToken,
+} from "@wurmhol/db";
+import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
+import { z } from "zod";
+import { type AppEnv, requireMember, requireOwner, resolveSession } from "../context.ts";
+import { SHARE_ID } from "../env.ts";
+import { limitPerMember } from "../rate-limiter.ts";
+
+function allowedOrigins(c: { var: AppEnv["Variables"] }) {
+  return new Set([new URL(c.var.config.auth.baseURL).origin, ...c.var.config.auth.trustedOrigins]);
+}
+
+/** A share of the member's org, or 404: another org's shares do not exist here. */
+async function ownShare(c: { var: AppEnv["Variables"] }, id: string) {
+  const share = SHARE_ID.test(id) ? await findShare(c.var.db, id) : null;
+  if (!share || share.orgId !== c.var.member.orgId) {
+    throw new HTTPException(404, { message: "no such share" });
+  }
+  return share;
+}
+
+/** Routes that work signed in but without an org, or with an invite in hand. */
+export const account = new Hono<AppEnv>()
+  /** Who is signed in, their orgs, and which one is active. */
+  .get("/me", async (c) => {
+    const session = await resolveSession(c);
+    if (!session) throw new HTTPException(401, { message: "sign in first" });
+    const orgs = await listOrgsForUser(c.var.db, session.user.id);
+    const standing = session.member
+      ? await orgStanding(c.var.db, session.member.orgId, {
+          enabled: c.var.config.auth.billing !== undefined,
+          trialDays: c.var.config.auth.trialDays,
+        })
+      : null;
+    return c.json({
+      user: session.user,
+      orgs,
+      activeOrgId: session.member?.orgId ?? null,
+      role: session.member?.role ?? null,
+      standing: standing && {
+        ok: standing.ok,
+        reason: standing.reason,
+        trialEndsAt: standing.ok ? (standing.trialEndsAt?.toISOString() ?? null) : null,
+      },
+    });
+  })
+  /** Which org an invite link is for, so the join page can name it. */
+  .get("/invites/:code", async (c) => {
+    const invite = await peekInvite(c.var.db, c.req.param("code"));
+    if (!invite)
+      throw new HTTPException(404, { message: "this invite link has expired or was used" });
+    return c.json({ orgName: invite.orgName });
+  })
+  .post("/invites/:code/accept", async (c) => {
+    const session = await resolveSession(c);
+    if (!session) throw new HTTPException(401, { message: "sign in first" });
+    const result = await acceptInvite(c.var.db, c.req.param("code"), session.user.id);
+    if (result.status === "invalid") {
+      throw new HTTPException(404, { message: "this invite link has expired or was used" });
+    }
+    // Land in the org just joined.
+    await c.var.auth.api.setActiveOrganization({
+      headers: c.req.raw.headers,
+      body: { organizationId: result.orgId },
+    });
+    return c.json({ orgId: result.orgId, status: result.status });
+  });
+
+const tokenBody = z.object({ name: z.string().trim().min(1).max(80) });
+
+export const api = new Hono<AppEnv>()
+  .use(requireMember)
+  /** The wall: every open share of the active org. */
+  .get("/shares", async (c) => {
+    const org = c.env.ORG.get(c.env.ORG.idFromName(c.var.member.orgId));
+    return c.json({ shares: await org.list() });
+  })
+  /**
+   * The wall's live feed: a snapshot, then share.started / updated / ended. Cookie-authenticated,
+   * and browsers send cookies on cross-site handshakes, so only our own origins may open it
+   * (cross-site WebSocket hijacking). A handshake with no Origin is not a browser.
+   */
+  .get("/live", async (c) => {
+    if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
+      return c.json({ error: "expected a websocket upgrade" }, 426);
+    }
+    const origin = c.req.header("origin");
+    if (origin !== undefined && !allowedOrigins(c).has(origin)) {
+      return c.json({ error: "origin not allowed" }, 403);
+    }
+    const org = c.env.ORG.get(c.env.ORG.idFromName(c.var.member.orgId));
+    return org.fetch(c.req.raw);
+  })
+  /** Terminate: ends the share at once and closes its CLI's socket. Any member may. */
+  .post("/shares/:id/terminate", limitPerMember("manage"), async (c) => {
+    const share = await ownShare(c, c.req.param("id"));
+    await c.env.SHARE.get(c.env.SHARE.idFromName(share.id)).terminate("terminated");
+    c.var.log.info("share.terminated", { shareId: share.id, orgId: share.orgId });
+    return c.json({ ok: true });
+  })
+  /** The dev server's favicon, for the wall (the share host itself needs its own cookie). */
+  .get("/shares/:id/favicon", async (c) => {
+    const share = await ownShare(c, c.req.param("id"));
+    const icon = await c.env.SHARE.get(c.env.SHARE.idFromName(share.id)).favicon();
+    if (!icon) return c.body(null, 404);
+    return c.body(icon.body, 200, {
+      "content-type": icon.type,
+      "cache-control": "private, max-age=300",
+      // SVG favicons can hold script: never as a document.
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    });
+  })
+  .get("/tokens", async (c) => c.json({ tokens: await listTokens(c.var.db, c.var.member.orgId) }))
+  /** A new token, shown once. */
+  .post("/tokens", limitPerMember("manage"), zValidator("json", tokenBody), async (c) => {
+    const { id, token } = await createToken(c.var.db, {
+      orgId: c.var.member.orgId,
+      name: c.req.valid("json").name,
+      createdBy: c.var.user.id,
+    });
+    return c.json({ id, token }, 201);
+  })
+  /** Revokes a token and ends every share it started (spec section 6, "Token leaked"). */
+  .delete("/tokens/:id", async (c) => {
+    const tokenId = c.req.param("id");
+    if (!(await revokeToken(c.var.db, c.var.member.orgId, tokenId))) {
+      throw new HTTPException(404, { message: "no such token" });
+    }
+    for (const share of await openSharesOfToken(c.var.db, tokenId)) {
+      await c.env.SHARE.get(c.env.SHARE.idFromName(share.id)).terminate("revoked");
+    }
+    return c.json({ ok: true });
+  })
+  .get("/members", async (c) =>
+    c.json({ members: await listMembers(c.var.db, c.var.member.orgId), you: c.var.member.id }),
+  )
+  .delete("/members/:id", requireOwner, async (c) => {
+    const result = await removeMember(c.var.db, c.var.member.orgId, c.req.param("id"));
+    if (result === "not_found") throw new HTTPException(404, { message: "no such member" });
+    if (result === "last_owner") {
+      throw new HTTPException(409, { message: "an org needs at least one owner" });
+    }
+    return c.json({ ok: true });
+  })
+  /** A single-use invite link (spec section 3, Members). */
+  .post("/invites", requireOwner, limitPerMember("manage"), async (c) => {
+    const { code, expiresAt } = await createInvite(c.var.db, {
+      orgId: c.var.member.orgId,
+      createdBy: c.var.user.id,
+    });
+    const url = new URL(`/join/${code}`, c.var.config.auth.baseURL).toString();
+    return c.json({ url, expiresAt: expiresAt.toISOString() }, 201);
+  });
