@@ -9,7 +9,8 @@ npx wurmhol 8787                 # prints https://<id>.pipe.wurmhol.com, then re
 ```
 
 Only signed-in members of the token's org can open the URL. One outbound WebSocket on 443,
-dialed through `HTTPS_PROXY` when set; `NODE_EXTRA_CA_CERTS` adds a proxy's CA.
+dialed through `HTTPS_PROXY` when set; `NODE_EXTRA_CA_CERTS` adds a proxy's CA. In a sandbox
+that only reaches listed hosts, allow `api.wurmhol.com`: it is the only host the CLI dials.
 
 | Command                   | Does                                                     |
 | ------------------------- | -------------------------------------------------------- |
