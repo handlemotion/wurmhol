@@ -13,6 +13,7 @@ import { open } from "./routes/open.ts";
 import { githubRoutes } from "./routes/github.ts";
 import { machineConnect } from "./routes/machines.ts";
 import { serveMcp } from "./routes/mcp.ts";
+import { operator } from "./routes/operator.ts";
 import { pipes } from "./routes/pipes.ts";
 import { securityHeaders } from "./security-headers.ts";
 
@@ -112,7 +113,7 @@ const OAUTH_ROUTES = new Set([
   "GET /api/auth/jwks",
 ]);
 
-/** The app's host: the console, its API, `/connect`, `/host`, `/device/*` and `/v1`. Share hosts never reach this (index.ts). */
+/** The app's host: the console, its API, `/connect`, `/host`, `/device/*`, `/v1` and `/operator`. Share hosts never reach this (index.ts). */
 export const app = new Hono<AppEnv>()
   .use(trace)
   .get("/health", (c) => c.json({ ok: true }))
@@ -161,6 +162,9 @@ export const app = new Hono<AppEnv>()
   .use("/v1/*", requestScope, securityHeaders)
   .route("/v1/pipes", pipes)
   .all("/v1/*", (c) => c.json({ error: "not found" }, 404))
+  .use("/operator/*", requestScope, securityHeaders)
+  .route("/operator", operator)
+  .all("/operator/*", (c) => c.json({ error: "not found" }, 404))
   .use("/open", requestScope, securityHeaders)
   .route("/open", open)
   .use("/api/*", requestScope, securityHeaders)

@@ -4,7 +4,7 @@ import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import type { Db } from "./client.ts";
 import { randomSecret, sha256Hex } from "./crypto.ts";
-import { inviteLinks, members, organizations, users } from "./schema/index.ts";
+import { inviteLinks, members, orgBlocks, organizations, users } from "./schema/index.ts";
 
 /** Self-serve sign-up's personal org, owned by the new user (spec section 3). */
 export async function createPersonalOrg(db: Db, input: { userId: string; name: string }) {
@@ -192,4 +192,19 @@ export async function findMembersByEmail(db: Db, orgId: string, emails: string[]
     .where(and(eq(members.organizationId, orgId), inArray(sql`lower(${users.email})`, wanted)));
   const found = new Set(rows.map((row) => row.email.toLowerCase()));
   return { members: rows, unknown: wanted.filter((email) => !found.has(email)) };
+}
+
+/** Blocks `orgId` for abuse (ADR 0022). Blocking it again keeps the first note. */
+export async function blockOrg(db: Db, orgId: string, reason: string | null) {
+  await db.insert(orgBlocks).values({ orgId, reason }).onConflictDoNothing();
+}
+
+/** Whether an operator blocked `orgId` (ADR 0022). */
+export async function isOrgBlocked(db: Db, orgId: string) {
+  const [row] = await db
+    .select({ orgId: orgBlocks.orgId })
+    .from(orgBlocks)
+    .where(eq(orgBlocks.orgId, orgId))
+    .limit(1);
+  return row !== undefined;
 }
