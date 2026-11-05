@@ -84,6 +84,8 @@ const configSchema = z
     LIMIT_MONTHLY_BYTES: positive(100 * 1000 ** 3),
     /** Longest a share stays open, in seconds; the CLI's `--ttl` may ask up to this. 12 hours. */
     LIMIT_SHARE_SECONDS: positive(12 * 3600),
+    /** Days the daily retention job keeps a pipe's history (`shares` rows). 90 by default. */
+    RETENTION_DAYS: positive(90),
     /**
      * How long a share stays open when the CLI asks for no lifetime, in seconds, capped at
      * `LIMIT_SHARE_SECONDS`. 4 hours by default (ADR 0008).

@@ -67,7 +67,6 @@ export async function handleShareHost(request: Request, env: Env, shareId: strin
   const headers = new Headers(request.headers);
   for (const name of Object.values(INTERNAL_HEADERS)) headers.delete(name);
   headers.set(INTERNAL_HEADERS.viewer, userId);
-  headers.set(INTERNAL_HEADERS.clientIp, request.headers.get("cf-connecting-ip") ?? "");
   const response = await stub.fetch(new Request(request, { headers }));
   if (response.headers.get("x-wurmhol-refused")) {
     // Removed from the org since the cookie was issued: sign in again, as someone who belongs.

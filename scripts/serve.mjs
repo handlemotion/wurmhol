@@ -9,6 +9,8 @@
 //
 // PORT (default 8787) picks the port. Sign in with the magic links the Worker logs as
 // `auth.dev_link` (ENVIRONMENT=development, the .dev.vars.example default).
+// Crons do not fire locally: `curl http://127.0.0.1:8787/cdn-cgi/local/scheduled` runs the
+// Worker's scheduled handler (the retention job) once.
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
