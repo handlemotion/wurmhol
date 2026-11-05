@@ -18,6 +18,12 @@ describe("sameOriginPath", () => {
     ["absolute URL", "https://evil.example/"],
     ["scheme", "javascript:alert(1)"],
     ["relative", "evil.example"],
+    // Dot segments resolve away and leave `//evil.example`: a path on this site to the parser,
+    // another site once a browser follows it as a redirect.
+    ["dot segment", "/.//evil.example/x"],
+    ["parent segment", "/a/..//evil.example"],
+    ["encoded dot segment", "/%2e//evil.example"],
+    ["dot segment and backslash", "/./\\evil.example"],
   ])("refuses %s", (_name, value) => {
     expect(sameOriginPath(value)).toBe("/");
   });
