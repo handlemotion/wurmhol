@@ -51,6 +51,6 @@ cd packages/cli && npm login && npm publish --access public
 Then on npmjs.com, package `wurmhol` → Settings → Trusted Publisher → GitHub Actions:
 organization `handlemotion`, repository `wurmhol`, workflow `production.yml`, environment
 `production`. Set "Publishing access" to require 2FA and disallow tokens. Every later version
-ships from `main` when its version changes.
+ships from `main` when a Changesets release pull request bumps it (`.changeset/README.md`).
 
 Never deploy from a laptop.

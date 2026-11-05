@@ -63,6 +63,20 @@ jobs:
       - name: Format, lint, policies
         run: pnpm check
 
+      # A pull request that changes the published CLI carries a changeset (.changeset/README.md).
+      # Release pull requests have consumed theirs: they change packages/cli/CHANGELOG.md instead.
+      - name: Changeset
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -qx packages/cli/CHANGELOG.md; then
+            echo "Release pull request: nothing to check"
+            exit 0
+          fi
+          pnpm changeset status --since="$BASE_SHA"
+
       - name: Types
         if: steps.scope.outputs.full == 'true'
         run: pnpm check-types

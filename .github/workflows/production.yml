@@ -8,7 +8,9 @@ name: Production
 #    secrets with `wrangler secret bulk` (which deploys a new version of the latest one: waiting
 #    keeps it from putting the old code back).
 # 3. Publishes packages/cli to npm when its version is not on npm yet, through npm trusted
-#    publishing (OIDC): no npm token exists. npm links the package to this workflow file.
+#    publishing (OIDC): no npm token exists. npm links the package to this workflow file. Versions
+#    come from Changesets release pull requests (.changeset/README.md); each one released here
+#    gets a `wurmhol@<version>` tag and GitHub release with its changelog section.
 #
 # prd_github arrives as secrets of the GitHub environment `production` (Doppler's GitHub sync).
 on:
@@ -101,7 +103,8 @@ jobs:
     timeout-minutes: 10
     environment: production
     permissions:
-      contents: read
+      # The release tag and GitHub release.
+      contents: write
       # npm trusted publishing: the OIDC token is the credential, and npm attaches provenance.
       id-token: write
     steps:
@@ -124,9 +127,27 @@ jobs:
           version="$(node -p 'require("./package.json").version')"
           if npm view "wurmhol@$version" version >/dev/null 2>&1; then
             echo "wurmhol@$version is already on npm"
-            exit 0
+          else
+            # Trusted publishing needs npm 11.5.1 or later.
+            npm --version
+            pnpm build
+            npm publish --access public
           fi
-          # Trusted publishing needs npm 11.5.1 or later.
-          npm --version
-          pnpm build
-          npm publish --access public
+
+      # Re-runs finish a release whose publish succeeded. Versions with no changelog section
+      # (the first, published by hand) get no release.
+      - name: Tag and GitHub release
+        working-directory: packages/cli
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          tag="wurmhol@$version"
+          notes="$(awk -v v="## $version" '$0 == v { on = 1; next } /^## / { on = 0 } on' CHANGELOG.md 2>/dev/null || true)"
+          if [ -z "${notes//[[:space:]]/}" ]; then
+            echo "No changelog section for $version: no release"
+          elif gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag is already released"
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --notes "$notes"
+          fi
