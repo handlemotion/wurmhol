@@ -30,7 +30,7 @@ on wurmhol.com.
 By default every member of the token's org can open a pipe. `--only ana@x.com,bo@y.com` narrows it
 to those members.
 
-`WURMHOL_URL` points at a self-hosted install. Node 20+. MIT.
+`WURMHOL_URL` points at a self-hosted install. Node 22+. MIT.
 
 ## From your own process
 

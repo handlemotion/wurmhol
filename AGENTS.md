@@ -46,7 +46,7 @@ extends this file and wins where they differ. Explicit user instructions overrid
   it returns once `/health` answers (`pnpm stack:serve:stop` stops it). Use it for UI checks
   instead of backgrounding a server yourself (`cmd &` in a piped script hangs).
 - Node is 26 (`.nvmrc`). Cloud sessions put `/opt/node/bin` first. The CLI itself supports
-  Node 20+.
+  Node 22+.
 - The pre-commit hook runs `lint-staged` (`oxfmt`, `oxlint --fix`, test policy), so staged files
   can change during `git commit`. Re-read a file after committing before you edit it again.
 

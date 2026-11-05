@@ -1,6 +1,6 @@
 {
   "name": "wurmhol",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Share a local dev server at a private HTTPS URL, from inside sandboxed cloud containers",
   "keywords": [
     "agent",
@@ -49,6 +49,6 @@
     "tsdown": "^0.23.5"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }
