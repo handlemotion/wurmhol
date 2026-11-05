@@ -7,6 +7,8 @@ import {
   type Share,
   type SignInMethods,
   type Token,
+  type TokenExpiry,
+  type TokenScope,
   type WallEvent,
 } from "@/lib/api";
 import { setActiveOrg, signOut } from "@/lib/auth";
@@ -90,10 +92,10 @@ export function useTokens(enabled: boolean) {
 export function useCreateToken() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) =>
+    mutationFn: (body: { name: string; scope: TokenScope; expiresInDays: TokenExpiry }) =>
       api<{ id: string; token: string; host: string; url: string | null }>("/api/tokens", {
         method: "POST",
-        body: { name },
+        body,
       }),
     onSuccess: () => client.invalidateQueries({ queryKey: keys.tokens }),
   });

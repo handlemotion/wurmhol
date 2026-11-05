@@ -266,7 +266,12 @@ export async function me(stack: Stack, person: Person) {
   return (await api<{ activeOrgId: string; user: { id: string } }>(stack, person, "/api/me")).body;
 }
 
-export async function createToken(stack: Stack, person: Person, name = "e2e") {
+export async function createToken(
+  stack: Stack,
+  person: Person,
+  name = "e2e",
+  options: { scope?: "pipes" | "org"; expiresInDays?: 30 | 90 | null } = {},
+) {
   const { status, body } = await api<{
     id: string;
     token: string;
@@ -274,7 +279,7 @@ export async function createToken(stack: Stack, person: Person, name = "e2e") {
     url: string | null;
   }>(stack, person, "/api/tokens", {
     method: "POST",
-    body: { name },
+    body: { name, ...options },
   });
   if (status !== 201) throw new Error(`token: ${status}`);
   return body;

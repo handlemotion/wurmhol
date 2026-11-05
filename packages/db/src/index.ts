@@ -1,5 +1,6 @@
 export { createDb, type Db } from "./client.ts";
 export * as schema from "./schema/index.ts";
+export { TOKEN_SCOPES, type TokenScope } from "./schema/app.ts";
 export * from "./crypto.ts";
 export * from "./orgs.ts";
 export * from "./tokens.ts";

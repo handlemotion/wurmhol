@@ -7,6 +7,48 @@ Below, `dirt.example.com` is the console (the app: sign-in, the wall, its API), 
 the host the CLI dials (ADR 0006), and `example-pipes.dev` a second domain your pipes live under
 (ADR 0007). One host for the app also works: leave `CONNECT_HOST` and `APP_ALIASES` empty.
 
+## Deploy to Cloudflare
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/handlemotion/wurmhol)
+
+The button copies this repository into your GitHub or GitLab account, creates the D1 database and
+the Durable Objects, and connects the copy to Workers Builds, so every push to it redeploys. It
+deploys from the repository root with the root `wrangler.jsonc`.
+
+On its setup page:
+
+- `BETTER_AUTH_SECRET`: the output of `openssl rand -base64 32`.
+- Build command `pnpm run build`, deploy command `pnpm run deploy` (it applies the D1 migrations,
+  then deploys). Write `pnpm run deploy`, not `pnpm deploy`: that one is a pnpm built-in.
+- The vars can stay as they are; you set the hostnames in step 2 below.
+
+Then the three things the button can't do:
+
+1. **Domains.** Add your two zones to the account (section 1 below explains the layout), a
+   proxied wildcard DNS record `*` on the pipe zone (an `AAAA` to `100::`), and the Worker's
+   routes. Put the routes in your copy's root `wrangler.jsonc` so each deploy keeps them:
+
+   ```jsonc
+   "routes": [
+     { "pattern": "dirt.example.com", "custom_domain": true },
+     { "pattern": "*.example-pipes.dev/*", "zone_name": "example-pipes.dev" },
+   ],
+   ```
+
+   The pipe zone's free Universal SSL certificate covers `*.example-pipes.dev`. Pipes one level
+   deeper (`*.pipe.example.com`) need Advanced Certificate Manager instead (section 1).
+
+2. **Hostnames.** In the same file, set `BETTER_AUTH_URL` (`https://dirt.example.com`) and
+   `SHARE_DOMAIN` (`example-pipes.dev`), and `CONNECT_HOST` if the CLI gets its own host. Set
+   them in the file, not the dashboard: each deploy writes the file's vars over the dashboard's.
+   Commit and push; Workers Builds redeploys.
+
+3. **Optional secrets** (OAuth, Stripe), in the dashboard or with `wrangler secret put <NAME>`
+   (section 2). Secrets survive deploys.
+
+D1 migrations need no step: the deploy command applies new ones on every push. Sections 3 to 6
+(sign-in, billing, limits, the CLI) apply as they are.
+
 ## 1. Domains and TLS
 
 - The console: `dirt.example.com`, a custom domain on the Worker (`BETTER_AUTH_URL`). Optional

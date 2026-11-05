@@ -6,9 +6,13 @@ import { organizations, users } from "./auth.ts";
 
 const now = sql`(cast(unixepoch('subsecond') * 1000 as integer))`;
 
+/** What a token may do (ADR 0008): `pipes` opens pipes; `org` also lists and closes the org's. */
+export const TOKEN_SCOPES = ["pipes", "org"] as const;
+export type TokenScope = (typeof TOKEN_SCOPES)[number];
+
 /**
- * Share tokens (spec section 6): random, 32 bytes, stored only as a SHA-256 hash, scoped to
- * "start shares for this org". Revoked tokens stay for the history; `revoked_at` is set.
+ * Share tokens (spec section 6, ADR 0008): random, 32 bytes, stored only as a SHA-256 hash.
+ * Revoked tokens stay for the history; `revoked_at` is set. Null `expires_at`: never expires.
  */
 export const tokens = sqliteTable(
   "tokens",
@@ -20,8 +24,10 @@ export const tokens = sqliteTable(
     name: text("name").notNull(),
     /** Lowercase hex SHA-256 of the token. */
     hash: text("hash").notNull(),
+    scope: text("scope", { enum: TOKEN_SCOPES }).default("pipes").notNull(),
     createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).default(now).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
     lastUsedAt: integer("last_used_at", { mode: "timestamp_ms" }),
     revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
   },

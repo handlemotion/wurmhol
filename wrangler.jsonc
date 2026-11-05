@@ -1,0 +1,73 @@
+// The Deploy to Cloudflare button's config (docs/self-hosting.md, ADR 0008). The button needs a
+// self-contained directory and apps/worker depends on workspace packages, so it deploys from the
+// repository root with this file. It is apps/worker/wrangler.jsonc with root-relative paths and
+// deploy defaults for the vars; `scripts/check-wrangler.mjs` fails when the two drift apart.
+// Local dev, e2e and Handlemotion's production deploy use apps/worker/wrangler.jsonc, not this.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "wurmhol",
+  "main": "apps/worker/src/index.ts",
+  "compatibility_date": "2026-11-03",
+  "compatibility_flags": ["nodejs_compat"],
+  // Vars set in the dashboard survive deploys.
+  "keep_vars": true,
+  "observability": { "enabled": true },
+  "upload_source_maps": true,
+  // Workers Builds installs dependencies with pnpm and runs the root `build` script; a local
+  // `wrangler deploy` from the root runs this command instead.
+  "build": { "command": "pnpm --filter @wurmhol/web build", "watch_dir": "apps/web/src" },
+  "assets": {
+    "directory": "apps/web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true,
+  },
+  // The button shows these on its setup page. Set BETTER_AUTH_URL and SHARE_DOMAIN to your
+  // hostnames there or afterwards (docs/self-hosting.md); every var is in apps/worker/.dev.vars.example.
+  "vars": {
+    "ENVIRONMENT": "production",
+    // The app's public origin: the login page, the wall, the API and `/connect`.
+    "BETTER_AUTH_URL": "https://dirt.example.com",
+    // The host the CLI dials (ADR 0006): /connect and /health only. Empty: BETTER_AUTH_URL's host.
+    "CONNECT_HOST": "",
+    // Hosts that 301 to BETTER_AUTH_URL, comma-separated.
+    "APP_ALIASES": "",
+    // Pipes live at `<id>.<SHARE_DOMAIN>`: a domain of its own with a wildcard route.
+    "SHARE_DOMAIN": "example-pipes.dev",
+    "AUTH_TRUSTED_ORIGINS": "",
+    "AUTH_PASSKEY_RP_ID": "",
+    "APP_NAME": "Wurmhol",
+    // Sender of magic-link mail (ADR 0005), on a domain onboarded to Email Service.
+    "MAIL_FROM": "",
+    "GOOGLE_CLIENT_ID": "",
+    "GITHUB_CLIENT_ID": "",
+    // Billing (ADR 0004): off unless the STRIPE_SECRET_KEY secret is set.
+    "STRIPE_PRICE_YEARLY": "",
+    "STRIPE_PRICE_MONTHLY": "",
+    "LIMIT_ACTIVE_SHARES": "5",
+    "LIMIT_MONTHLY_BYTES": "100000000000",
+    "LIMIT_SHARE_SECONDS": "43200",
+    "RATE_LIMIT_AUTH": "60/60",
+    "RATE_LIMIT_MAGIC_LINK": "5/900",
+    "RATE_LIMIT_CONNECT": "60/60",
+    "RATE_LIMIT_MANAGE": "60/60",
+  },
+  "send_email": [{ "name": "EMAIL" }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wurmhol",
+      // The button creates the database and writes its id here in your copy of the repo.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "packages/db/migrations",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "SHARE", "class_name": "Share" },
+      { "name": "ORG", "class_name": "Org" },
+      { "name": "RATE_LIMITER", "class_name": "RateLimiter" },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Share", "Org", "RateLimiter"] }],
+}
