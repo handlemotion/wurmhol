@@ -4,7 +4,11 @@
     "outDir": ".tsbuild/e2e",
     "lib": ["es2024", "dom"],
     "types": ["node"],
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    // Types for `wurmhol/sdk` come from the CLI project, so this checks before a build; the
+    // suites run the built `dist/sdk.js` through the package's exports.
+    "paths": { "wurmhol/sdk": ["../../packages/cli/src/sdk.ts"] }
   },
+  "references": [{ "path": "../../packages/cli" }],
   "include": ["e2e"]
 }
