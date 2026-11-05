@@ -124,7 +124,10 @@ you pick a variant instead of guessing. `--tsx Name` writes a React component of
    Check an anchored plate through real viewports with `check.mjs --frame x,y,w,h` (the window
    a screen shows, in the plate's coordinates), then on the real stack at 1440, 1024 and 390.
 
-   **Favicon** (`favicon`, `--seed 2`): the lens, on a 32px grid. `--stroke 1` with
+   **Favicon** (`favicon`): named candidates (`lens`, `holding`, `chain`, `flower`, `bezel`,
+   `tangents`, `tunnel`, `spiral`, `portal`, `graph`, `funnel`), each one construction cut to
+   what survives at 16px; `SHIPPED` names the live one. Render one with `--set name=<name>`, all
+   with `--seeds 11`. On a 32px grid. `--stroke 1` with
    `scaleStroke` (a hairline at any size) and `scheme` (inks switch with the viewer's color
    scheme inside the file). Copy it to `apps/web/public/` and `apps/site/public/`. Preview it at
    16, 32, 64 and 128px on light and dark before shipping; drop any mark that vanishes at 16.

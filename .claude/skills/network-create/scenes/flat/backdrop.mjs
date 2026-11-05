@@ -1,13 +1,13 @@
 // The login backdrop: the form sits in the hole. (0, 0) is the centre of the form column, and
-// the hole is a circle of radius 260 px around it, big enough for the tallest form (three
-// providers, a two-line notice). Around the hole runs an eccentric Steiner chain: nine circles,
+// the hole is a circle of radius 310 px around it: the tallest form (three providers, a
+// two-line notice) reaches 249 px from the centre, so the form keeps about 60 px of air. Around the hole runs an eccentric Steiner chain: nine circles,
 // each tangent to its neighbours, to the hole and to the outer circle, built concentric and then
 // inverted so the ring is tight on the form's left and opens wide into the page on its right.
 // Nothing crosses the hole; every node is an exact tangency, and the hole's rim, the one accent,
 // is the pivot the whole construction turns on.
 import { meet, PHI, plate } from "../../scripts/flat.mjs";
 
-const HOLE = 260;
+const HOLE = 310;
 const N = 9;
 const E = 0.45; // where the inversion point sits inside the concentric hole: the eccentricity
 
@@ -24,7 +24,7 @@ export default (o) => {
   const rho = (1 + R2) / 2;
   const rr = (R2 - 1) / 2;
   const ring = Array.from({ length: N }, (_, i) => {
-    const t = Math.PI + (i / N) * Math.PI * 2; // a circle sits on the axis at the tight side
+    const t = Math.PI + (o.set?.phase ? Number(o.set.phase) : 0) + (i / N) * Math.PI * 2;
     return { c: [rho * Math.cos(t), rho * Math.sin(t)], r: rr };
   });
   // Invert through a point inside the hole: R1 maps to the new outer circle, R2 to the new hole.
@@ -54,6 +54,12 @@ export default (o) => {
   p.circle(outer.c, outer.r * 1.08, { dashed: true });
   p.circle(outer.c, outer.r * PHI, { dashed: true });
   p.circle(hole.c, hole.r, { accent: true });
+  p.node([outer.c[0], 0], { size: 10 });
+  p.node([outer.c[0] + outer.r, 0], { size: 8 });
+
+  // The chain. The app draws it live and rolls it around the hole (Steiner's porism: any
+  // starting phase closes), so `--set chain=off` leaves it out of the static export.
+  if (o.set?.chain === "off") return p;
   for (const C of chain) p.circle(C.c, C.r);
 
   // The network: chain centres joined in a loop, spokes from the hole's rim to each centre.
@@ -75,7 +81,5 @@ export default (o) => {
     p.node(towards(outer.c, C.c, outer.r), { size: 6 }); // touches the outer circle
     p.node(C.c, { shape: "dot", size: 5 });
   });
-  p.node([outer.c[0], 0], { size: 10 });
-  p.node([outer.c[0] + outer.r, 0], { size: 8 });
   return p;
 };
