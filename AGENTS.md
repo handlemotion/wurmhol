@@ -132,6 +132,15 @@ change keeps that path working:
 - Before finishing, check the diff against the ask: intent met, relevant checks and tests run,
   nothing unrequested added.
 
+## Comments and prose
+
+- DO NOT leak our conversation, prompt, or iteration history into code comments, pull request
+  descriptions, or other maintainer-facing prose. No "used to be x; now y", "changed from",
+  "as requested", "per your request". Comments say what the code does and why, as it stands,
+  for whoever reads it next; history belongs in git.
+- `.claude/hooks/no-chat-comments.sh` (a PreToolUse hook in `.claude/settings.json`) refuses
+  Claude Code edits that add such comments.
+
 ## Shared workspace
 
 Several agents may work in this repository at once.
