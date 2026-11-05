@@ -6,7 +6,7 @@ export const badgeStyles = tv({
     "border border-(--badge-border,transparent) bg-(--badge-bg) text-(--badge-foreground)",
     "group-hover:bg-(--badge-overlay) group-focus:bg-(--badge-overlay)",
     "*:data-[slot=icon]:size-3 *:data-[slot=icon]:shrink-0",
-    "duration-200",
+    "transition-colors duration-150 ease-out",
   ],
   variants: {
     intent: {

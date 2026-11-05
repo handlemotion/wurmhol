@@ -23,6 +23,8 @@ export function Input({ className, ref, size = "md", ...props }: InputProps) {
           size === "md" ? "h-8 px-2" : "h-9 px-2.5",
           "text-sm text-foreground placeholder:text-subtle-foreground",
           "border border-input enabled:hover:border-muted-foreground/30",
+          // The border eases like a button's fill, so hover reads the same on every control.
+          "transition-[border-color] duration-150 ease-out",
           "outline-hidden focus:border-ring/70 focus:enabled:hover:border-ring/80",
           "invalid:border-danger-subtle-foreground/70 focus:invalid:border-danger-subtle-foreground/70 invalid:enabled:hover:border-danger-subtle-foreground/80 focus:invalid:enabled:hover:border-danger-subtle-foreground/80",
           "[&::-ms-reveal]:hidden [&::-webkit-search-cancel-button]:hidden",

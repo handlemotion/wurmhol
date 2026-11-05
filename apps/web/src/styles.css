@@ -4,17 +4,10 @@
 
 @plugin "tailwindcss-react-aria-components";
 
-/* `hover:` is the browser's own `:hover`, not React Aria's `data-hovered`. The attribute only
-   lands after a React render on pointerenter, so the style trailed the pointer; `:hover` paints
-   in the same frame. Disabled and pending controls don't light up, as React Aria's didn't, and
-   touch screens never get a sticky hover. Declared after the plugin, so it replaces its variant. */
-@custom-variant hover {
-  @media (hover: hover) {
-    &:hover:not(:disabled, [data-disabled], [data-pending]) {
-      @slot;
-    }
-  }
-}
+/* `hover:` is the react-aria-components plugin's variant, as React Aria's docs recommend: on its
+   components it is `data-hovered` (useHover: real pointers only, never on touch, off while a
+   button is disabled or pending), elsewhere native `:hover`, both inside `@media (hover: hover)`.
+   One source per element, so a control's fill and its icon change together. */
 
 /* Dark is `data-theme="dark"` on <html>, set by public/theme.js (Tailwind's data-attribute form). */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
