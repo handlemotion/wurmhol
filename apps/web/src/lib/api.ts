@@ -60,6 +60,8 @@ export interface Token {
   id: string;
   name: string;
   scope: TokenScope;
+  /** `login`: a computer approved with `wurmhol login`, shown under Computers. */
+  source: "console" | "login";
   createdAt: string;
   expiresAt: string | null;
   lastUsedAt: string | null;
@@ -79,6 +81,11 @@ export interface SignInMethods {
   google: boolean;
   github: boolean;
   magicLink: boolean;
+}
+
+/** The Worker's config for the app (apps/worker/src/app.ts `appConfig`). */
+export interface AppConfig {
+  docsUrl: string;
 }
 
 /** A `wurmhol login` waiting for approval (apps/worker/src/routes/device.ts). */

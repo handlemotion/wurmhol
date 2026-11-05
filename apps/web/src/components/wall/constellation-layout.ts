@@ -5,8 +5,10 @@
  * The anchor (the copy-the-command field) is the hub. Pipes sit on an ellipse around it, each
  * nudged off its even slot by a jitter hashed from its id, so the ring reads as a drawn network
  * rather than a clock face and a pipe keeps its look across renders. An open pipe's card takes
- * the middle with the anchor just above it, and the ring grows around the pair. A last pass
- * pushes apart anything that still overlaps and keeps every node inside the width.
+ * the middle with the anchor just above it, and the ring grows around the pair. When the ring
+ * won't fit the width (a phone), the pipes stand in a column above and below the hub instead,
+ * arranged so no spoke passes behind another node (`column`). A last pass pushes apart anything
+ * that still overlaps and keeps every node inside the width.
  */
 
 export interface Size {
@@ -91,26 +93,25 @@ export function layout(input: {
       rx *= s;
       ry *= s;
     }
-    // Too wide for the container (a phone): pin the width and stretch the ring down instead.
-    const maxRx = Math.max(0, width / 2 - GAP - widest / 2);
-    if (rx > maxRx) {
-      const before = ring();
-      rx = maxRx;
-      ry = Math.max(ry, Math.sqrt(Math.max(0, 2 * (before / (2 * Math.PI)) ** 2 - rx * rx)));
-    }
-    const step = (Math.PI * 2) / n;
-    pipes.forEach((pipe, i) => {
-      // Start at the top and go clockwise; the jitter stays inside a quarter of a slot.
-      const angle = -Math.PI / 2 + (i + 0.5) * step + hash(pipe.id, 1) * step * 0.25;
-      // Around an open card the jitter only reaches outwards, never into its clear space.
-      const jitter = hash(pipe.id, 2) * 0.14;
-      const reach = 1 + (roomy.size > 0 ? Math.abs(jitter) : jitter);
-      at.set(pipe.id, {
-        x: Math.cos(angle) * rx * reach,
-        y: hub.y + Math.sin(angle) * ry * reach,
+    // Too wide for the container (a phone): a column instead of a ring.
+    if (rx > Math.max(0, width / 2 - GAP - widest / 2)) {
+      for (const [id, p] of column({ width, hub, clear, pipes, at, sizes })) at.set(id, p);
+      for (const pipe of pipes) sizes.set(pipe.id, pipe.size);
+    } else {
+      const step = (Math.PI * 2) / n;
+      pipes.forEach((pipe, i) => {
+        // Start at the top and go clockwise; the jitter stays inside a quarter of a slot.
+        const angle = -Math.PI / 2 + (i + 0.5) * step + hash(pipe.id, 1) * step * 0.25;
+        // Around an open card the jitter only reaches outwards, never into its clear space.
+        const jitter = hash(pipe.id, 2) * 0.14;
+        const reach = 1 + (roomy.size > 0 ? Math.abs(jitter) : jitter);
+        at.set(pipe.id, {
+          x: Math.cos(angle) * rx * reach,
+          y: hub.y + Math.sin(angle) * ry * reach,
+        });
+        sizes.set(pipe.id, pipe.size);
       });
-      sizes.set(pipe.id, pipe.size);
-    });
+    }
   }
 
   relax(at, sizes, fixed, roomy, width);
@@ -123,6 +124,121 @@ export function layout(input: {
     bottom = Math.max(bottom, p.y + h / 2);
   }
   return { at, top, bottom };
+}
+
+type Slot = "left" | "right" | "centre";
+
+/**
+ * The phone layout: pipes in rows above and below the hub, each row's pill against one side or
+ * in the middle. A spoke runs from the anchor's centre to its pill, so a row nearer the hub can
+ * stand in its way. Which arrangement clears every spoke depends on the pills' widths, so this
+ * tries a few (how many go above, the sides each row takes, the order of the pipes) and keeps the
+ * one whose spokes cross the fewest other nodes; ties go to the shorter column, then the more
+ * even split, then the earlier candidate (wall order first), so the choice holds still.
+ */
+function column(input: {
+  width: number;
+  hub: { halfH: number; y: number };
+  clear: number;
+  pipes: { id: string; size: Size }[];
+  at: Map<string, Point>;
+  sizes: Map<string, Size>;
+}): Map<string, Point> {
+  const { width, hub, clear, pipes } = input;
+  const n = pipes.length;
+  const anchor = input.at.get(ANCHOR)!;
+  // Whatever already stands in the middle (an open card) blocks spokes too.
+  const fixed = [...input.at].filter(([id]) => id !== ANCHOR);
+  const byWidth = pipes.toSorted((a, b) => a.size.w - b.size.w);
+  const orders = [pipes, byWidth, byWidth.toReversed()];
+  let best: { score: number[]; at: Map<string, Point> } | null = null;
+  for (const order of orders) {
+    for (let above = 0; above <= n; above++) {
+      const up = order.slice(0, above);
+      const down = order.slice(above);
+      for (const upSlots of patterns(up.length)) {
+        for (const downSlots of patterns(down.length)) {
+          const at = new Map<string, Point>();
+          let top = hub.y - hub.halfH;
+          let bottom = hub.y + hub.halfH;
+          const place = (
+            pipe: { id: string; size: Size },
+            slot: Slot,
+            dir: -1 | 1,
+            first: boolean,
+          ) => {
+            const half = Math.max(0, width / 2 - GAP - pipe.size.w / 2);
+            const x = slot === "left" ? -half : slot === "right" ? half : 0;
+            const edge = dir < 0 ? top : bottom;
+            const y = edge + dir * ((first ? clear : GAP) + pipe.size.h / 2);
+            if (dir < 0) top = y - pipe.size.h / 2;
+            else bottom = y + pipe.size.h / 2;
+            at.set(pipe.id, { x, y });
+          };
+          up.forEach((pipe, i) => place(pipe, upSlots[i]!, -1, i === 0));
+          down.forEach((pipe, i) => place(pipe, downSlots[i]!, 1, i === 0));
+          const nodes: [string, Point, Size][] = [
+            ...fixed.map(([id, p]): [string, Point, Size] => [id, p, input.sizes.get(id)!]),
+            ...pipes.map((pipe): [string, Point, Size] => [pipe.id, at.get(pipe.id)!, pipe.size]),
+          ];
+          let crossings = 0;
+          for (const pipe of pipes) {
+            const end = at.get(pipe.id)!;
+            for (const [id, p, size] of nodes) {
+              if (id !== pipe.id && crosses(anchor, end, p, size)) crossings++;
+            }
+          }
+          const score = [crossings, bottom - top, Math.abs(n - 2 * above)];
+          if (!best || less(score, best.score)) best = { score, at };
+        }
+      }
+    }
+  }
+  return best!.at;
+}
+
+/** A side's rows, outwards from the hub: they alternate sides, and the last may take the middle. */
+function patterns(k: number): Slot[][] {
+  const zig = (first: Slot): Slot[] =>
+    Array.from({ length: k }, (_, i) =>
+      i % 2 === 0 ? first : first === "left" ? "right" : "left",
+    );
+  const sides = [zig("left"), zig("right")];
+  return k > 0 ? [...sides, ...sides.map((p) => [...p.slice(0, -1), "centre" as const])] : sides;
+}
+
+/** Lexicographic `a < b`. */
+function less(a: number[], b: number[]) {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i]! < b[i]!;
+  return false;
+}
+
+/** Whether the segment `a`–`b` passes through a node's box, with a few pixels to spare. */
+function crosses(a: Point, b: Point, centre: Point, size: Size, spare = 4) {
+  const x0 = centre.x - size.w / 2 - spare;
+  const x1 = centre.x + size.w / 2 + spare;
+  const y0 = centre.y - size.h / 2 - spare;
+  const y1 = centre.y + size.h / 2 + spare;
+  // Liang-Barsky: clip the segment's parameter range to the box.
+  let lo = 0;
+  let hi = 1;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  for (const [p, q] of [
+    [-dx, a.x - x0],
+    [dx, x1 - a.x],
+    [-dy, a.y - y0],
+    [dy, y1 - a.y],
+  ] as const) {
+    if (p === 0) {
+      if (q < 0) return false;
+    } else {
+      const t = q / p;
+      if (p < 0) lo = Math.max(lo, t);
+      else hi = Math.min(hi, t);
+    }
+  }
+  return lo < hi;
 }
 
 /** Push overlapping nodes apart along the shallower axis; fixed nodes hold still. */

@@ -50,21 +50,34 @@ function signInMethods(config: Config) {
   };
 }
 
+/** The config the web app reads beyond sign-in: where its Docs links go. */
+function appConfig(config: Config) {
+  return { docsUrl: config.DOCS_URL };
+}
+
+/** JSON for inside a `<script>`: `<` escaped, so no value can close the element. */
+const inlineJson = (value: unknown) => JSON.stringify(value).replaceAll("<", "\\u003c");
+
 /**
- * Serves the web app. Pages (HTML) carry the sign-in methods inline, as a JSON script the app
- * reads on its first render, so the login form paints complete instead of waiting on
- * `/api/sign-in-methods`. A JSON script never executes, so the CSP's `script-src 'self'` holds.
+ * Serves the web app. Pages (HTML) carry the sign-in methods and the app config inline, as JSON
+ * scripts the app reads on its first render, so the login form and the wall paint complete
+ * instead of waiting on `/api/sign-in-methods` and `/api/app-config`. A JSON script never
+ * executes, so the CSP's `script-src 'self'` holds.
  */
 async function serveApp(c: { env: Env; req: { raw: Request } }) {
   const res = await c.env.ASSETS.fetch(c.req.raw);
   if (!res.headers.get("content-type")?.includes("text/html")) return res;
-  const json = JSON.stringify(signInMethods(loadConfig(c.env)));
+  const config = loadConfig(c.env);
+  const methods = inlineJson(signInMethods(config));
+  const app = inlineJson(appConfig(config));
   return new HTMLRewriter()
     .on("head", {
       element(head) {
-        head.append(`<script id="sign-in-methods" type="application/json">${json}</script>`, {
-          html: true,
-        });
+        head.append(
+          `<script id="sign-in-methods" type="application/json">${methods}</script>` +
+            `<script id="app-config" type="application/json">${app}</script>`,
+          { html: true },
+        );
       },
     })
     .transform(res);
@@ -86,6 +99,8 @@ export const app = new Hono<AppEnv>()
   .use("/api/*", requestScope, securityHeaders)
   /** Public: which sign-in buttons the login page shows. */
   .get("/api/sign-in-methods", (c) => c.json(signInMethods(c.var.config)))
+  /** Public: the app config, for the Vite dev server, whose pages don't carry it inline. */
+  .get("/api/app-config", (c) => c.json(appConfig(c.var.config)))
   // Stripe calls this, not a browser: no per-IP auth limit. The plugin verifies the signature.
   .post("/api/auth/stripe/webhook", (c) => c.var.auth.handler(c.req.raw))
   // Checkout and the portal go through /api/billing, which pins them to the active org and to
@@ -95,6 +110,13 @@ export const app = new Hono<AppEnv>()
   // out a full session, and its approve route records no org.
   .on(["GET", "POST"], ["/api/auth/device", "/api/auth/device/*"], (c) =>
     c.json({ error: "use /api/device" }, 404),
+  )
+  // Orgs are changed through /api (routes/org.ts), which allows only our two roles, keeps
+  // everyone in an org and ends a deleted org's pipes. Switching the active org stays here.
+  .post("/api/auth/organization/:action", async (c, next) =>
+    c.req.param("action") === "set-active"
+      ? next()
+      : c.json({ error: "use /api/org and /api/members" }, 404),
   )
   // Development sends no mail: the link comes back in the response, for the login page to show.
   .post("/api/auth/sign-in/magic-link", limitAuth, async (c) => {

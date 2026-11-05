@@ -33,6 +33,10 @@ There's no trial, an org subscribes before its first pipe.
 
 `RATE_LIMIT_AUTH`, `RATE_LIMIT_MAGIC_LINK`, `RATE_LIMIT_CONNECT` and `RATE_LIMIT_MANAGE` take `<count>/<seconds>`, or `off`.
 
+## Docs link
+
+The wall's Docs links go to `https://wurmhol.com/docs`. Set `DOCS_URL` to send them to your own docs instead.
+
 ## Cleanup
 
 Once a day the Worker deletes pipe history older than `RETENTION_DAYS` (90), plus expired sessions, sign-in links, invite links and device logins. `wrangler deploy` sets that up. It only writes its own log lines, Cloudflare's invocation logs are off so request URLs aren't recorded. Every var is in [`apps/worker/.dev.vars.example`](https://github.com/handlemotion/wurmhol/blob/main/apps/worker/.dev.vars.example).

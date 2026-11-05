@@ -44,7 +44,8 @@ it. It holds no values: colors, sizes, and radii live in code, so they cannot dr
 - **Control sizes.** Buttons and inputs share a size scale: `md` is the default, `lg` the larger
   one. Pick the size the frame shows; don't resize a control with classes.
 - **Destructive actions.** `<Button intent="danger">`: filled red with a darker edge. Use it only
-  for actions that delete or can't be undone, and say what happens on the button itself.
+  for actions that delete or can't be undone, and say what happens on the button itself. Ending
+  your session counts too: Log out is a danger button.
 - **Icons come from Lucide.** Every icon is a Lucide glyph exported from
   `@/components/icons/lucide` (add one there if it's missing). Never draw an icon inline, paste
   SVG paths, or add a one-off icon file; when a glyph looks wrong, pick another Lucide glyph.

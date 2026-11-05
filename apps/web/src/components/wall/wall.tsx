@@ -6,13 +6,16 @@ import { Skeleton } from "skullet/react";
 import {
   IconChevronsUpDown,
   IconCreditCard,
+  IconDoorOpen,
   IconEllipsis,
   IconArrowUpRight,
   IconCheck,
   IconExternalLink,
   IconLaptop,
+  IconPencil,
   IconPlus,
   IconSparkles,
+  IconTrash,
   IconKey,
   IconLogOut,
   IconUsers,
@@ -35,6 +38,7 @@ import {
 } from "@/components/ui/menu";
 import { Text } from "@/components/ui/text";
 import {
+  useAppConfig,
   useMe,
   useNow,
   useOpenBilling,
@@ -49,6 +53,7 @@ import type { Me, Share } from "@/lib/api";
 import { initials } from "@/lib/initials";
 import { ago } from "@/lib/time";
 import { MembersDialog } from "./members-dialog";
+import { type OrgAction, OrgDialog } from "./org-dialogs";
 import { Constellation } from "./constellation";
 import { ANCHOR } from "./constellation-layout";
 import { TokensDialog } from "./tokens-dialog";
@@ -101,6 +106,8 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
   const billing = useOpenBilling();
   const prefetchDialogs = usePrefetchDialogs();
   const active = me.orgs.find((org) => org.id === me.activeOrgId);
+  const [orgAction, setOrgAction] = useState<OrgAction | null>(null);
+  const owner = me.role === "owner";
   // Owners manage billing; with billing off (self-hosted) there is nothing to open.
   const canBill = me.role === "owner" && me.standing?.reason !== "billing_off";
   return (
@@ -120,7 +127,11 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
           placement="bottom start"
           selectionMode="single"
           selectedKeys={me.activeOrgId ? [me.activeOrgId] : []}
-          onAction={(key) => switchOrg.mutate(String(key))}
+          onAction={(key) => {
+            const action = ORG_ACTIONS.find((a) => a.id === key);
+            if (action) setOrgAction(action.id);
+            else switchOrg.mutate(String(key));
+          }}
           popover={{ className: "max-w-72" }}
         >
           <MenuSection aria-label="Signed in as">
@@ -152,8 +163,24 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
               </MenuItem>
             )}
           </MenuSection>
+          {active && <MenuSeparator />}
+          {active && (
+            <MenuSection aria-label={active.name}>
+              {ORG_ACTIONS.filter((a) => owner || !a.owner).map(({ id, label, Icon, danger }) => (
+                <MenuItem key={id} id={id} intent={danger ? "danger" : undefined}>
+                  <Icon />
+                  <MenuLabel>{label}</MenuLabel>
+                </MenuItem>
+              ))}
+            </MenuSection>
+          )}
         </Menu>
       </MenuTrigger>
+      <OrgDialog
+        action={orgAction}
+        orgName={active?.name ?? ""}
+        onClose={() => setOrgAction(null)}
+      />
       <nav
         aria-label="Org"
         className="absolute start-1/2 hidden -translate-x-1/2 gap-2 sm:flex"
@@ -212,6 +239,13 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
     </header>
   );
 }
+
+/** What the switcher offers for the active org; owners rename and delete. */
+const ORG_ACTIONS = [
+  { id: "rename", label: "Rename org", Icon: IconPencil, owner: true, danger: false },
+  { id: "leave", label: "Leave org", Icon: IconDoorOpen, owner: false, danger: false },
+  { id: "delete", label: "Delete org", Icon: IconTrash, owner: true, danger: true },
+] as const;
 
 const COMMAND = "npx wurmhol <port>";
 const PROMPT =
@@ -295,8 +329,6 @@ function Network({ shares }: { shares: Share[] }) {
 }
 
 const LOGIN = "npx wurmhol login && npx wurmhol <port>";
-/** The project's public docs: the same for hosted and self-hosted installs. */
-const DOCS = "https://wurmhol.com/docs";
 
 /** npm's mark (svgl) at 13px inside the rows' 15px icon slot, as the design draws it. */
 function NpmMark() {
@@ -343,6 +375,7 @@ const CREATE = [
 function CreateCard() {
   const { copy, copied } = useClipboard();
   const [last, setLast] = useState<string | null>(null);
+  const docs = useAppConfig().data?.docsUrl;
   return (
     <section
       data-open
@@ -371,15 +404,17 @@ function CreateCard() {
         ))}
       </ActionList>
       {/* The footer mirrors the label above: same row, same muted type, pinned to the bottom. */}
-      <Link
-        href={DOCS}
-        target="_blank"
-        rel="noopener"
-        className="mt-auto flex h-8 items-center gap-1 px-2 text-xs text-subtle-foreground hover:text-foreground"
-      >
-        Docs
-        <IconArrowUpRight className="size-3" />
-      </Link>
+      {docs && (
+        <Link
+          href={docs}
+          target="_blank"
+          rel="noopener"
+          className="mt-auto flex h-8 items-center gap-1 px-2 text-xs text-subtle-foreground hover:text-foreground"
+        >
+          Docs
+          <IconArrowUpRight className="size-3" />
+        </Link>
+      )}
     </section>
   );
 }
