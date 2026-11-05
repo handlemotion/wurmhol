@@ -66,6 +66,25 @@ STRIPE_PRICE_YEARLY=
 # the plan before its first pipe.
 STRIPE_PRICE_MONTHLY=
 
+# --- Preview links on pull requests (optional; ADR 0013, docs/self-hosting.md) ---
+# A GitHub App that posts each open pipe to the open pull request of its branch as a deployment.
+# Leave GITHUB_APP_ID empty and nothing talks to GitHub; set it and every one below is required.
+# Numeric App id.
+GITHUB_APP_ID=
+# The App's slug, as in https://github.com/apps/<slug>.
+GITHUB_APP_SLUG=
+# The App's client id (for the person linking the org to prove they can see the installation).
+GITHUB_APP_CLIENT_ID=
+# Secret. The App's client secret.
+GITHUB_APP_CLIENT_SECRET=
+# Secret. The App's private key, PEM; newlines may be written as \n.
+GITHUB_APP_PRIVATE_KEY=
+# Secret. The App's webhook secret (webhook URL <BETTER_AUTH_URL>/api/github/webhook).
+GITHUB_APP_WEBHOOK_SECRET=
+# Optional, GitHub Enterprise Server only. Defaults https://api.github.com and https://github.com.
+GITHUB_API_URL=
+GITHUB_WEB_URL=
+
 # --- Fair-use limits per org (spec section 4); empty means the default ---
 LIMIT_ACTIVE_SHARES=5
 # Bytes relayed per calendar month (UTC), both directions. Default 100 GB.

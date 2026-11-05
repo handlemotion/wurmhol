@@ -17,6 +17,7 @@
     "@wurmhol/protocol": "workspace:*",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.16",
+    "universal-github-app-jwt": "^2.2.2",
     "zod": "4.6.7"
   },
   "devDependencies": {

@@ -140,6 +140,24 @@ Leave `STRIPE_SECRET_KEY` empty and every org shares without a plan. To bill:
    signing secret as `STRIPE_WEBHOOK_SECRET`.
 4. The customer portal turned on in Stripe's settings.
 
+## 4a. Preview links on pull requests (optional)
+
+Leave `GITHUB_APP_ID` empty and nothing talks to GitHub. To post each open pipe to the open pull
+request of its branch as a deployment (`wurmhol-preview`, ADR 0013):
+
+1. Create a GitHub App (Settings → Developer settings → GitHub Apps):
+   - Callback URL `<BETTER_AUTH_URL>/api/github/callback`.
+   - Setup URL `<BETTER_AUTH_URL>/api/github/setup`, with "Redirect on update" on.
+   - Webhook URL `<BETTER_AUTH_URL>/api/github/webhook`, with a random webhook secret.
+   - Repository permissions: Deployments read and write; Pull requests read-only; Metadata
+     read-only. Events: Pull request.
+2. Generate a private key and a client secret.
+3. Vars `GITHUB_APP_ID`, `GITHUB_APP_SLUG` (from `github.com/apps/<slug>`) and
+   `GITHUB_APP_CLIENT_ID`. Secrets `GITHUB_APP_PRIVATE_KEY` (the `.pem`, with newlines or `\n`),
+   `GITHUB_APP_CLIENT_SECRET` and `GITHUB_APP_WEBHOOK_SECRET`. GitHub Enterprise Server: also
+   `GITHUB_API_URL` and `GITHUB_WEB_URL`.
+4. An org owner links the org from a pipe's card on the wall: **Pull request → Connect GitHub**.
+
 ## 5. Limits
 
 Per org, enforced by the Durable Objects: `LIMIT_ACTIVE_SHARES` (5), `LIMIT_MONTHLY_BYTES`

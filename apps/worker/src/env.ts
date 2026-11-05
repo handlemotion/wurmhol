@@ -12,6 +12,9 @@ declare global {
       GITHUB_CLIENT_SECRET?: string;
       STRIPE_SECRET_KEY?: string;
       STRIPE_WEBHOOK_SECRET?: string;
+      GITHUB_APP_PRIVATE_KEY?: string;
+      GITHUB_APP_CLIENT_SECRET?: string;
+      GITHUB_APP_WEBHOOK_SECRET?: string;
     }
   }
 }
@@ -33,6 +36,65 @@ function rateLimit(fallback: string) {
       return { count, windowSeconds };
     });
 }
+
+/** An optional string var: undefined when empty. */
+const optional = z
+  .string()
+  .optional()
+  .transform((value) => value?.trim() || undefined);
+
+/**
+ * The GitHub App that posts pipes to pull requests as deployments (ADR 0013). All of it or none
+ * of it: with no `GITHUB_APP_ID`, nothing talks to GitHub.
+ */
+const githubSchema = z
+  .object({
+    GITHUB_APP_ID: optional.pipe(z.string().regex(/^\d+$/, "use the App's numeric id").optional()),
+    /** The App's URL name: github.com/apps/<slug>. */
+    GITHUB_APP_SLUG: optional.pipe(
+      z
+        .string()
+        .regex(/^[a-z0-9-]+$/, "use the App's slug, as in github.com/apps/<slug>")
+        .optional(),
+    ),
+    GITHUB_APP_CLIENT_ID: optional,
+    GITHUB_APP_CLIENT_SECRET: optional,
+    /** PEM, as GitHub downloads it; `\n` escapes are read as newlines. */
+    GITHUB_APP_PRIVATE_KEY: optional.transform((value) => value?.replace(/\\n/g, "\n")),
+    GITHUB_APP_WEBHOOK_SECRET: optional,
+    /** GitHub Enterprise Server: its API and web origins. Default github.com. */
+    GITHUB_API_URL: optional.pipe(z.url().optional()),
+    GITHUB_WEB_URL: optional.pipe(z.url().optional()),
+  })
+  .superRefine((vars, ctx) => {
+    if (!vars.GITHUB_APP_ID) return;
+    for (const name of [
+      "GITHUB_APP_SLUG",
+      "GITHUB_APP_CLIENT_ID",
+      "GITHUB_APP_CLIENT_SECRET",
+      "GITHUB_APP_PRIVATE_KEY",
+      "GITHUB_APP_WEBHOOK_SECRET",
+    ] as const) {
+      if (!vars[name])
+        ctx.addIssue({ code: "custom", path: [name], message: "required with GITHUB_APP_ID" });
+    }
+  })
+  .transform((vars) =>
+    vars.GITHUB_APP_ID
+      ? {
+          appId: vars.GITHUB_APP_ID,
+          slug: vars.GITHUB_APP_SLUG!,
+          clientId: vars.GITHUB_APP_CLIENT_ID!,
+          clientSecret: vars.GITHUB_APP_CLIENT_SECRET!,
+          privateKey: vars.GITHUB_APP_PRIVATE_KEY!,
+          webhookSecret: vars.GITHUB_APP_WEBHOOK_SECRET!,
+          apiUrl: (vars.GITHUB_API_URL ?? "https://api.github.com").replace(/\/$/, ""),
+          webUrl: (vars.GITHUB_WEB_URL ?? "https://github.com").replace(/\/$/, ""),
+        }
+      : undefined,
+  );
+
+export type GithubConfig = NonNullable<z.output<typeof githubSchema>>;
 
 export type RateLimit = { count: number; windowSeconds: number } | null;
 
@@ -131,7 +193,7 @@ const configSchema = z
     /** Per member: creating tokens and invite links, terminating shares. */
     RATE_LIMIT_MANAGE: rateLimit("60/60"),
   })
-  .and(z.object({ auth: authEnvSchema }))
+  .and(z.object({ auth: authEnvSchema, github: githubSchema }))
   .superRefine((config, ctx) => {
     const app = new URL(config.auth.baseURL).hostname;
     if (app === config.SHARE_DOMAIN || app.endsWith(`.${config.SHARE_DOMAIN}`)) {
@@ -170,7 +232,7 @@ const cache = new WeakMap<object, Config>();
 export function loadConfig(env: Env): Config {
   let config = cache.get(env);
   if (!config) {
-    const parsed = configSchema.safeParse({ ...env, auth: env });
+    const parsed = configSchema.safeParse({ ...env, auth: env, github: env });
     if (!parsed.success) {
       // Names only: values may be secrets.
       const problems = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);

@@ -23,6 +23,8 @@ export interface ShareCard {
   state: "live" | "away";
   /** Where it came from (ADR 0012): repo, branch, commit, agent session, link and note. */
   source: PipeSource | null;
+  /** The pull request it is posted to as a deployment (ADR 0013), once it is. */
+  preview: { pullRequest: number; url: string } | null;
 }
 
 export type WallEvent =
@@ -43,10 +45,10 @@ function month(at = Date.now()) {
 
 /**
  * A stored card in the current shape. Cards written by an older Worker lack the fields added
- * since (`views`, ADR 0008; `source`, ADR 0012); they get those fields' empty values so walls can rely on the shape.
+ * since (`views`, ADR 0008; `source`, ADR 0012; `preview`, ADR 0013); they get those fields' empty values so walls can rely on the shape.
  */
 function current(card: Partial<ShareCard> & Pick<ShareCard, "id">): ShareCard {
-  return { views: [], source: null, ...card } as ShareCard;
+  return { views: [], source: null, preview: null, ...card } as ShareCard;
 }
 
 export class Org extends DurableObject<Env> {
