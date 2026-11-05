@@ -1,17 +1,14 @@
 // What the CLI and orchestrators present on the CLI's host: `Authorization: Bearer wh_…`.
-// Refusals are `{ error, fix }`: the CLI prints `fix`, one line that says what to do.
+// Refusals are `@wurmhol/protocol`'s `Refusal`: the CLI prints `fix`, one line that says what to
+// do, and stops retrying on one with a `reason`.
 import { findMember, useToken } from "@wurmhol/db";
+import { refusal } from "@wurmhol/protocol";
 import type { HonoRequest } from "hono";
 import type { AppEnv } from "./context.ts";
 import { checkRateLimit } from "./rate-limiter.ts";
 
-export function refuse(
-  status: number,
-  error: string,
-  fix: string,
-  extra: Record<string, unknown> = {},
-) {
-  return Response.json({ error, fix, ...extra }, { status });
+export function refuse(...args: Parameters<typeof refusal>) {
+  return Response.json(refusal(...args), { status: args[0] });
 }
 
 export type BearerToken = Extract<Awaited<ReturnType<typeof useToken>>, { ok: true }>;

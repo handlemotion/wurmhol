@@ -2,7 +2,6 @@
 // adds only its state file and log on top (ADR 0008, section 3).
 import { EventEmitter } from "node:events";
 import {
-  isEndReason,
   parseDuration,
   PIPE_NAME_RULE,
   pipeName,
@@ -20,7 +19,10 @@ export const DEFAULT_CONSOLE = "https://dirt.wurmhol.com";
 
 export type { RequestEvent };
 
-/** Where a pipe comes from, as the wall shows it. Every field is optional. */
+/**
+ * Where a pipe comes from, as the wall shows it. Every field is optional. Spelled out, like
+ * `CloseReason`, so the public `.d.ts` stands alone (tsdown cannot emit protocol's types).
+ */
 export interface PipeSource {
   /** The forge's host, like `github.com`. */
   repoHost: string | null;
@@ -243,12 +245,9 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
     version: pkg.version,
     log,
     onRequest: (event) => pipe?.emit("request", event),
-    onEnd: (raw) => {
-      log("ended", { reason: raw });
+    onEnd: (reason) => {
+      log("ended", { reason });
       signal?.removeEventListener("abort", onAbort);
-      // A refusal on reconnect can carry the relay's own words; any of those means the pipe
-      // could not be resumed.
-      const reason: CloseReason = isEndReason(raw) ? raw : "disconnected";
       markClosed(reason);
       pipe?.emit("close", reason);
     },

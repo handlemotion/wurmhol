@@ -14,11 +14,11 @@
 // `@wurmhol/protocol`'s `PipeSource`, every field optional and bounded. It goes on the share's
 // history row and its card on the wall.
 //
-// Refusals answer with plain HTTP before the upgrade, as `{ error, fix }`: the CLI prints `fix`,
-// one line that says what to do.
+// Refusals answer with plain HTTP before the upgrade, as `@wurmhol/protocol`'s `Refusal`.
 import {
   CONNECT_HEADERS,
   formatDuration,
+  isEndReason,
   parsePipeSource,
   PIPE_NAME_RULE,
   pipeName,
@@ -36,7 +36,7 @@ import { bearerToken, refuse } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
 import { reservedPipeName, shareOrigin, SHARE_ID } from "../env.ts";
 import { orgStub } from "../org-do.ts";
-import { type ShareInit, shareStub, toShare } from "../share-do.ts";
+import { shareGone, type ShareInit, shareStub, toShare } from "../share-do.ts";
 
 const MAX_VIEWERS = 50;
 /** Bigger than any source within `SOURCE_LIMITS`, URI-encoded. */
@@ -77,12 +77,10 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
   if (resume !== undefined) {
     const share = SHARE_ID.test(resume) ? await findShare(db, resume) : null;
     if (!share || share.orgId !== token.orgId || share.tokenId !== token.id) {
-      return refuse(404, "share not found", "Start a new pipe: npx wurmhol <port>.");
+      return shareGone(null);
     }
     if (share.endedAt) {
-      return refuse(410, "share ended", "Start a new pipe: npx wurmhol <port>.", {
-        reason: share.endReason,
-      });
+      return shareGone(isEndReason(share.endReason) ? share.endReason : "disconnected");
     }
     return shareStub(c.env, share.id).fetch(
       toShare(c.req.raw, null, new URL("/connect", c.req.url)),

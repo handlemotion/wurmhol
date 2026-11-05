@@ -6,7 +6,7 @@
 // reports the ports open on its computer and opens a pipe to one when its owner asks from the
 // wall. Each machine is visible to the person whose token it runs on, and no one else.
 import { DurableObject } from "cloudflare:workers";
-import type { PipeSource } from "@wurmhol/protocol";
+import { type PipeSource, sendableCloseCode } from "@wurmhol/protocol";
 import { z } from "zod";
 
 /** One card on the wall. */
@@ -364,9 +364,8 @@ export class Org extends DurableObject<Env> {
   }
 
   override webSocketClose(socket: WebSocket, code: number) {
-    // 1005/1006 are reserved and cannot be sent back.
     try {
-      socket.close(code === 1005 || code === 1006 ? 1000 : code, "bye");
+      socket.close(sendableCloseCode(code), "bye");
     } catch {
       // Already closed.
     }
