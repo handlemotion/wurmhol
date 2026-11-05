@@ -3,52 +3,12 @@
 // token. Both calls go to the host the CLI already dials, through HTTPS_PROXY like the pipe.
 // `wurmhol host --code` skips the approval: Create pipe hands it a code already approved by the
 // signed-in member (ADR 0020), redeemed once on the same token endpoint.
-import { request as httpRequest } from "node:http";
-import { request as httpsRequest } from "node:https";
-import { proxyFor, userAgent } from "./dial.ts";
-import { explainConnectError, explainRefusal, FixError } from "./errors.ts";
-
-interface Answer {
-  status: number;
-  body: string;
-  viaProxy: boolean;
-}
+import { type Answer, send } from "./dial.ts";
+import { explainRefusal, FixError } from "./errors.ts";
 
 /** POSTs JSON to `path` on `server`, through the environment's proxy. */
 function postJson(server: string, path: string, body: unknown, version: string): Promise<Answer> {
-  const url = new URL(path, server);
-  const { proxy, agent } = proxyFor(url);
-  const send = url.protocol === "http:" ? httpRequest : httpsRequest;
-  const payload = JSON.stringify(body);
-  return new Promise((resolve, reject) => {
-    const req = send(
-      url,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "content-length": Buffer.byteLength(payload),
-          "user-agent": userAgent(version),
-        },
-        agent,
-        timeout: 15_000,
-      },
-      (res) => {
-        let text = "";
-        res.setEncoding("utf8");
-        res.on("data", (chunk: string) => (text += chunk));
-        res.on("end", () =>
-          resolve({ status: res.statusCode ?? 0, body: text, viaProxy: Boolean(proxy) }),
-        );
-        res.on("error", reject);
-      },
-    );
-    req.on("timeout", () =>
-      req.destroy(Object.assign(new Error("timed out"), { code: "ETIMEDOUT" })),
-    );
-    req.on("error", (error) => reject(explainConnectError(error, { server, proxy })));
-    req.end(payload);
-  });
+  return send(new URL(path, server), { server, version, method: "POST", json: body });
 }
 
 function parse<T>(answer: Answer): T | null {

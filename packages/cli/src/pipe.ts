@@ -17,6 +17,8 @@ import { type RequestEvent, Tunnel } from "./tunnel.ts";
 /** The CLI dials api.wurmhol.com; people sign in and make tokens at the console (ADR 0006). */
 export const DEFAULT_SERVER = "https://api.wurmhol.com";
 export const DEFAULT_CONSOLE = "https://dirt.wurmhol.com";
+/** Where the default server's pipes live: `<id>.wurmhol.dev` (ADR 0007). */
+export const DEFAULT_PIPE_DOMAIN = "wurmhol.dev";
 
 export type { RequestEvent };
 

@@ -39,6 +39,16 @@ export function explainRefusal(
   );
 }
 
+const TLS_FIX =
+  "TLS verification failed. If the sandbox re-signs HTTPS, set NODE_EXTRA_CA_CERTS to its CA bundle.";
+
+/** Whether a connection failed because the server's certificate was not trusted. */
+export function isTlsError(error: Error & { code?: string }) {
+  return /certificate|self[- ]signed|UNABLE_TO_VERIFY|CERT_/i.test(
+    `${error.code} ${error.message ?? ""}`,
+  );
+}
+
 /** A connection that failed before any HTTP answer. */
 export function explainConnectError(
   error: Error & { code?: string },
@@ -50,11 +60,7 @@ export function explainConnectError(
       `The network proxy refused the connection. Allowlist ${hosts(context.server)} in the sandbox's network settings.`,
     );
   }
-  if (/certificate|self[- ]signed|UNABLE_TO_VERIFY|CERT_/i.test(`${error.code} ${message}`)) {
-    return new FixError(
-      "TLS verification failed. If the sandbox re-signs HTTPS, set NODE_EXTRA_CA_CERTS to its CA bundle.",
-    );
-  }
+  if (isTlsError(error)) return new FixError(TLS_FIX);
   if (error.code === "ENOTFOUND" || error.code === "EAI_AGAIN") {
     return new FixError(
       context.proxy
