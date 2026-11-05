@@ -1,0 +1,393 @@
+---
+import Base from "../layouts/Base.astro";
+
+// Every row says what the code in this repository does today (docs/adr/0008 lists the sources).
+// When the code changes what it keeps, this page changes in the same pull request.
+const UPDATED = "November 5, 2026";
+const REPO = "https://github.com/handlemotion/wurmhol";
+const SELF_HOSTING = `${REPO}/blob/main/docs/self-hosting.md`;
+const CONTACT = `${REPO}/issues/new`;
+
+const title = "Privacy and data: Wurmhol";
+const description =
+  "What Wurmhol keeps, for how long, who else handles it, and what never leaves the pipe.";
+
+const kept = [
+  {
+    what: "Your account",
+    detail:
+      "Name, email address, and the avatar URL your Google or GitHub account provides. Passkeys are stored as public keys.",
+    kept: "Until the account is deleted",
+  },
+  {
+    what: "Sign-in with Google or GitHub",
+    detail:
+      "Which provider account you used, and the tokens the provider returns at sign-in. Wurmhol does not call the provider again with them.",
+    kept: "Until the account is deleted",
+  },
+  {
+    what: "Sessions",
+    detail:
+      "A random session id, its expiry, and the IP address and browser user agent it was created from.",
+    kept: "Until the session expires",
+  },
+  {
+    what: "Orgs and members",
+    detail:
+      "Org names, who belongs to which org and their role. Invite links are stored only as hashes.",
+    kept: "Until removed",
+  },
+  {
+    what: "Tokens",
+    detail:
+      "A name, who created it, when it was created and last used, and whether it was revoked. The token itself is stored only as a SHA-256 hash.",
+    kept: "Kept as history after revocation",
+  },
+  {
+    what: "Pipe history",
+    detail:
+      "For each pipe: its id, org, the token that opened it, who started it, the local port number, when it started and ended, why it ended, and how many bytes it relayed.",
+    kept: "Kept as history",
+  },
+  {
+    what: "Page title and favicon",
+    detail:
+      "The <title> of the last HTML page and the favicon the dev server serves, so the pipe has a recognizable card on the org's wall.",
+    kept: "Favicon deleted when the pipe ends; the title stays in the pipe's record",
+  },
+  {
+    what: "Billing",
+    detail:
+      "The org's Stripe customer and subscription ids, plan status and billing period. Card details go to Stripe and never reach Wurmhol.",
+    kept: "Kept while the org exists",
+  },
+  {
+    what: "Rate limits",
+    detail:
+      "Counters keyed by IP address (sign-in), token (connections) or member (management actions).",
+    kept: "Deleted when each window ends, at most 15 minutes",
+  },
+  {
+    what: "Logs",
+    detail:
+      "Wurmhol's own log lines: event, route pattern, status, duration, and org, pipe and request ids. Cloudflare's platform logs also record the method and full URL of each request, including paths on a pipe.",
+    kept: "7 days, in Cloudflare Workers Logs",
+  },
+];
+
+const processors = [
+  {
+    name: "Cloudflare",
+    role: "Runs Wurmhol: the Worker, its database (D1) and Durable Objects, logs, and sign-in email.",
+  },
+  {
+    name: "Stripe",
+    role: "Handles subscriptions and payment for orgs. Wurmhol sees the subscription's status, not the card.",
+  },
+  {
+    name: "Google and GitHub",
+    role: "Only if you choose to sign in with them. They tell Wurmhol your name, email address and avatar.",
+  },
+];
+---
+
+<Base title={title} description={description}>
+  <header class="wrap header">
+    <a class="brand" href="/" aria-label="Wurmhol home">
+      <img src="/favicon.svg" alt="" width="18" height="18" />
+      <span>Wurmhol</span>
+    </a>
+    <a class="back" href="/">Back to wurmhol.com</a>
+  </header>
+
+  <main class="wrap page">
+    <div class="intro">
+      <h1>Privacy and data</h1>
+      <p class="lead">
+        What Wurmhol keeps, for how long, and who else handles it. This page describes what the
+        code does today. The code is open source, so you can check it.
+      </p>
+      <p class="updated">Last updated {UPDATED}</p>
+    </div>
+
+    <section class="section" aria-labelledby="short">
+      <h2 id="short">In short</h2>
+      <div class="body">
+        <ul class="points">
+          <li>
+            Request and response bodies that pass through a pipe are never logged or stored. Only
+            the page's title and favicon are kept, for the org's wall.
+          </li>
+          <li>
+            Only signed-in members of the org that owns a pipe can open it. Wurmhol's own cookies
+            are removed before a request reaches your dev server.
+          </li>
+          <li>
+            TLS ends at Wurmhol's relay, so the relay could technically read what passes through
+            it. We don't, and the code doesn't. If that isn't good enough for your work, <a
+              href={SELF_HOSTING}>host Wurmhol yourself</a
+            >.
+          </li>
+          <li>We don't sell data, show ads, or use trackers or analytics on our sites.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="kept">
+      <h2 id="kept">What we keep</h2>
+      <div class="body">
+        <dl class="rows">
+          {
+            kept.map((row) => (
+              <div class="row">
+                <dt>{row.what}</dt>
+                <dd>
+                  <p>{row.detail}</p>
+                  <p class="retention">{row.kept}</p>
+                </dd>
+              </div>
+            ))
+          }
+        </dl>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="passes">
+      <h2 id="passes">What passes through</h2>
+      <div class="body prose">
+        <p>
+          When someone opens a pipe, the request travels from their browser through Cloudflare to
+          the Wurmhol CLI and on to the dev server. Bodies, headers and cookies are relayed and not
+          kept. Wurmhol's sign-in cookie is removed before the request is forwarded.
+        </p>
+        <p>
+          The dev server receives the viewer's IP address in the <code>X-Forwarded-For</code> header.
+          The dev server runs wherever its owner runs it, and what it does with requests is up to
+          them.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="cookies">
+      <h2 id="cookies">Cookies</h2>
+      <div class="body prose">
+        <p>
+          Wurmhol sets only the cookies sign-in needs: a session cookie on the console, and one
+          cookie per pipe that proves you may open it, valid for 12 hours. Both are
+          <code>__Host-</code> cookies: HttpOnly, Secure, and bound to one host. This site sets no
+          cookies.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="others">
+      <h2 id="others">Who else handles it</h2>
+      <div class="body">
+        <dl class="rows">
+          {
+            processors.map((p) => (
+              <div class="row">
+                <dt>{p.name}</dt>
+                <dd>
+                  <p>{p.role}</p>
+                </dd>
+              </div>
+            ))
+          }
+        </dl>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="choices">
+      <h2 id="choices">Your choices</h2>
+      <div class="body prose">
+        <p>
+          Leave an org, remove members, revoke tokens and end pipes from the console at any time.
+          Revoking a token ends every pipe it opened.
+        </p>
+        <p>
+          To see or delete your account and its data, <a href={CONTACT}>contact us</a>. Deleting an
+          account removes its sessions, sign-in methods and memberships.
+        </p>
+        <p>
+          Wurmhol is built to be self-hosted: on your own Cloudflare account, nothing reaches us.
+          See the <a href={SELF_HOSTING}>self-hosting guide</a>.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="changes">
+      <h2 id="changes">Changes</h2>
+      <div class="body prose">
+        <p>
+          When Wurmhol starts or stops keeping something, this page changes with the code that does
+          it. Its history is public in the <a href={`${REPO}/commits/main/apps/site/src/pages/privacy.astro`}
+            >repository</a
+          >.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap footer">
+    <a href="/">wurmhol.com</a>
+    <a href={REPO}>GitHub</a>
+  </footer>
+</Base>
+
+<style>
+  .wrap {
+    width: 100%;
+    max-width: calc(var(--measure) + 2 * var(--gutter));
+    margin-inline: auto;
+    padding-inline: var(--gutter);
+  }
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-block: 20px;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 500;
+    text-decoration: none;
+  }
+  .back {
+    color: var(--muted-foreground);
+    font-size: 14px;
+    text-decoration: none;
+  }
+  .back:hover {
+    color: var(--foreground);
+  }
+
+  .intro {
+    padding-top: 72px;
+    padding-bottom: 56px;
+  }
+  h1 {
+    font-size: 40px;
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+  }
+  .lead {
+    max-width: 56ch;
+    margin-top: 20px;
+    color: var(--muted-foreground);
+    font-size: 17px;
+    line-height: 1.55;
+  }
+  .updated {
+    margin-top: 16px;
+    color: var(--subtle-foreground);
+    font-size: 13px;
+  }
+  @media (max-width: 640px) {
+    .intro {
+      padding-top: 40px;
+      padding-bottom: 32px;
+    }
+    h1 {
+      font-size: 30px;
+    }
+    .lead {
+      font-size: 16px;
+    }
+  }
+
+  /* Sections: a label on the left, the body on the right; stacked on a phone. */
+  .section {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 32px;
+    padding-block: 48px;
+    border-top: 1px solid var(--border);
+  }
+  .section h2 {
+    color: var(--muted-foreground);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 24px;
+  }
+  .body {
+    min-width: 0;
+    max-width: 680px;
+  }
+  @media (max-width: 760px) {
+    .section {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 16px;
+      padding-block: 36px;
+    }
+  }
+
+  .prose {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .points {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-left: 18px;
+  }
+  code {
+    padding: 1px 4px;
+    background: var(--well);
+    font-size: 0.86em;
+    overflow-wrap: anywhere;
+  }
+
+  /* Rows: what, then the detail and how long, with hairlines between. */
+  .rows {
+    border-top: 1px solid var(--border);
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: 16px;
+    padding-block: 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+  }
+  .row dt {
+    font-weight: 500;
+  }
+  .row dd {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--muted-foreground);
+  }
+  .retention {
+    color: var(--foreground);
+    font-size: 13px;
+  }
+  @media (max-width: 520px) {
+    .row {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 4px;
+    }
+  }
+
+  .footer {
+    display: flex;
+    gap: 20px;
+    padding-block: 32px 48px;
+    border-top: 1px solid var(--border);
+    font-size: 14px;
+  }
+  .footer a {
+    color: var(--muted-foreground);
+    text-decoration: none;
+  }
+  .footer a:hover {
+    color: var(--foreground);
+  }
+</style>
