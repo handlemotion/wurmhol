@@ -1,0 +1,170 @@
+// A pipe in the caller's process: `openPipe` behind `wurmhol/sdk`, and the CLI's daemon, which
+// adds only its state file and log on top (ADR 0008, section 3).
+import { EventEmitter } from "node:events";
+import pkg from "../package.json" with { type: "json" };
+import { FixError } from "./errors.ts";
+import { type RequestEvent, Tunnel } from "./tunnel.ts";
+
+/** The CLI dials api.wurmhol.com; people sign in and make tokens at the console (ADR 0006). */
+export const DEFAULT_SERVER = "https://api.wurmhol.com";
+export const DEFAULT_CONSOLE = "https://dirt.wurmhol.com";
+
+export type { RequestEvent };
+
+/** Why a pipe ended. Every reason is final: open a new pipe to share the port again. */
+export type CloseReason =
+  | "stopped"
+  | "terminated"
+  | "expired"
+  | "revoked"
+  | "limit"
+  | "disconnected"
+  | "no_subscription";
+
+const REASONS = new Set<string>([
+  "stopped",
+  "terminated",
+  "expired",
+  "revoked",
+  "limit",
+  "disconnected",
+  "no_subscription",
+]);
+
+export interface OpenPipeOptions {
+  /** The local port the dev server listens on. */
+  port: number;
+  /** A token from the org (`wh_…`): the console's menu → Tokens. */
+  token: string;
+  /** A self-hosted install's origin. Default `https://api.wurmhol.com`. */
+  server?: string;
+  /** Where the dev server listens. Default `127.0.0.1`; it still sees `Host: localhost:<port>`. */
+  host?: string;
+  /** Aborting rejects a pending `openPipe`, or closes an open pipe. */
+  signal?: AbortSignal;
+}
+
+/** The CLI's daemon logs to a file; the SDK logs nothing. */
+export interface Internals {
+  log?: (shareId: string | null, event: string, fields: Record<string, unknown>) => void;
+}
+
+interface PipeEvents {
+  /** A viewer request the dev server answered. Never sent anywhere: it stays in this process. */
+  request: [event: RequestEvent];
+  /** The pipe ended for good. Emitted once. */
+  close: [reason: CloseReason];
+}
+
+/** An open pipe. Emits `request` per answered viewer request and `close` once when it ends. */
+export interface Pipe extends EventEmitter<PipeEvents> {
+  /** The share id, as on the wall and in `wurmhol ls`. */
+  readonly id: string;
+  /** The private URL to send the humans. */
+  readonly url: string;
+  readonly port: number;
+  /** Ends the pipe on purpose; resolves once it has ended (the relay ends it at once). */
+  close(): Promise<void>;
+}
+
+class OpenPipe extends EventEmitter<PipeEvents> implements Pipe {
+  readonly id: string;
+  readonly url: string;
+  readonly port: number;
+  readonly #tunnel: Tunnel;
+  readonly #closed: Promise<CloseReason>;
+
+  constructor(
+    info: { id: string; url: string; port: number },
+    tunnel: Tunnel,
+    closed: Promise<CloseReason>,
+  ) {
+    super();
+    this.id = info.id;
+    this.url = info.url;
+    this.port = info.port;
+    this.#tunnel = tunnel;
+    this.#closed = closed;
+  }
+
+  async close() {
+    await this.#tunnel.stop();
+    await this.#closed;
+  }
+}
+
+function originOf(server: string) {
+  try {
+    return new URL(server).origin;
+  } catch {
+    throw new FixError(`WURMHOL_URL is not a URL: ${server}`);
+  }
+}
+
+/**
+ * Opens a pipe to `port` and resolves once the relay has given it its URL, or rejects with a
+ * `FixError` whose message is the one-line fix the CLI prints.
+ */
+export async function openPipe(options: OpenPipeOptions, internals: Internals = {}): Promise<Pipe> {
+  const server = originOf(options.server ?? DEFAULT_SERVER);
+  const token = options.token?.trim();
+  if (!token) {
+    const console = options.server ? server : DEFAULT_CONSOLE;
+    throw new FixError(`Set WURMHOL_TOKEN to a token from ${console} (menu → Tokens).`);
+  }
+  const { signal } = options;
+  signal?.throwIfAborted();
+
+  let pipe: OpenPipe | null = null;
+  let markClosed!: (reason: CloseReason) => void;
+  const closed = new Promise<CloseReason>((resolve) => (markClosed = resolve));
+  const log = (event: string, fields: Record<string, unknown> = {}) =>
+    internals.log?.(tunnel.share?.id ?? null, event, fields);
+  const tunnel: Tunnel = new Tunnel({
+    server,
+    token,
+    port: options.port,
+    host: options.host ?? "127.0.0.1",
+    version: pkg.version,
+    log,
+    onRequest: (event) => pipe?.emit("request", event),
+    onEnd: (raw) => {
+      log("ended", { reason: raw });
+      signal?.removeEventListener("abort", onAbort);
+      // A refusal on reconnect can carry the relay's own words; any of those means the pipe
+      // could not be resumed.
+      const reason = (REASONS.has(raw) ? raw : "disconnected") as CloseReason;
+      markClosed(reason);
+      pipe?.emit("close", reason);
+    },
+  });
+  const onAbort = () => void tunnel.stop();
+
+  const started = tunnel.start();
+  let info;
+  if (signal) {
+    let stopWaiting!: () => void;
+    const aborted = new Promise<never>((_, reject) => {
+      const listener = () => reject(signal.reason);
+      signal.addEventListener("abort", listener, { once: true });
+      stopWaiting = () => signal.removeEventListener("abort", listener);
+    });
+    try {
+      info = await Promise.race([started, aborted]);
+    } catch (error) {
+      // Aborted mid-dial: end the pipe if the dial still succeeds.
+      started.then(
+        () => tunnel.stop(),
+        () => {},
+      );
+      throw error;
+    } finally {
+      stopWaiting();
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  } else {
+    info = await started;
+  }
+  pipe = new OpenPipe({ ...info, port: options.port }, tunnel, closed);
+  return pipe;
+}

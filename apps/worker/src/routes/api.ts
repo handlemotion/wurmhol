@@ -13,6 +13,7 @@ import {
   peekInvite,
   removeMember,
   revokeToken,
+  TOKEN_SCOPES,
 } from "@wurmhol/db";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -77,7 +78,14 @@ export const account = new Hono<AppEnv>()
     return c.json({ orgId: result.orgId, status: result.status });
   });
 
-const tokenBody = z.object({ name: z.string().trim().min(1).max(80) });
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** A new token (ADR 0008): 30 days, 90 days (the default) or never; scope `pipes` by default. */
+const tokenBody = z.object({
+  name: z.string().trim().min(1).max(80),
+  scope: z.enum(TOKEN_SCOPES).default("pipes"),
+  expiresInDays: z.union([z.literal(30), z.literal(90), z.null()]).default(90),
+});
 
 export const api = new Hono<AppEnv>()
   .use(requireMember)
@@ -124,9 +132,12 @@ export const api = new Hono<AppEnv>()
   .get("/tokens", async (c) => c.json({ tokens: await listTokens(c.var.db, c.var.member.orgId) }))
   /** A new token, shown once. */
   .post("/tokens", limitPerMember("manage"), zValidator("json", tokenBody), async (c) => {
+    const { name, scope, expiresInDays } = c.req.valid("json");
     const { id, token } = await createToken(c.var.db, {
       orgId: c.var.member.orgId,
-      name: c.req.valid("json").name,
+      name,
+      scope,
+      expiresAt: expiresInDays === null ? null : new Date(Date.now() + expiresInDays * DAY_MS),
       createdBy: c.var.user.id,
     });
     return c.json({ id, token }, 201);

@@ -1,9 +1,9 @@
 // Share tokens: what the CLI presents to start shares for an org (spec section 6).
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import type { Db } from "./client.ts";
 import { randomSecret, sha256Hex } from "./crypto.ts";
-import { tokens, users } from "./schema/index.ts";
+import { type TokenScope, tokens, users } from "./schema/index.ts";
 
 /** Every token starts with this, so secret scanners and people can tell what it is. */
 export const TOKEN_PREFIX = "wh_";
@@ -11,7 +11,14 @@ export const TOKEN_PREFIX = "wh_";
 /** A new token for `orgId`. The plaintext is returned once and never stored. */
 export async function createToken(
   db: Db,
-  input: { orgId: string; name: string; createdBy: string },
+  input: {
+    orgId: string;
+    name: string;
+    createdBy: string;
+    scope: TokenScope;
+    /** Null: never expires. */
+    expiresAt: Date | null;
+  },
 ) {
   const token = `${TOKEN_PREFIX}${randomSecret(32)}`;
   const id = uuidv7();
@@ -20,6 +27,8 @@ export async function createToken(
     orgId: input.orgId,
     name: input.name,
     hash: await sha256Hex(token),
+    scope: input.scope,
+    expiresAt: input.expiresAt,
     createdBy: input.createdBy,
   });
   return { id, token };
@@ -30,7 +39,9 @@ export async function listTokens(db: Db, orgId: string) {
     .select({
       id: tokens.id,
       name: tokens.name,
+      scope: tokens.scope,
       createdAt: tokens.createdAt,
+      expiresAt: tokens.expiresAt,
       lastUsedAt: tokens.lastUsedAt,
       createdBy: users.name,
     })
@@ -50,15 +61,41 @@ export async function revokeToken(db: Db, orgId: string, tokenId: string) {
   return revoked.length > 0;
 }
 
-/** The live token a plaintext token is, with who made it, or null. Records the use. */
-export async function useToken(db: Db, token: string) {
-  if (!token.startsWith(TOKEN_PREFIX)) return null;
+export type TokenUse =
+  | { ok: true; id: string; orgId: string; createdBy: string | null; scope: TokenScope }
+  | { ok: false; reason: "unknown" | "expired" };
+
+/**
+ * The live token a plaintext token is, with who made it, and records the use. Revoked and
+ * unknown tokens are `unknown`; a live one past its `expires_at` is `expired`.
+ */
+export async function useToken(db: Db, token: string): Promise<TokenUse> {
+  if (!token.startsWith(TOKEN_PREFIX)) return { ok: false, reason: "unknown" };
+  const hash = await sha256Hex(token);
+  const now = new Date();
   const [row] = await db
     .update(tokens)
-    .set({ lastUsedAt: new Date() })
-    .where(and(eq(tokens.hash, await sha256Hex(token)), isNull(tokens.revokedAt)))
-    .returning({ id: tokens.id, orgId: tokens.orgId, createdBy: tokens.createdBy });
-  return row ?? null;
+    .set({ lastUsedAt: now })
+    .where(
+      and(
+        eq(tokens.hash, hash),
+        isNull(tokens.revokedAt),
+        or(isNull(tokens.expiresAt), gt(tokens.expiresAt, now)),
+      ),
+    )
+    .returning({
+      id: tokens.id,
+      orgId: tokens.orgId,
+      createdBy: tokens.createdBy,
+      scope: tokens.scope,
+    });
+  if (row) return { ok: true, ...row };
+  const [expired] = await db
+    .select({ id: tokens.id })
+    .from(tokens)
+    .where(and(eq(tokens.hash, hash), isNull(tokens.revokedAt)))
+    .limit(1);
+  return { ok: false, reason: expired ? "expired" : "unknown" };
 }
 
 /** Whether a token is still live: a reconnecting CLI's token may have been revoked meanwhile. */

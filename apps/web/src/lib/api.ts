@@ -51,10 +51,16 @@ export type WallEvent =
   | { type: "share.updated"; share: Share }
   | { type: "share.ended"; id: string };
 
+export type TokenScope = "pipes" | "org";
+/** Days until a new token expires; null never. */
+export type TokenExpiry = 30 | 90 | null;
+
 export interface Token {
   id: string;
   name: string;
+  scope: TokenScope;
   createdAt: string;
+  expiresAt: string | null;
   lastUsedAt: string | null;
   createdBy: string | null;
 }

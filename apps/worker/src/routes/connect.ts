@@ -3,45 +3,20 @@
 //
 // Refusals answer with plain HTTP before the upgrade, as `{ error, fix }`: the CLI prints `fix`,
 // one line that says what to do.
-import { findShare, orgStanding, recordShareEnd, recordShareStart, useToken } from "@wurmhol/db";
+import { findShare, orgStanding, recordShareEnd, recordShareStart } from "@wurmhol/db";
 import { Hono } from "hono";
+import { bearerToken, refuse } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
 import { shareOrigin, SHARE_ID } from "../env.ts";
-import { checkRateLimit } from "../rate-limiter.ts";
 import { INTERNAL_HEADERS, type ShareInit } from "../share-do.ts";
-
-function refuse(status: number, error: string, fix: string, extra: Record<string, unknown> = {}) {
-  return Response.json({ error, fix, ...extra }, { status });
-}
 
 export const connect = new Hono<AppEnv>().get("/", async (c) => {
   if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
     return refuse(426, "expected a websocket upgrade", "Connect with the wurmhol CLI.");
   }
   const { config, db } = c.var;
-  const authorization = c.req.header("authorization") ?? "";
-  const presented = /^Bearer (\S+)$/.exec(authorization)?.[1];
-  if (!presented) {
-    return refuse(
-      401,
-      "token missing",
-      `Set WURMHOL_TOKEN to a token from ${config.auth.baseURL} (menu → Tokens).`,
-    );
-  }
-  const token = await useToken(db, presented);
-  if (!token) {
-    return refuse(
-      401,
-      "token revoked or unknown",
-      `Create a new token at ${config.auth.baseURL} (menu → Tokens) and set WURMHOL_TOKEN.`,
-    );
-  }
-  const wait = await checkRateLimit(c.env, config, "connect", token.id);
-  if (wait) {
-    return refuse(429, "too many connections", `Wait ${wait} s and try again.`, {
-      retryAfter: wait,
-    });
-  }
+  const token = await bearerToken(c);
+  if (token instanceof Response) return token;
   const standing = await orgStanding(db, token.orgId, {
     enabled: config.auth.billing !== undefined,
   });
