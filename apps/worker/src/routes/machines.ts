@@ -6,12 +6,11 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { computerName, DEFAULT_COMPUTER_NAME, MAX_PORT } from "@wurmhol/protocol";
 import { bearerToken, refuse } from "../bearer.ts";
 import { type AppEnv, ownOriginSocket } from "../context.ts";
 import { orgStub, toOrg } from "../org-do.ts";
 import { limitPerMember } from "../rate-limiter.ts";
-
-const machineName = z.string().trim().min(1).max(80);
 
 /** `GET /host?name=<computer>`: a machine's socket, authenticated by its bearer token. */
 export const machineConnect = new Hono<AppEnv>().get("/", async (c) => {
@@ -27,14 +26,13 @@ export const machineConnect = new Hono<AppEnv>().get("/", async (c) => {
       `Whoever made this token has left. Run wurmhol login, or make a token at ${c.var.config.auth.baseURL} (menu → Tokens).`,
     );
   }
-  const name = machineName.safeParse(c.req.query("name"));
   c.var.log.info("machine.connected", { orgId: token.orgId });
   return orgStub(c.env, token.orgId).fetch(
     toOrg(c.req.raw, {
       kind: "machine",
       userId: token.createdBy,
       tokenId: token.id,
-      name: name.success ? name.data : "Computer",
+      name: computerName(c.req.query("name")) ?? DEFAULT_COMPUTER_NAME,
     }),
   );
 });
@@ -51,7 +49,7 @@ export const machines = new Hono<AppEnv>()
   .post(
     "/:id/open",
     limitPerMember("manage"),
-    zValidator("json", z.object({ port: z.number().int().min(1).max(65535) })),
+    zValidator("json", z.object({ port: z.number().int().min(1).max(MAX_PORT) })),
     async (c) => {
       const result = await orgStub(c.env, c.var.member.orgId).openPort(
         c.var.user.id,

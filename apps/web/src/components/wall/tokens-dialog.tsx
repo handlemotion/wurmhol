@@ -9,7 +9,8 @@ import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useCreateToken, useNow, useRevokeToken, useTokens } from "@/hooks/use-app";
-import type { Token, TokenExpiry } from "@/lib/api";
+import type { TokenExpiry } from "@wurmhol/protocol";
+import type { Token } from "@/lib/api";
 import { ago, expiry } from "@/lib/time";
 
 const EXPIRIES: { key: string; days: TokenExpiry; label: string }[] = [

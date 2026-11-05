@@ -222,7 +222,9 @@ describe("the wall in a browser", () => {
     await page.locator("[data-create]").click();
     await page.getByRole("menuitem", { name: "Create from this computer" }).click();
     const card = page.locator("section[data-open]");
-    const run = card.getByRole("button", { name: /^Copy run: npx wurmhol host --code \S+$/ });
+    const run = card.getByRole("button", {
+      name: /^Copy run: npx wurmhol@latest host --code \S+$/,
+    });
     // Catches: the steps opening without the command to run, or in a card of another size.
     await expect.poll(() => run.count()).toBe(1);
     expect((await card.boundingBox())!.width).toBe((await card.boundingBox())!.height);
@@ -231,7 +233,7 @@ describe("the wall in a browser", () => {
     await run.click();
     const command = await page.evaluate(() => navigator.clipboard.readText());
     const [npx, binary, ...args] = command.split(" ");
-    expect([npx, binary, args[0], args[1]]).toEqual(["npx", "wurmhol", "host", "--code"]);
+    expect([npx, binary, args[0], args[1]]).toEqual(["npx", "wurmhol@latest", "host", "--code"]);
 
     // A computer that has never logged in: no WURMHOL_TOKEN, nothing saved.
     const fresh: Record<string, string> = cliEnv(stack, "");

@@ -1,5 +1,18 @@
 # wurmhol
 
+## 0.4.0
+
+### Minor Changes
+
+- 5e8235c: `wurmhol host --install` keeps this computer connected to the wall: it starts `wurmhol host` at login and restarts it if it stops (a launch agent on macOS, a systemd user service on Linux). `wurmhol host --uninstall` removes it.
+- 42e98fa: `wurmhol host --code <code>` logs this computer in with the setup code in Create pipe's command, so there is nothing to approve in the browser.
+- eb3b591: `wurmhol host` connects this computer to the wall, so you can open a pipe to any web server running on it from Create pipe in the browser.
+
+### Patch Changes
+
+- ad4811a: A revoked pipe or `wurmhol host` stops within 2 s of the server closing it, instead of up to 30 s when the connection lingers.
+- 0cf8375: `wurmhol host` no longer lists debuggers (Node's, Chrome's and wrangler's inspectors) or ports that answer with an error other than 404. Set `WURMHOL_HOST_IGNORE=9229,5555` to leave out other ports.
+
 ## 0.3.0
 
 ### Minor Changes

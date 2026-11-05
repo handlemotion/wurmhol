@@ -5,6 +5,7 @@
 import http from "node:http";
 import {
   chunk,
+  CLOSE_CODES,
   CONNECT_HEADERS,
   decodeFrame,
   encodeFrame,
@@ -13,6 +14,8 @@ import {
   type Frame,
   type HeaderList,
   HEARTBEAT_MS,
+  localRequestHeaders,
+  localSocketHeaders,
   MAX_WS_MESSAGE_BYTES,
   PING_TEXT,
   PONG_TEXT,
@@ -20,14 +23,16 @@ import {
   RECONNECT_GRACE_MS,
   type RequestHead,
   SendWindow,
+  sendableCloseCode,
   SHARE_HEADERS,
+  WAITING_HEADER,
   type WsOpenPayload,
 } from "@wurmhol/protocol";
 import WebSocket from "ws";
 import { dial } from "./dial.ts";
 import { FixError } from "./errors.ts";
 import { Loopback, refused } from "./loopback.ts";
-import type { PipeSource } from "./pipe.ts";
+import type { CloseReason, PipeSource } from "./pipe.ts";
 
 export interface ShareInfo {
   id: string;
@@ -65,7 +70,7 @@ export interface TunnelOptions {
   log: Logger;
   onRequest: (event: RequestEvent) => void;
   /** The share ended for good (stopped, terminated, expired, revoked, or the CLI gave up). */
-  onEnd: (reason: string) => void;
+  onEnd: (reason: CloseReason) => void;
 }
 
 /** Above this many unsent bytes on the socket, body pumps wait: bounded memory here too. */
@@ -94,15 +99,6 @@ interface LocalWs {
 
 function waitingPage(port: number) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="2"><title>Waiting for port ${port}</title><style>:root{color-scheme:light dark}body{margin:0;min-height:100svh;display:grid;place-items:center;font:16px/1.5 system-ui,sans-serif}</style></head><body><p>Waiting for the server on port ${port}</p></body></html>`;
-}
-
-function toNodeHeaders(headers: HeaderList, port: number) {
-  // Raw `[name, value, name, value]`: keeps order and repeated headers.
-  const raw: string[] = [];
-  for (const [name, value] of forwardable(headers)) raw.push(name, value);
-  // Vite and most frameworks accept localhost without config (spec section 7).
-  raw.push("host", `localhost:${port}`);
-  return raw;
 }
 
 function pairs(rawHeaders: string[]): HeaderList {
@@ -149,7 +145,7 @@ export class Tunnel {
         clearTimeout(timer);
         resolve();
       });
-      socket.close(1000, "stop");
+      socket.close(CLOSE_CODES.stopped, "stop");
     });
     this.#finish("stopped");
   }
@@ -265,10 +261,8 @@ export class Tunnel {
           stream.socket.send(frame.payload.data, { binary: frame.payload.binary });
         }
       } else if (frame.type === "ws-close") {
-        const code =
-          frame.payload.code === 1005 || frame.payload.code === 1006 ? 1000 : frame.payload.code;
         try {
-          stream.socket.close(code, frame.payload.reason);
+          stream.socket.close(sendableCloseCode(frame.payload.code), frame.payload.reason);
         } catch {
           stream.socket.terminate();
         }
@@ -304,7 +298,8 @@ export class Tunnel {
       port,
       method: head.method,
       path: head.path,
-      headers: toNodeHeaders(head.headers, port),
+      // Raw `[name, value, name, value]`: keeps order and repeated headers.
+      headers: localRequestHeaders(head.headers, port).flat(),
       setHost: false,
     });
     const stream: LocalHttp = {
@@ -351,6 +346,7 @@ export class Tunnel {
             headers: [
               ["content-type", waiting ? "text/html; charset=utf-8" : "text/plain; charset=utf-8"],
               ["cache-control", "no-store"],
+              ...(waiting ? [[WAITING_HEADER, String(port)] as [string, string]] : []),
             ],
           },
         });
@@ -413,11 +409,7 @@ export class Tunnel {
     const port = this.#options.port;
     // A Map, not an object literal: header names come from the browser, and one named
     // `__proto__` must not write to the object's prototype.
-    const headers = new Map<string, string>();
-    for (const [name, value] of forwardable(open.headers ?? [])) {
-      if (!/^sec-websocket-/i.test(name)) headers.set(name, value);
-    }
-    headers.set("host", `localhost:${port}`);
+    const headers = new Map(localSocketHeaders(open.headers ?? [], port));
     const { host, ...target } = this.#loopback.target(port, this.#options.host);
     const socket = new WebSocket(
       `ws://${host.includes(":") ? `[${host}]` : host}:${port}${open.path ?? "/"}`,
@@ -471,9 +463,8 @@ export class Tunnel {
     this.#dropStreams();
     this.#options.log("disconnected", { code, reason });
     if (this.#stopping) return;
-    const final = endReasonFor(code);
-    if (final) return this.#finish(final);
-    if (code === 1000) return this.#finish(reason || "stopped");
+    const ended = endReasonFor(code);
+    if (ended) return this.#finish(ended);
     void this.#reconnect();
   }
 
@@ -489,16 +480,14 @@ export class Tunnel {
         this.#options.log("reconnected", { shareId: this.#share?.id });
         return;
       } catch (error) {
-        const fix = error instanceof FixError ? error : null;
         this.#options.log("reconnect.failed", { message: (error as Error).message });
-        // The relay says the share is over (ended, revoked, no plan): stop trying.
-        if (fix?.final) return this.#finish(fix.reason ?? "ended");
+        if (error instanceof FixError && error.reason) return this.#finish(error.reason);
       }
     }
     if (!this.#stopping) this.#finish("disconnected");
   }
 
-  #finish(reason: string) {
+  #finish(reason: CloseReason) {
     if (this.#ended) return;
     this.#ended = true;
     if (this.#heartbeat) clearInterval(this.#heartbeat);

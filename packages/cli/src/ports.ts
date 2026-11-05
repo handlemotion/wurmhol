@@ -6,17 +6,11 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import http from "node:http";
 import { promisify } from "node:util";
+import { MACHINE_LIMITS, type MachinePort } from "@wurmhol/protocol";
 import { Loopback } from "./loopback.ts";
 
 const run = promisify(execFile);
 
-export interface LocalPort {
-  port: number;
-  title: string | null;
-}
-
-/** Most ports the CLI reports: the relay refuses more. */
-const MAX_PORTS = 64;
 /** System services sit below 1024; dev servers do not. */
 const MIN_PORT = 1024;
 const PROBE_MS = 1500;
@@ -69,7 +63,7 @@ function titleOf(html: string) {
     // Last, so `&amp;lt;` reads as `&lt;`, not `<`.
     .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ");
-  return text.slice(0, 200) || null;
+  return text.slice(0, MACHINE_LIMITS.title) || null;
 }
 
 /** Remembers which loopback address each port answered on, as a pipe does. */
@@ -129,7 +123,7 @@ async function isDebugger(port: number) {
  * errors are what debuggers (400, 500), proxies (405) and helpers that want a key (401, 403)
  * answer, and are not offered.
  */
-async function probe(port: number): Promise<LocalPort | null> {
+async function probe(port: number): Promise<MachinePort | null> {
   const res = await get(port, "/");
   if (!res) return null;
   const status = res.statusCode ?? 0;
@@ -160,7 +154,7 @@ const RETRY_MS = 30_000;
 
 /** Watches this computer's web ports; remembers each port's answer while it stays open. */
 export class PortScanner {
-  #known = new Map<number, { answer: LocalPort | null; at: number }>();
+  #known = new Map<number, { answer: MachinePort | null; at: number }>();
   readonly #skip: Set<number>;
 
   /** `server`: the origin the CLI dials, never offered when it is on this computer. */
@@ -168,7 +162,7 @@ export class PortScanner {
     this.#skip = new Set(ignored(server));
   }
 
-  async scan(): Promise<LocalPort[]> {
+  async scan(): Promise<MachinePort[]> {
     const open = new Set((await listening()).filter((p) => p >= MIN_PORT && !this.#skip.has(p)));
     for (const port of this.#known.keys()) if (!open.has(port)) this.#known.delete(port);
     const now = Date.now();
@@ -180,8 +174,8 @@ export class PortScanner {
     fresh.forEach((port, i) => this.#known.set(port, { answer: answers[i] ?? null, at: now }));
     return [...this.#known.values()]
       .map((known) => known.answer)
-      .filter((p): p is LocalPort => p !== null)
+      .filter((p): p is MachinePort => p !== null)
       .toSorted((a, b) => a.port - b.port)
-      .slice(0, MAX_PORTS);
+      .slice(0, MACHINE_LIMITS.ports);
   }
 }

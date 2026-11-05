@@ -16,14 +16,17 @@ import { Link } from "@/components/ui/link";
 import { Loader } from "@/components/ui/loader";
 import { useAppConfig, useMachines, useOpenPort, useSetupCode } from "@/hooks/use-app";
 import { useClipboard } from "@/hooks/use-clipboard";
-import type { Machine } from "@/lib/api";
+import type { Machine } from "@wurmhol/protocol";
 
 const COMMAND = "npx wurmhol <port>";
 const PROMPT =
   "Start the dev server, then run `npx wurmhol <port>` with its port and send me the URL it prints.";
 
-/** The command Create from this computer copies, with its setup code (ADR 0020). */
-const host = (code: string) => `npx wurmhol host --code ${code}`;
+/**
+ * The command Create from this computer copies, with its setup code (ADR 0020). `@latest`, because
+ * npx otherwise runs whatever version it cached, which may predate `host`.
+ */
+const host = (code: string) => `npx wurmhol@latest host --code ${code}`;
 
 /** npm's mark (svgl) at 13px inside the rows' 15px icon slot, as the design draws it. */
 function NpmMark() {

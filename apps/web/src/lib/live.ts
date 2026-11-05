@@ -3,17 +3,17 @@
 // polling). And the person's own computers over `/api/machines/live`. Each reconnects with
 // backoff if its socket drops. Its own small module, so the entry chunk can open the wall's
 // socket (main.tsx) while the wall's code is still downloading.
-import type { Machine, MachinesEvent, Share, WallEvent } from "./api";
+import type { Machine, MachinesEvent, ShareCard, WallEvent } from "@wurmhol/protocol";
 
 export interface LiveWall {
   /** The latest list, or undefined until the first snapshot. */
-  readonly shares: Share[] | undefined;
+  readonly shares: ShareCard[] | undefined;
   /** The one listener, called with each new list. */
-  listen(listener: (shares: Share[]) => void): void;
+  listen(listener: (shares: ShareCard[]) => void): void;
   close(): void;
 }
 
-function apply(current: Share[] | undefined, event: WallEvent): Share[] {
+function apply(current: ShareCard[] | undefined, event: WallEvent): ShareCard[] {
   if (event.type === "snapshot") return event.shares;
   const list = current ?? [];
   if (event.type === "share.ended") return list.filter((s) => s.id !== event.id);
@@ -53,8 +53,8 @@ function live<T>(path: string, onEvent: (event: T) => void, retry: { first: numb
 }
 
 export function connectWall(): LiveWall {
-  let shares: Share[] | undefined;
-  let listener: ((shares: Share[]) => void) | null = null;
+  let shares: ShareCard[] | undefined;
+  let listener: ((shares: ShareCard[]) => void) | null = null;
   const close = live<WallEvent>(
     "/api/live",
     (event) => {

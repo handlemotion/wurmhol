@@ -22,7 +22,7 @@ const frame = fi === -1 ? null : argv.splice(fi, 2)[1].split(",").map(Number);
 
 let failed = false;
 for (const file of argv) {
-  // A void mask's black and white are luminance, not ink.
+  // A hole mask's black and white are luminance, not ink.
   const svg = readFileSync(file, "utf8").replace(/<mask[\s\S]*?<\/mask>/g, "");
   const all = (re) => [...svg.matchAll(re)].map((m) => m[1]);
   const [X0, Y0, W, H] =

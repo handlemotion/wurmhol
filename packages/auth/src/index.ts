@@ -143,10 +143,6 @@ export type BillingConfig = NonNullable<AuthConfig["billing"]>;
 /** The one plan's key, as the Stripe plugin stores it in `subscriptions.plan`. */
 export const PLAN_NAME = "wurmhol";
 
-/** Org roles (spec section 3): owners manage members, tokens and billing; members share. */
-export const ROLES = ["owner", "member"] as const;
-export type Role = (typeof ROLES)[number];
-
 /**
  * Session cookies are `__Host-` cookies (spec section 4): Secure, Path=/, no Domain, so no
  * other host (a share included) can set or read them. Better Auth only knows `__Secure-`, so the
