@@ -3,11 +3,15 @@
 One Cloudflare account, two hostnames, `wrangler deploy`. No other service is required: D1 holds
 the data, Durable Objects hold the shares, and billing stays off unless you set Stripe keys.
 
-Below, `example.com` is your app's host and `pipe.example.com` the domain your pipes live under.
+Below, `dirt.example.com` is the console (the app: sign-in, the wall, its API), `api.example.com`
+the host the CLI dials, and `pipe.example.com` the domain your pipes live under (ADR 0006). One
+host for everything also works: leave `CONNECT_HOST` and `APP_ALIASES` empty.
 
 ## 1. Domains and TLS
 
-- The app: `example.com` (or any host), a custom domain on the Worker.
+- The console: `dirt.example.com`, a custom domain on the Worker (`BETTER_AUTH_URL`). Optional
+  aliases that redirect to it (`APP_ALIASES`, e.g. `app.example.com`) are custom domains too.
+- The CLI's host: `api.example.com`, a custom domain on the Worker (`CONNECT_HOST`).
 - Shares: `<id>.pipe.example.com`. A two-level wildcard needs a certificate that covers
   `*.pipe.example.com`: in Cloudflare that is **Advanced Certificate Manager** (or a second zone
   whose apex wildcard covers shares, e.g. `*.example-shares.dev`; spec open question 2).
@@ -34,7 +38,9 @@ dashboard, or `WORKER_VAR_<NAME>` build variables for the deploy script.
 
 | Var                                    | Value                                         |
 | -------------------------------------- | --------------------------------------------- |
-| `BETTER_AUTH_URL`                      | `https://example.com`                         |
+| `BETTER_AUTH_URL`                      | `https://dirt.example.com`                    |
+| `CONNECT_HOST`                         | `api.example.com` (optional)                  |
+| `APP_ALIASES`                          | `app.example.com` (optional)                  |
 | `SHARE_DOMAIN`                         | `pipe.example.com`                            |
 | `AUTH_TRUSTED_ORIGINS`                 | empty (or extra origins allowed to call auth) |
 | `ENVIRONMENT`                          | `production`                                  |
@@ -47,8 +53,10 @@ optionally `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET`, `STRIPE_SECRET_KEY`,
 Deploy:
 
 ```bash
-D1_DATABASE_ID=<id> WORKER_DOMAIN=example.com WORKER_ROUTE='*.pipe.example.com/*' \
-  WORKER_VAR_BETTER_AUTH_URL=https://example.com WORKER_VAR_SHARE_DOMAIN=pipe.example.com \
+D1_DATABASE_ID=<id> WORKER_DOMAIN=dirt.example.com,api.example.com,app.example.com \
+  WORKER_ROUTE='*.pipe.example.com/*' WORKER_VAR_BETTER_AUTH_URL=https://dirt.example.com \
+  WORKER_VAR_SHARE_DOMAIN=pipe.example.com WORKER_VAR_CONNECT_HOST=api.example.com \
+  WORKER_VAR_APP_ALIASES=app.example.com \
   pnpm --filter @wurmhol/worker deploy:cloudflare
 ```
 
@@ -61,8 +69,8 @@ and syncs secrets on each push to `main` (see `docs/operations/doppler.md`).
 
 Passkeys work with no setup. For OAuth, create the clients with these callback URLs:
 
-- Google: `https://example.com/api/auth/callback/google`
-- GitHub: `https://example.com/api/auth/callback/github`
+- Google: `https://dirt.example.com/api/auth/callback/google`
+- GitHub: `https://dirt.example.com/api/auth/callback/github`
 
 Magic links (ADR 0005): onboard your domain under **Email Service → Email Sending** and set
 `MAIL_FROM` (for example `sign-in@example.com`). The `EMAIL` binding in `wrangler.jsonc` is the
@@ -76,7 +84,7 @@ Leave `STRIPE_SECRET_KEY` empty and every org shares without a plan. To bill:
    want, a monthly one.
 2. Vars `STRIPE_PRICE_YEARLY` and optionally `STRIPE_PRICE_MONTHLY`. There is no trial: an org
    subscribes before its first pipe.
-3. A webhook endpoint `https://example.com/api/auth/stripe/webhook` for
+3. A webhook endpoint `https://dirt.example.com/api/auth/stripe/webhook` for
    `checkout.session.completed` and `customer.subscription.created`, `.updated`, `.deleted`; its
    signing secret as `STRIPE_WEBHOOK_SECRET`.
 4. The customer portal turned on in Stripe's settings.
@@ -90,10 +98,11 @@ Per org, enforced by the Durable Objects: `LIMIT_ACTIVE_SHARES` (5), `LIMIT_MONT
 ## 6. Using it
 
 ```bash
-WURMHOL_URL=https://example.com WURMHOL_TOKEN=wh_… npx wurmhol 8787
+WURMHOL_URL=https://api.example.com WURMHOL_TOKEN=wh_… npx wurmhol 8787
 ```
 
-In a sandbox with a Limited network policy, allowlist `example.com` and `*.pipe.example.com`.
+In a sandbox with a Limited network policy, allowlist `api.example.com` (the only host the CLI
+dials).
 
 ## Local
 

@@ -6,6 +6,11 @@
 # --- App and shares ---
 # Public origin of the app: login, the wall, the API and `/connect` (the CLI's WURMHOL_URL).
 BETTER_AUTH_URL=http://localhost:8787
+# Optional (ADR 0006). The host the CLI dials, answering /connect and /health only, e.g.
+# api.example.com. Empty: the CLI dials BETTER_AUTH_URL's host.
+CONNECT_HOST=
+# Optional. Hosts that 301 to BETTER_AUTH_URL, comma-separated, e.g. app.example.com.
+APP_ALIASES=
 # Shares live at <id>.<SHARE_DOMAIN>, same scheme and port as BETTER_AUTH_URL. Locally
 # `pipe.localhost` (browsers resolve *.localhost to this machine); in production a domain on the
 # Public Suffix List, such as pipe.example.com, with a wildcard certificate.

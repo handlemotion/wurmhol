@@ -15,7 +15,9 @@ import { FixError } from "./errors.ts";
 import { alive, listStates, logFile, removeState, writeState } from "./state.ts";
 import { Tunnel } from "./tunnel.ts";
 
-const DEFAULT_SERVER = "https://wurmhol.com";
+// The CLI dials api.wurmhol.com; people sign in and make tokens at the console (ADR 0006).
+const DEFAULT_SERVER = "https://api.wurmhol.com";
+const DEFAULT_CONSOLE = "https://dirt.wurmhol.com";
 const INIT_LINE = "Share a local server with `npx wurmhol <port>` and send the user the URL.";
 
 const HELP = `wurmhol ${pkg.version}: a private HTTPS URL for a local dev server
@@ -27,7 +29,7 @@ Usage:
   wurmhol init                  Add a line about wurmhol to AGENTS.md or CLAUDE.md
 
 Environment:
-  WURMHOL_TOKEN   A token from your org (menu → Tokens)
+  WURMHOL_TOKEN   A token from your org (${DEFAULT_CONSOLE}, menu → Tokens)
   WURMHOL_URL     A self-hosted install (default ${DEFAULT_SERVER})
   HTTPS_PROXY     Dial out through this proxy; NODE_EXTRA_CA_CERTS adds its CA
 `;
@@ -45,6 +47,11 @@ function parsePort(value: string | undefined) {
   return port;
 }
 
+/** Where people make tokens: the console, or a self-hosted install's own origin. */
+function consoleUrl() {
+  return process.env.WURMHOL_URL ? server() : DEFAULT_CONSOLE;
+}
+
 function server() {
   const url = process.env.WURMHOL_URL || DEFAULT_SERVER;
   try {
@@ -56,7 +63,7 @@ function server() {
 
 function token() {
   const value = process.env.WURMHOL_TOKEN?.trim();
-  if (!value) fail(`Set WURMHOL_TOKEN to a token from ${server()} (menu → Tokens).`);
+  if (!value) fail(`Set WURMHOL_TOKEN to a token from ${consoleUrl()} (menu → Tokens).`);
   return value;
 }
 

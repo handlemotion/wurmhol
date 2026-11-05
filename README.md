@@ -9,12 +9,12 @@ npx wurmhol 8787
 ```
 
 The URL (a pipe) opens only for signed-in members of the org that owns the token, on any device. The CLI
-needs one outbound WebSocket on 443 and works through an HTTPS CONNECT proxy (`HTTPS_PROXY`,
+needs one outbound WebSocket on 443 to `api.wurmhol.com` and works through an HTTPS CONNECT proxy (`HTTPS_PROXY`,
 `NODE_EXTRA_CA_CERTS`).
 
 - $12 a year per org (ADR 0004).
 - `wurmhol ls`, `wurmhol stop <port|id>`, `wurmhol stop --all`, `wurmhol init`
-- `WURMHOL_TOKEN`: a token from your org (menu → Tokens). `WURMHOL_URL`: a self-hosted install.
+- `WURMHOL_TOKEN`: a token from your org at https://dirt.wurmhol.com (menu → Tokens). `WURMHOL_URL`: a self-hosted install.
 
 The relay can read the traffic it carries; it never logs or stores request or response bodies.
 It keeps only each page's `<title>` and favicon, for the wall.

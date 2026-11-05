@@ -4,7 +4,7 @@ A private HTTPS URL for a local dev server, from inside sandboxed cloud containe
 cloud and similar) where ngrok and Cloudflare Tunnel can't connect.
 
 ```bash
-export WURMHOL_TOKEN=wh_…        # from https://wurmhol.com (menu → Tokens)
+export WURMHOL_TOKEN=wh_…        # from https://dirt.wurmhol.com (menu → Tokens)
 npx wurmhol 8787                 # prints https://<id>.pipe.wurmhol.com, then returns
 ```
 
