@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Skeleton } from "skullet/react";
+import { ConsentPlate } from "@/components/auth/consent-plate";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Heading } from "@/components/ui/heading";
 import { SkeletonProvider } from "@/components/ui/skeleton-provider";
 import { Strong, Text } from "@/components/ui/text";
@@ -81,7 +81,7 @@ function Review() {
         return (
           <div className="flex flex-col gap-6">
             <div className="flex flex-col gap-2">
-              <Heading>Connect {client.client_name ?? host ?? "this app"}?</Heading>
+              <Heading size="sm">Connect {client.client_name ?? host ?? "this app"}?</Heading>
               <Text>
                 {host ? (
                   <>
@@ -124,14 +124,25 @@ function Review() {
   );
 }
 
+/**
+ * The page, laid out like the login: no card, the form in the hole of a construction drawing
+ * (`ConsentPlate`, the `network-create` skill's `consent` scene). The drawing is anchored at the
+ * centre of the form's column, at true size; its circle around the form is the person's orgs,
+ * the small circle out to the right is the assistant, and the blue point where their two
+ * tangents cross is the grant. Behind the content (`-z-10` inside the page's `isolate`), inked by
+ * `text-hairline-line`.
+ */
 export function Consent() {
   return (
     <SkeletonProvider>
-      <main className="flex min-h-dvh items-center justify-center bg-surface px-4">
-        <div className="flex w-full max-w-100 flex-col pb-12">
-          <Card className="gap-6 p-6">
+      <main className="relative isolate grid min-h-dvh place-items-center overflow-hidden bg-background px-4 py-12 lg:grid-cols-4 lg:justify-items-start lg:px-0">
+        <div className="w-full max-w-88 lg:col-span-2 lg:col-start-2">
+          <div className="relative">
+            <div aria-hidden className="pointer-events-none absolute top-1/2 left-1/2 -z-10 size-0">
+              <ConsentPlate className="text-hairline-line" />
+            </div>
             <Review />
-          </Card>
+          </div>
         </div>
       </main>
     </SkeletonProvider>
