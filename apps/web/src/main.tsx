@@ -9,6 +9,13 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false, staleTime: 10_000 } },
 });
 
+// A tab left open across a deploy asks for chunks the new deploy no longer serves (sign-out
+// loads the auth client on demand, for one). Reloading picks up the new build.
+addEventListener("vite:preloadError", (event) => {
+  event.preventDefault();
+  location.reload();
+});
+
 const path = location.pathname;
 const join = /^\/join\/([^/]+)$/.exec(path);
 // The wall's data starts loading now, alongside its code, not after it.
