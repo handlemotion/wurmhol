@@ -2,6 +2,7 @@
 // thin as the type beside them. Each export keeps the name its call sites use; size and colour
 // come from the caller's classes, as before.
 import {
+  ArrowLeft,
   ArrowUpRight,
   Check,
   ChevronDown,
@@ -39,6 +40,7 @@ function thin(Icon: LucideIcon, name: string) {
   return Thin;
 }
 
+export const IconArrowLeft = thin(ArrowLeft, "IconArrowLeft");
 export const IconArrowUpRight = thin(ArrowUpRight, "IconArrowUpRight");
 export const IconCheck = thin(Check, "IconCheck");
 export const IconChevronDown = thin(ChevronDown, "IconChevronDown");

@@ -10,8 +10,8 @@ export { Org } from "./org-do.ts";
 export { RateLimiter } from "./rate-limiter.ts";
 export { Share } from "./share-do.ts";
 
-/** The CLI's host answers these and `/v1/pipes` (ADR 0006, ADR 0008): the pipe socket, `wurmhol login`, health. */
-const CLI_PATHS = new Set(["/connect", "/device/code", "/device/token", "/health"]);
+/** The CLI's host answers these and `/v1/pipes` (ADR 0006, ADR 0008, ADR 0018): the pipe socket, `wurmhol host`, `wurmhol login`, health. */
+const CLI_PATHS = new Set(["/connect", "/host", "/device/code", "/device/token", "/health"]);
 
 export default {
   /**

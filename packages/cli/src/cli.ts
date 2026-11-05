@@ -7,10 +7,11 @@
 //   wurmhol ls [--json]           open shares on this machine
 //   wurmhol stop <port|id|name>   end one; `--all` ends every one
 //   wurmhol init [--skill]        tell the repo's agents how to share
+//   wurmhol host                  connect this computer to the wall; open pipes from the browser
 //   wurmhol mcp                   a stdio MCP server with the same tools, for agents
 import { spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { hostname } from "node:os";
+import { homedir, hostname } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -31,6 +32,7 @@ import {
   writeCredentials,
 } from "./credentials.ts";
 import { FixError } from "./errors.ts";
+import { host as runHost } from "./host.ts";
 import { login as deviceLogin } from "./login.ts";
 import { DEFAULT_CONSOLE, DEFAULT_SERVER, openPipe, type Pipe } from "./pipe.ts";
 import { detectSource } from "./source.ts";
@@ -61,6 +63,8 @@ Usage:
   wurmhol stop <port|id|name>   End a pipe (--all ends every one)
   wurmhol init [--skill]        Tell this repo's agents how to share (AGENTS.md or
                                 CLAUDE.md); --skill also writes .claude/skills/wurmhol
+  wurmhol host                  Connect this computer to the wall, to open pipes to its
+                                ports from Create pipe in the browser; logs in first if needed
   wurmhol login                 Approve this computer in the browser; stores a token
   wurmhol logout                Delete the stored token
   wurmhol mcp                   Run an MCP server on stdio (open_pipe, list_pipes,
@@ -105,12 +109,17 @@ function server() {
   }
 }
 
-/** WURMHOL_TOKEN when set, else the token `wurmhol login` stored for this server. */
-function token() {
+/** WURMHOL_TOKEN when set, else the token `wurmhol login` stored for this server, else null. */
+function findToken() {
   const value = process.env.WURMHOL_TOKEN?.trim();
   if (value) return value;
   const stored = readCredentials();
-  if (stored && stored.server === server()) return stored.token;
+  return stored && stored.server === server() ? stored.token : null;
+}
+
+function token() {
+  const found = findToken();
+  if (found) return found;
   fail(`Run wurmhol login, or set WURMHOL_TOKEN to a token from ${consoleUrl()} (menu → Tokens).`);
 }
 
@@ -147,30 +156,33 @@ function logout() {
 }
 
 /** Starts the detached daemon and waits for it to report the URL (or the reason it could not). */
-async function share(
+async function startDaemon(
   port: number,
-  ttl: number | undefined,
-  json: boolean,
-  only: string | undefined,
-  name: string | undefined,
-  extra: { link?: string; note?: string },
-) {
-  token();
+  options: {
+    ttl?: number;
+    only?: string;
+    name?: string;
+    link?: string;
+    note?: string;
+    cwd?: string;
+  } = {},
+): Promise<ReadyMessage> {
   const entry = fileURLToPath(import.meta.url);
   const args = [
     entry,
     "__daemon",
     String(port),
-    ...(ttl === undefined ? [] : [String(ttl)]),
-    ...(only ? ["--only", only] : []),
-    ...(name ? ["--name", name] : []),
-    ...(extra.link ? ["--link", extra.link] : []),
-    ...(extra.note ? ["--note", extra.note] : []),
+    ...(options.ttl === undefined ? [] : [String(options.ttl)]),
+    ...(options.only ? ["--only", options.only] : []),
+    ...(options.name ? ["--name", options.name] : []),
+    ...(options.link ? ["--link", options.link] : []),
+    ...(options.note ? ["--note", options.note] : []),
   ];
   const child = spawn(process.execPath, args, {
     detached: true,
     stdio: ["ignore", "ignore", "ignore", "ipc"],
     env: process.env,
+    cwd: options.cwd,
   });
   const message = await new Promise<ReadyMessage>((resolve) => {
     child.once("message", (m) => resolve(m as ReadyMessage));
@@ -182,12 +194,55 @@ async function share(
     );
   });
   child.removeAllListeners("exit");
+  if (message.type === "ready") {
+    child.disconnect();
+    child.unref();
+  }
+  return message;
+}
+
+async function share(
+  port: number,
+  ttl: number | undefined,
+  json: boolean,
+  only: string | undefined,
+  name: string | undefined,
+  extra: { link?: string; note?: string },
+) {
+  token();
+  const message = await startDaemon(port, { ttl, only, name, ...extra });
   if (message.type === "error") fail(message.message);
-  child.disconnect();
-  child.unref();
   const { url, id, endsAt } = message;
   const out = json ? JSON.stringify({ url, port, id, endsAt }) : url;
   process.stdout.write(`${out}\n`);
+}
+
+/**
+ * `wurmhol host`: logs in if there is no token yet, then keeps this computer connected to the
+ * wall. A port picked there opens as `wurmhol <port>` would, from the home directory (its git
+ * repo is not this one's to tell), and keeps running if this process ends.
+ */
+async function serveHost() {
+  if (!findToken()) await login();
+  const say = (line: string) => process.stdout.write(`${line}\n`);
+  try {
+    await runHost({
+      server: server(),
+      token: token(),
+      name: hostname(),
+      version: pkg.version,
+      say,
+      open: async (port) => {
+        const open = listStates().find((s) => s.port === port);
+        if (open) return open.url;
+        const message = await startDaemon(port, { cwd: homedir() });
+        if (message.type === "error") throw new FixError(message.message);
+        return message.url;
+      },
+    });
+  } catch (error) {
+    fail(error instanceof FixError ? error.message : String(error));
+  }
 }
 
 /** The daemon: holds the share's pipe until it ends. Reports readiness over IPC. */
@@ -435,6 +490,7 @@ async function main() {
   if (command === "stop") return stop(argument, values.all);
   if (command === "init") return init(values.skill);
   if (command === "login") return login();
+  if (command === "host") return serveHost();
   if (command === "logout") return logout();
   if (command === "mcp") return (await import("./mcp.ts")).serve();
   const port = parsePort(command);

@@ -68,6 +68,15 @@ export type WallEvent =
   | { type: "share.updated"; share: Share }
   | { type: "share.ended"; id: string };
 
+/** A computer running `wurmhol host` (apps/worker/src/org-do.ts `Machine`, ADR 0018). */
+export interface Machine {
+  id: string;
+  name: string;
+  /** Web servers answering on it, with their page's title. */
+  ports: { port: number; title: string | null }[];
+  connectedAt: number;
+}
+
 export type TokenScope = "pipes" | "org";
 /** Days until a new token expires; null never. */
 export type TokenExpiry = 30 | 90 | null;
