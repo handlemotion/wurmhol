@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": ".tsbuild",
+    "rootDir": "../..",
+    "types": ["@cloudflare/workers-types"],
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src", "*.ts"]
+}

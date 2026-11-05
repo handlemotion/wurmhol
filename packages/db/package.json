@@ -1,0 +1,21 @@
+{
+  "name": "@wurmhol/db",
+  "private": true,
+  "description": "Drizzle schema and D1 migrations",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.4",
+    "uuidv7": "^1.2.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261104.1",
+    "drizzle-kit": "^0.31.11"
+  }
+}
