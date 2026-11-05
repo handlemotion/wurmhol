@@ -91,7 +91,10 @@ export function useCreateToken() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (name: string) =>
-      api<{ id: string; token: string }>("/api/tokens", { method: "POST", body: { name } }),
+      api<{ id: string; token: string; host: string }>("/api/tokens", {
+        method: "POST",
+        body: { name },
+      }),
     onSuccess: () => client.invalidateQueries({ queryKey: keys.tokens }),
   });
 }

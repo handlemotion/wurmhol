@@ -43,11 +43,14 @@ it("the CLI's host answers /connect and /health, and nothing of the app", async 
   }
 });
 
-it("the CLI dials its host through a proxy and opens a pipe on the pipe domain", async () => {
+it("the CLI dials the host the console names, through a proxy, and opens a pipe on the pipe domain", async () => {
   const local = await localServer((_req, res) => res.end("through api"));
   const proxy = await connectProxy([stack.port]);
-  const env = cliEnv(stack, (await createToken(stack, ada)).token, {
-    WURMHOL_URL: `http://api.localhost:${stack.port}`,
+  // The host the Tokens dialog tells people to allowlist is the one the CLI dials.
+  const { token, host } = await createToken(stack, ada);
+  expect(host).toBe("api.localhost");
+  const env = cliEnv(stack, token, {
+    WURMHOL_URL: `http://${host}:${stack.port}`,
     HTTPS_PROXY: proxy.url,
     HTTP_PROXY: proxy.url,
   });

@@ -267,10 +267,15 @@ export async function me(stack: Stack, person: Person) {
 }
 
 export async function createToken(stack: Stack, person: Person, name = "e2e") {
-  const { status, body } = await api<{ id: string; token: string }>(stack, person, "/api/tokens", {
-    method: "POST",
-    body: { name },
-  });
+  const { status, body } = await api<{ id: string; token: string; host: string }>(
+    stack,
+    person,
+    "/api/tokens",
+    {
+      method: "POST",
+      body: { name },
+    },
+  );
   if (status !== 201) throw new Error(`token: ${status}`);
   return body;
 }

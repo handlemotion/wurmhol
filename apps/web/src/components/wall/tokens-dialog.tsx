@@ -60,11 +60,22 @@ export function TokensDialog({
           </Button>
         </form>
         {create.data && (
-          <div className="flex flex-col gap-2">
-            <CopyField label="WURMHOL_TOKEN" value={create.data.token} />
-            <Text className="text-xs text-muted-foreground">
-              Shown once. Set it where your agent runs.
-            </Text>
+          // What a Claude Code cloud environment needs (ADR 0008): the variable and the one host
+          // the CLI dials. Each field keeps its line 8px below it; the pairs sit 16px apart, and
+          // the shared label width lines up the two dividers.
+          <div className="flex flex-col gap-4 [--copy-label-width:4.5rem]">
+            <div className="flex flex-col gap-2">
+              <CopyField label="Variable" value={`WURMHOL_TOKEN=${create.data.token}`} />
+              <Text className="text-xs text-muted-foreground">
+                Shown once. Paste it under Environment variables.
+              </Text>
+            </div>
+            <div className="flex flex-col gap-2">
+              <CopyField label="Host" value={create.data.host} />
+              <Text className="text-xs text-muted-foreground">
+                Add it under Network access, Allowed domains.
+              </Text>
+            </div>
           </div>
         )}
         <Skeleton

@@ -122,14 +122,18 @@ export const api = new Hono<AppEnv>()
     });
   })
   .get("/tokens", async (c) => c.json({ tokens: await listTokens(c.var.db, c.var.member.orgId) }))
-  /** A new token, shown once. */
+  /**
+   * A new token, shown once, with the host the CLI dials: the one a sandbox must allowlist
+   * (ADR 0008, the console snippet).
+   */
   .post("/tokens", limitPerMember("manage"), zValidator("json", tokenBody), async (c) => {
     const { id, token } = await createToken(c.var.db, {
       orgId: c.var.member.orgId,
       name: c.req.valid("json").name,
       createdBy: c.var.user.id,
     });
-    return c.json({ id, token }, 201);
+    const host = c.var.config.CONNECT_HOST ?? new URL(c.var.config.auth.baseURL).hostname;
+    return c.json({ id, token, host }, 201);
   })
   /** Revokes a token and ends every share it started (spec section 6, "Token leaked"). */
   .delete("/tokens/:id", async (c) => {

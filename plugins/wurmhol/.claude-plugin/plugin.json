@@ -1,0 +1,10 @@
+{
+  "name": "wurmhol",
+  "description": "Share a running local server at a private HTTPS URL with `npx wurmhol <port>`, from inside sandboxed cloud containers",
+  "version": "0.1.0",
+  "author": { "name": "Handlemotion" },
+  "homepage": "https://wurmhol.com",
+  "repository": "https://github.com/handlemotion/wurmhol",
+  "license": "MIT",
+  "keywords": ["tunnel", "preview", "dev server", "sandbox"]
+}
