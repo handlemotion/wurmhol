@@ -170,6 +170,8 @@ Several agents may work in this repository at once.
 - Deploys happen when `main` changes: Cloudflare Workers Builds ships the Worker, and
   `.github/workflows/production.yml` migrates D1, syncs Worker secrets and publishes the CLI
   (Omni's ADR 0019). Never `wrangler deploy` from a laptop for production.
+- A pull request that changes what the CLI does adds a changeset (`pnpm changeset`); CLI
+  releases are pull requests that run `pnpm changeset version`. See `.changeset/README.md`.
 
 ## Skills
 
