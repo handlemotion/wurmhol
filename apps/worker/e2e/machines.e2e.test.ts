@@ -42,15 +42,29 @@ function watch(stack: Stack, person: Person) {
   return state;
 }
 
+/** The real `wurmhol host`, with what it printed and how it exited (undefined while it runs). */
+function startHost(env: Record<string, string>) {
+  const state: { process: ChildProcess; output: string; exited: number | null | undefined } = {
+    process: spawn(process.execPath, [cliPath, "host"], {
+      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
+      stdio: ["ignore", "pipe", "pipe"],
+    }),
+    output: "",
+    exited: undefined,
+  };
+  state.process.stdout!.on("data", (chunk: Buffer) => (state.output += chunk));
+  state.process.stderr!.on("data", (chunk: Buffer) => (state.output += chunk));
+  state.process.on("exit", (code) => (state.exited = code));
+  return state;
+}
+
 describe("a computer running wurmhol host", () => {
   let stack: Stack;
   let ada: Person;
   let bea: Person;
   let token: { id: string; token: string };
   let env: Record<string, string>;
-  let host: ChildProcess;
-  let output = "";
-  let exited: number | null | undefined;
+  let host: ReturnType<typeof startHost>;
   let local: Awaited<ReturnType<typeof localServer>>;
   let hits = 0;
 
@@ -69,17 +83,11 @@ describe("a computer running wurmhol host", () => {
     });
     token = await createToken(stack, ada, "laptop");
     env = cliEnv(stack, token.token);
-    host = spawn(process.execPath, [cliPath, "host"], {
-      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    host.stdout!.on("data", (chunk: Buffer) => (output += chunk));
-    host.stderr!.on("data", (chunk: Buffer) => (output += chunk));
-    host.on("exit", (code) => (exited = code));
+    host = startHost(env);
   });
 
   afterAll(async () => {
-    host?.kill();
+    host?.process.kill();
     await stopAll(env);
     await local?.close();
     await stack?.stop();
@@ -150,9 +158,43 @@ describe("a computer running wurmhol host", () => {
     );
     // Catches: a revoked token's computer still listed, and still able to open pipes.
     await waitFor(() => adas.machines?.length === 0, { what: "the machine gone" });
-    await waitFor(() => exited !== undefined, { timeoutMs: 15_000, what: "the CLI to exit" });
-    expect(exited).toBe(1);
-    expect(output).toContain("token");
+    await waitFor(() => host.exited !== undefined, { timeoutMs: 15_000, what: "the CLI to exit" });
+    expect(host.exited).toBe(1);
+    expect(host.output).toContain("token");
     adas.socket.close();
+  });
+
+  it("disconnects, and the CLI stops with the fix, when its owner is removed from the org", async () => {
+    const beasToken = await createToken(stack, bea, "bea's laptop");
+    const beasHost = startHost(cliEnv(stack, beasToken.token));
+    try {
+      const beas = watch(stack, bea);
+      await waitFor(() => beas.machines?.length === 1, {
+        timeoutMs: 15_000,
+        what: "bea's machine",
+      });
+      const { body } = await api<{ members: { id: string; email: string }[] }>(
+        stack,
+        ada,
+        "/api/members",
+      );
+      const member = body.members.find((m) => m.email === bea.email)!;
+      expect(
+        (await api(stack, ada, `/api/members/${member.id}`, { method: "DELETE" })).status,
+      ).toBe(200);
+      // Catches: a removed member's computer staying connected to the org, reporting its ports.
+      await waitFor(() => beas.machines?.length === 0, { what: "bea's machine gone" });
+      // Catches: `/host` taking the token back on reconnect (its owner is no longer a member), or
+      // refusing it with a status the CLI retries forever.
+      await waitFor(() => beasHost.exited !== undefined, {
+        timeoutMs: 15_000,
+        what: "bea's CLI to exit",
+      });
+      expect(beasHost.exited).toBe(1);
+      expect(beasHost.output).toContain("no longer in its org");
+      beas.socket.close();
+    } finally {
+      beasHost.process.kill();
+    }
   });
 });

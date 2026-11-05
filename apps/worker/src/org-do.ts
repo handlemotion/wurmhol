@@ -187,10 +187,10 @@ export class Org extends DurableObject<Env> {
     return this.#cards();
   }
 
-  #machines(userId: string, except?: WebSocket): Machine[] {
+  #machines(userId: string, except: ReadonlySet<WebSocket> = new Set()): Machine[] {
     return this.ctx
       .getWebSockets(`user:${userId}`)
-      .filter((socket) => socket !== except && this.ctx.getTags(socket).includes("machine"))
+      .filter((socket) => !except.has(socket) && this.ctx.getTags(socket).includes("machine"))
       .map((socket) => {
         const { id, name, ports, connectedAt } =
           socket.deserializeAttachment() as MachineAttachment;
@@ -200,7 +200,7 @@ export class Org extends DurableObject<Env> {
   }
 
   /** Tells the owner's open cards what their machines are now. */
-  #pushMachines(userId: string, except?: WebSocket) {
+  #pushMachines(userId: string, except?: ReadonlySet<WebSocket>) {
     const message = JSON.stringify({
       type: "machines",
       machines: this.#machines(userId, except),
@@ -249,16 +249,35 @@ export class Org extends DurableObject<Env> {
 
   /** Disconnects the machines a revoked token runs. */
   dropToken(tokenId: string) {
+    this.#drop((machine) => machine.tokenId === tokenId, "token revoked");
+  }
+
+  /** Disconnects a person's machines: they are no longer a member of this org. */
+  dropUser(userId: string) {
+    this.#drop((machine) => machine.userId === userId, "no longer a member of this org");
+  }
+
+  /** Disconnects every machine: the org is being deleted. */
+  dropAll() {
+    this.#drop(() => true, "org deleted");
+  }
+
+  /** Closes the matching machines' sockets (4001: the CLI says why) and updates their owners. */
+  #drop(match: (machine: MachineAttachment) => boolean, reason: string) {
+    const dropped = new Set<WebSocket>();
+    const owners = new Set<string>();
     for (const socket of this.ctx.getWebSockets("machine")) {
       const machine = socket.deserializeAttachment() as MachineAttachment;
-      if (machine.tokenId !== tokenId) continue;
+      if (!match(machine)) continue;
       try {
-        socket.close(4001, "token revoked");
+        socket.close(4001, reason);
       } catch {
         // Already closed.
       }
-      this.#pushMachines(machine.userId, socket);
+      dropped.add(socket);
+      owners.add(machine.userId);
     }
+    for (const userId of owners) this.#pushMachines(userId, dropped);
   }
 
   /**
@@ -335,7 +354,7 @@ export class Org extends DurableObject<Env> {
     }
     if (this.ctx.getTags(socket).includes("machine")) {
       const { userId } = socket.deserializeAttachment() as MachineAttachment;
-      this.#pushMachines(userId, socket);
+      this.#pushMachines(userId, new Set([socket]));
     }
   }
 }

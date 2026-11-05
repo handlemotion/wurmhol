@@ -172,12 +172,17 @@ export const api = new Hono<AppEnv>()
   .get("/members", async (c) =>
     c.json({ members: await listMembers(c.var.db, c.var.member.orgId), you: c.var.member.id }),
   )
+  /** Removes a member and disconnects their machines (ADR 0018). */
   .delete("/members/:id", requireOwner, async (c) => {
-    const result = await removeMember(c.var.db, c.var.member.orgId, c.req.param("id"));
+    const orgId = c.var.member.orgId;
+    const memberId = c.req.param("id");
+    const target = (await listMembers(c.var.db, orgId)).find((m) => m.id === memberId);
+    const result = await removeMember(c.var.db, orgId, memberId);
     if (result === "not_found") throw new HTTPException(404, { message: "no such member" });
     if (result === "last_owner") {
       throw new HTTPException(409, { message: "an org needs at least one owner" });
     }
+    if (target) await c.env.ORG.get(c.env.ORG.idFromName(orgId)).dropUser(target.userId);
     return c.json({ ok: true });
   })
   /** A single-use invite link (spec section 3, Members). */

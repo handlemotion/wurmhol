@@ -3,6 +3,7 @@
 // `/api/machines/live` and opens a pipe to one with `POST /api/machines/:id/open`. The Org object
 // holds the sockets; a machine belongs to the person whose token it runs on.
 import { zValidator } from "@hono/zod-validator";
+import { findMember } from "@wurmhol/db";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -33,11 +34,13 @@ export const machineConnect = new Hono<AppEnv>().get("/", async (c) => {
   }
   const token = await bearerToken(c);
   if (token instanceof Response) return token;
-  if (!token.createdBy) {
+  // A machine belongs to whoever made the token, so they must still be in the token's org. 401,
+  // not 403: the CLI stops on it instead of retrying.
+  if (!token.createdBy || !(await findMember(c.var.db, token.createdBy, token.orgId))) {
     return refuse(
-      403,
-      "token has no owner",
-      `Whoever made this token has left. Run wurmhol login, or make a token at ${c.var.config.auth.baseURL} (menu → Tokens).`,
+      401,
+      "token owner is not a member",
+      `Whoever made this token is no longer in its org. Run wurmhol login, or make a token at ${c.var.config.auth.baseURL} (menu → Tokens).`,
     );
   }
   const name = machineName.safeParse(c.req.query("name"));
