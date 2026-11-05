@@ -117,7 +117,7 @@ export const app = new Hono<AppEnv>()
   .post("/api/auth/organization/:action", async (c, next) =>
     c.req.param("action") === "set-active"
       ? next()
-      : c.json({ error: "use /api/org and /api/members" }, 404),
+      : c.json({ error: "use /api/orgs, /api/org and /api/members" }, 404),
   )
   // Development sends no mail: the link comes back in the response, for the login page to show.
   .post("/api/auth/sign-in/magic-link", limitAuth, async (c) => {

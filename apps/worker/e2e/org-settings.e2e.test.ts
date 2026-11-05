@@ -58,6 +58,32 @@ const setActive = (person: Person, organizationId: string) =>
     body: { organizationId },
   });
 
+it("anyone starts a new org: they own it, land in it, and can leave the one they came from", async () => {
+  const ada = await signIn(stack);
+  const bo = await signIn(stack);
+  await join(ada, bo);
+  const adaOrg = (await whoami(ada)).activeOrgId;
+
+  // A plain member may start one too, and a blank name is refused.
+  const blank = await api(stack, bo, "/api/orgs", { method: "POST", body: { name: "  " } });
+  expect(blank.status).toBe(400);
+  const created = await api<{ id: string }>(stack, bo, "/api/orgs", {
+    method: "POST",
+    body: { name: "Bo's side project" },
+  });
+  expect(created.status).toBe(200);
+
+  const after = await whoami(bo);
+  expect(after.activeOrgId).toBe(created.body.id);
+  expect(after.role).toBe("owner");
+  expect(after.orgs).toContainEqual(
+    expect.objectContaining({ id: created.body.id, name: "Bo's side project", role: "owner" }),
+  );
+  // Ada's org is untouched: Bo is still a member there, and nobody else sees the new one.
+  expect(after.orgs).toContainEqual(expect.objectContaining({ id: adaOrg, role: "member" }));
+  expect((await whoami(ada)).orgs.map((o) => o.id)).not.toContain(created.body.id);
+});
+
 it("owners rename the org and change roles; members can't; the last owner can't step down", async () => {
   const ada = await signIn(stack);
   const bo = await signIn(stack);

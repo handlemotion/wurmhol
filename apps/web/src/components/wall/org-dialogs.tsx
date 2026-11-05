@@ -12,13 +12,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
-import { useDeleteOrg, useLeaveOrg, useRenameOrg } from "@/hooks/use-app";
+import { useCreateOrg, useDeleteOrg, useLeaveOrg, useRenameOrg } from "@/hooks/use-app";
 
 /** The org actions in the switcher menu, each confirmed in a small dialog. */
-export type OrgAction = "rename" | "leave" | "delete";
+export type OrgAction = "create" | "rename" | "leave" | "delete";
 
 /**
- * Rename, leave or delete the active org (spec section 3, header menu). Leaving and deleting say
+ * Start a new org, or rename, leave or delete the active one (spec section 3, header menu). Leaving and deleting say
  * what happens on the button itself, in red: neither can be undone from here.
  */
 export function OrgDialog({
@@ -35,8 +35,9 @@ export function OrgDialog({
       isOpen={action !== null}
       onOpenChange={(open) => !open && onClose()}
       size="md"
-      role={action === "rename" ? "dialog" : "alertdialog"}
+      role={action === "rename" || action === "create" ? "dialog" : "alertdialog"}
     >
+      {action === "create" && <Create onDone={onClose} />}
       {action === "rename" && <Rename orgName={orgName} onDone={onClose} />}
       {action === "leave" && <Leave orgName={orgName} onDone={onClose} />}
       {action === "delete" && <Delete orgName={orgName} onDone={onClose} />}
@@ -46,6 +47,37 @@ export function OrgDialog({
 
 function Failure({ error }: { error: Error | null }) {
   return error ? <Text className="text-danger-subtle-foreground">{error.message}</Text> : null;
+}
+
+/** Names the new org; creating it switches to it, so the wall behind the dialog is its own. */
+function Create({ onDone }: { onDone: () => void }) {
+  const [name, setName] = useState("");
+  const create = useCreateOrg();
+  return (
+    <form
+      className="contents"
+      onSubmit={(event) => {
+        event.preventDefault();
+        create.mutate(name, { onSuccess: onDone });
+      }}
+    >
+      <DialogHeader>
+        <DialogTitle>New org</DialogTitle>
+      </DialogHeader>
+      <DialogBody className="gap-3">
+        <TextField aria-label="Org name" isRequired autoFocus value={name} onChange={setName}>
+          <Input maxLength={80} placeholder="Org name" />
+        </TextField>
+        <Failure error={create.error} />
+      </DialogBody>
+      <DialogFooter>
+        <DialogClose>Cancel</DialogClose>
+        <Button type="submit" isPending={create.isPending} isDisabled={!name.trim()}>
+          Create org
+        </Button>
+      </DialogFooter>
+    </form>
+  );
 }
 
 function Rename({ orgName, onDone }: { orgName: string; onDone: () => void }) {

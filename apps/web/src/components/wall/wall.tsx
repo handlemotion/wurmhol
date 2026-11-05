@@ -29,7 +29,6 @@ import { Link } from "@/components/ui/link";
 import {
   Menu,
   MenuDescription,
-  MenuHeader,
   MenuItem,
   MenuLabel,
   MenuSection,
@@ -135,35 +134,21 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
         </Button>
         <Menu
           placement="bottom start"
-          selectionMode="single"
-          selectedKeys={me.activeOrgId ? [me.activeOrgId] : []}
           onAction={(key) => {
             const action = ORG_ACTIONS.find((a) => a.id === key);
             if (action) setOrgAction(action.id);
             else switchOrg.mutate(String(key));
           }}
-          popover={{ className: "max-w-72" }}
         >
-          <MenuSection aria-label="Signed in as">
-            <MenuHeader className="flex items-center gap-3 p-2.5">
-              <Avatar
-                size="md"
-                src={me.user.image}
-                initials={initials(me.user.name, me.user.email)}
-                alt=""
-              />
-              <span className="flex min-w-0 flex-col">
-                <span className="truncate text-sm text-foreground">
-                  {me.user.name || me.user.email}
-                </span>
-                {me.user.name && (
-                  <span className="truncate text-xs text-muted-foreground">{me.user.email}</span>
-                )}
-              </span>
-            </MenuHeader>
-          </MenuSection>
-          <MenuSeparator />
-          <MenuSection aria-label="Orgs" items={me.orgs}>
+          {/* The orgs lead: switching is what the menu is for. Then starting one, then what can be
+              done to the active one, with deleting set apart at the bottom. */}
+          <MenuSection
+            aria-label="Orgs"
+            items={me.orgs}
+            // Only the orgs are chosen between; the rows below are plain actions.
+            selectionMode="single"
+            selectedKeys={me.activeOrgId ? [me.activeOrgId] : []}
+          >
             {(org) => (
               <MenuItem id={org.id} textValue={org.name}>
                 {/* One letter: two would be specks at 20px. */}
@@ -173,15 +158,24 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
               </MenuItem>
             )}
           </MenuSection>
-          {active && <MenuSeparator />}
-          {active && (
-            <MenuSection aria-label={active.name}>
-              {ORG_ACTIONS.filter((a) => owner || !a.owner).map(({ id, label, Icon, danger }) => (
-                <MenuItem key={id} id={id} intent={danger ? "danger" : undefined}>
-                  <Icon />
-                  <MenuLabel>{label}</MenuLabel>
-                </MenuItem>
-              ))}
+          <MenuSeparator />
+          <MenuSection aria-label="Org actions">
+            {ORG_ACTIONS.filter(
+              (a) => !a.danger && (owner || !a.owner) && (active || a.id === "create"),
+            ).map(({ id, label, Icon }) => (
+              <MenuItem key={id} id={id}>
+                <Icon />
+                <MenuLabel>{label}</MenuLabel>
+              </MenuItem>
+            ))}
+          </MenuSection>
+          {active && owner && <MenuSeparator />}
+          {active && owner && (
+            <MenuSection aria-label={`Delete ${active.name}`}>
+              <MenuItem id="delete" intent="danger">
+                <IconTrash />
+                <MenuLabel>Delete org</MenuLabel>
+              </MenuItem>
             </MenuSection>
           )}
         </Menu>
@@ -250,8 +244,9 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
   );
 }
 
-/** What the switcher offers for the active org; owners rename and delete. */
+/** What the switcher offers: anyone starts an org; owners rename and delete the active one. */
 const ORG_ACTIONS = [
+  { id: "create", label: "New org", Icon: IconPlus, owner: false, danger: false },
   { id: "rename", label: "Rename org", Icon: IconPencil, owner: true, danger: false },
   { id: "leave", label: "Leave org", Icon: IconDoorOpen, owner: false, danger: false },
   { id: "delete", label: "Delete org", Icon: IconTrash, owner: true, danger: true },

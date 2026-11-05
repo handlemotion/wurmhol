@@ -64,7 +64,9 @@ export const dropdownItemStyles = tv({
     "[&>[slot=label]+svg:not([data-slot='check-indicator'])]:absolute [&>[slot=label]+svg:not([data-slot='check-indicator'])]:inset-e-0 [&>[slot=label]+svg:not([data-slot='check-indicator'])]:top-1",
     "selected:[&>svg:not([data-slot='check-indicator']):has(+svg:not([data-slot='check-indicator']))]:absolute selected:[&>svg:not([data-slot='check-indicator']):has(+svg:not([data-slot='check-indicator']))]:inset-e-0 selected:[&>svg:not([data-slot='check-indicator']):has(+svg:not([data-slot='check-indicator']))]:top-1",
     "selected:[&>svg:not([data-slot='check-indicator']):has(+[data-slot=avatar])]:absolute selected:[&>svg:not([data-slot='check-indicator']):has(+[data-slot=avatar])]:inset-e-0 selected:[&>svg:not([data-slot='check-indicator']):has(+[data-slot=avatar])]:top-1",
-    "selected:[&>[data-slot=avatar]+[slot=label]]:me-6 selected:[&>[data-slot=avatar]+svg:not([data-slot='check-indicator'])+[slot=label]]:me-6 selected:[&>svg:not([data-slot='check-indicator'])+[data-slot=avatar]+[slot=label]]:me-6 selected:[&>svg:not([data-slot='check-indicator'])+[slot=label]]:me-6",
+    // A chosen row keeps room for its trailing check: 28px past the label, so with the check's
+    // own air its ink sits 16px after the label's (the check's box: see `MenuItem`).
+    "selected:*:[[slot=label]]:me-7",
     // keyboard
     "*:data-[slot=keyboard]:inset-e-3",
     // force color adjust
