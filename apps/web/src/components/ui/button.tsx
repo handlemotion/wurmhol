@@ -81,7 +81,7 @@ export const buttonStyles = tv({
     },
 
     isCircle: {
-      true: "rounded-full",
+      true: "rounded-none",
       false: "rounded-lg",
     },
   },

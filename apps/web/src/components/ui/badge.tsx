@@ -24,7 +24,7 @@ export const badgeStyles = tv({
       outline: "[--badge-border:var(--color-border)] [--badge-overlay:var(--color-secondary)]/20",
     },
     isCircle: {
-      true: "rounded-full px-[calc(--spacing(2)-1px)]",
+      true: "rounded-none px-[calc(--spacing(2)-1px)]",
       false: "rounded-sm px-[calc(--spacing(1.5)-1px)]",
     },
   },
