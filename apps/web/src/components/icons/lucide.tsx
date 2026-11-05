@@ -20,7 +20,6 @@ import {
   Mail,
   Plus,
   Sparkles,
-  SquareTerminal,
   TriangleAlert,
   Users,
   X,
@@ -52,7 +51,6 @@ export const IconLogOut = thin(LogOut, "IconLogOut");
 export const IconMail = thin(Mail, "IconMail");
 export const IconPlus = thin(Plus, "IconPlus");
 export const IconSparkles = thin(Sparkles, "IconSparkles");
-export const IconSquareTerminal = thin(SquareTerminal, "IconSquareTerminal");
 export const IconTriangleAlert = thin(TriangleAlert, "IconTriangleAlert");
 export const IconUsers = thin(Users, "IconUsers");
 export const IconX = thin(X, "IconX");

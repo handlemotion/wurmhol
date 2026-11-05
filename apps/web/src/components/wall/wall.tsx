@@ -1,4 +1,5 @@
 import { LazyMotion } from "motion/react";
+import { NPM } from "@ridemountainpig/svgl-react";
 import { cn } from "cn";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Skeleton } from "skullet/react";
@@ -11,7 +12,6 @@ import {
   IconLaptop,
   IconPlus,
   IconSparkles,
-  IconSquareTerminal,
   IconKey,
   IconLogOut,
   IconUsers,
@@ -258,12 +258,42 @@ function Network({ shares }: { shares: Share[] }) {
 
 const LOGIN = "npx wurmhol login && npx wurmhol <port>";
 
-/** The ways to start a pipe, each copied in one press. */
+/** npm's mark (svgl) at 13px inside the rows' 15px icon slot, as the design draws it. */
+function NpmMark() {
+  return (
+    <span aria-hidden className="flex size-icon shrink-0 items-center justify-center">
+      <NPM className="size-3.25" />
+    </span>
+  );
+}
+
+/**
+ * The ways to start a pipe, each copied in one press. Every label is the verb and what it
+ * copies; once copied, the row says where the text goes next.
+ */
 const CREATE = [
-  { id: "prompt", label: "Copy prompt", value: PROMPT, Icon: IconSparkles },
-  { id: "command", label: "Copy npx command", value: COMMAND, Icon: IconSquareTerminal },
+  {
+    id: "prompt",
+    label: "Copy agent prompt",
+    done: "Copied. Paste it to your agent",
+    value: PROMPT,
+    Icon: IconSparkles,
+  },
+  {
+    id: "command",
+    label: "Copy npx command",
+    done: "Copied. Run it next to the dev server",
+    value: COMMAND,
+    Icon: NpmMark,
+  },
   // Approves this computer in the browser first, then shares the port from it.
-  { id: "machine", label: "From this machine", value: LOGIN, Icon: IconLaptop },
+  {
+    id: "machine",
+    label: "Copy setup for this computer",
+    done: "Copied. Run it in a terminal here",
+    value: LOGIN,
+    Icon: IconLaptop,
+  },
 ] as const;
 
 /**
@@ -293,10 +323,10 @@ function CreateCard() {
           void copy(option.value);
         }}
       >
-        {CREATE.map(({ id, label, Icon }) => (
+        {CREATE.map(({ id, label, done, Icon }) => (
           <ActionItem key={id} id={id} textValue={label}>
-            {copied && last === id ? <IconCheck /> : <Icon />}
-            {copied && last === id ? "Copied" : label}
+            {copied && last === id ? <IconCheck /> : <Icon aria-hidden />}
+            <span className="truncate">{copied && last === id ? done : label}</span>
           </ActionItem>
         ))}
       </ActionList>
