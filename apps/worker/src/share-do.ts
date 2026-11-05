@@ -122,8 +122,10 @@ const AWAY_WAIT_MS = 10_000;
 /** Usage goes to the Org object at most this often, or once this many bytes piled up. */
 const USAGE_FLUSH_MS = 5_000;
 const USAGE_FLUSH_BYTES = 8 * 1024 * 1024;
-/** The wall's "last request" line updates at most this often. */
+/** The wall's "last request" line updates at most this often, and is stored as often. */
 const LAST_REQUEST_PUSH_MS = 5_000;
+/** Stream ids are reserved in storage this many at a time, so most streams write nothing. */
+const STREAM_ID_BLOCK = 1024;
 /** One-time viewer codes (spec section 6). */
 const CODE_TTL_MS = 60_000;
 
@@ -172,7 +174,12 @@ export class Share extends DurableObject<Env> {
   #members = new Map<string, number>();
   #pendingUsage = 0;
   #lastUsageFlush = 0;
+  /** The last viewer request, kept here and pushed and stored every `LAST_REQUEST_PUSH_MS`. */
+  #lastRequestAt: number | null = null;
   #lastRequestPush = 0;
+  #lastRequestTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The next stream id, and the first one not yet reserved in storage; null until first used. */
+  #streamIds: { next: number; reserved: number } | null = null;
   #log = createLogger({ component: "share" });
   #page: SharePage;
   #views: ViewLog;
@@ -228,10 +235,29 @@ export class Share extends DurableObject<Env> {
     );
   }
 
-  /** Kept in storage: a viewer's WebSocket stream outlives hibernation, so its id must too. */
+  /**
+   * A stream id never used on this share before. Ids come from memory; storage holds the end of
+   * the reserved block, so after hibernation the count goes on past every id handed out, and past
+   * every viewer socket still open (its `v:<id>` tag).
+   */
   #nextStream() {
-    const id = this.ctx.storage.kv.get<number>("nextStream") ?? FIRST_STREAM_ID;
-    this.ctx.storage.kv.put("nextStream", nextStreamId(id));
+    if (!this.#streamIds) {
+      let next = this.ctx.storage.kv.get<number>("nextStream") ?? FIRST_STREAM_ID;
+      for (const socket of this.ctx.getWebSockets()) {
+        for (const tag of this.ctx.getTags(socket)) {
+          if (tag.startsWith("v:")) next = Math.max(next, Number(tag.slice(2)) + 1);
+        }
+      }
+      this.#streamIds = { next, reserved: next };
+    }
+    const ids = this.#streamIds;
+    const id = ids.next;
+    ids.next = nextStreamId(id);
+    if (id >= ids.reserved) {
+      ids.reserved = id + STREAM_ID_BLOCK;
+      // Never written over the tombstone: an ended share opens no more streams.
+      if (this.#meta()) this.ctx.storage.kv.put("nextStream", ids.reserved);
+    }
     return id;
   }
 
@@ -385,7 +411,7 @@ export class Share extends DurableObject<Env> {
         refresh: 2,
       });
     }
-    this.#touch(meta);
+    this.#touch();
     this.#views.note(meta, viewer);
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
       return this.#openViewerSocket(request, meta);
@@ -415,15 +441,33 @@ export class Share extends DurableObject<Env> {
     return false;
   }
 
-  #touch(meta: Meta) {
-    meta.lastRequestAt = Date.now();
-    this.#save(meta);
-    if (meta.lastRequestAt - this.#lastRequestPush >= LAST_REQUEST_PUSH_MS) {
-      this.#lastRequestPush = meta.lastRequestAt;
-      this.ctx.waitUntil(
-        this.#org(meta.orgId).update(meta.id, { lastRequestAt: meta.lastRequestAt }),
-      );
+  /**
+   * Notes a viewer request for the wall's "last request" line. The first in a while goes out at
+   * once; later ones at most every `LAST_REQUEST_PUSH_MS`, on a timer that also keeps the object
+   * from hibernating with the newest one unsaved.
+   */
+  #touch() {
+    const now = Date.now();
+    this.#lastRequestAt = now;
+    const wait = this.#lastRequestPush + LAST_REQUEST_PUSH_MS - now;
+    if (wait <= 0) {
+      this.#pushLastRequest();
+    } else {
+      this.#lastRequestTimer ??= setTimeout(() => {
+        this.#lastRequestTimer = null;
+        this.#pushLastRequest();
+      }, wait);
     }
+  }
+
+  #pushLastRequest() {
+    const meta = this.#meta();
+    const at = this.#lastRequestAt;
+    if (!meta || at === null || at === meta.lastRequestAt) return;
+    this.#lastRequestPush = Date.now();
+    meta.lastRequestAt = at;
+    this.#save(meta);
+    this.ctx.waitUntil(this.#org(meta.orgId).update(meta.id, { lastRequestAt: at }));
   }
 
   #requestHead(request: Request, meta: Meta): RequestHead {
@@ -839,6 +883,8 @@ export class Share extends DurableObject<Env> {
     // `shares` row is the pipe's history.
     this.ctx.storage.kv.put("meta", { state: "ended", endReason: reason } satisfies Tombstone);
     this.ctx.storage.kv.delete("nextStream");
+    if (this.#lastRequestTimer) clearTimeout(this.#lastRequestTimer);
+    this.#lastRequestTimer = null;
     for (const cli of this.ctx.getWebSockets("cli")) {
       try {
         cli.close(CLOSE_CODES[reason], reason);

@@ -133,9 +133,10 @@ export class SharePage {
       }
       const body = await response.arrayBuffer();
       if (body.byteLength === 0 || body.byteLength > FAVICON_MAX_BYTES) return;
-      this.#share.ctx.storage.kv.put("favicon", { type, body } satisfies StoredFavicon);
+      // The pipe may have ended while the icon came: never stored next to the tombstone.
       const current = this.#share.meta();
       if (!current) return;
+      this.#share.ctx.storage.kv.put("favicon", { type, body } satisfies StoredFavicon);
       current.favicon = true;
       this.#share.save(current);
       await this.#share.org(current.orgId).update(current.id, { favicon: true });
