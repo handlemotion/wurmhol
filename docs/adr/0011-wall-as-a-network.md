@@ -40,5 +40,6 @@ loop eases nodes to it and redraws the spokes from the same positions
 - Clicking a pipe no longer opens the share: that moved to the card's Open button (and the URL
   field copies it). One more press to visit, in exchange for seeing a pipe's details on the wall.
 - Terminate moved from the card corner into the open card.
-- The org cap (5 open pipes) keeps the ring small; the layout still grows the ring and stretches
-  it downward on narrow screens if that ever changes.
+- The org cap (5 open pipes) keeps the ring small; the layout still grows the ring if that ever
+  changes. Where the ring won't fit the width (a phone), the pipes stand in a column above and
+  below the hub instead, arranged so their spokes clear the other pills.
