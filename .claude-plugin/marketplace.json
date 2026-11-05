@@ -1,0 +1,16 @@
+{
+  "name": "wurmhol",
+  "owner": {
+    "name": "Handlemotion",
+    "url": "https://github.com/handlemotion"
+  },
+  "description": "Wurmhol for coding agents: share a local server at a private URL",
+  "plugins": [
+    {
+      "name": "wurmhol",
+      "source": "./plugins/wurmhol",
+      "description": "Teaches the agent to share a running server with `npx wurmhol <port>` and send the user the URL",
+      "category": "development"
+    }
+  ]
+}

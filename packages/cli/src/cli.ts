@@ -4,16 +4,16 @@
 //   npx wurmhol <port> [--ttl 8h] [--json]   start a share; prints its URL first, then returns
 //   wurmhol ls [--json]           open shares on this machine
 //   wurmhol stop <port|id>        end one; `--all` ends every one
-//   wurmhol init                  tell the repo's agents how to share
-//   wurmhol login | logout        store or delete a token for this computer
+//   wurmhol init [--skill]        tell the repo's agents how to share
 import { spawn } from "node:child_process";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { formatDuration, parseDuration } from "@wurmhol/protocol";
 import pkg from "../package.json" with { type: "json" };
+import skill from "../../../plugins/wurmhol/skills/wurmhol/SKILL.md";
 import {
   credentialsFile,
   readCredentials,
@@ -25,7 +25,16 @@ import { login as deviceLogin } from "./login.ts";
 import { DEFAULT_CONSOLE, DEFAULT_SERVER, openPipe, type Pipe } from "./pipe.ts";
 import { alive, listStates, logFile, removeState, writeState } from "./state.ts";
 
-const INIT_LINE = "Share a local server with `npx wurmhol <port>` and send the user the URL.";
+/** The line `init` writes, with the repo's dev port (spec section 7). */
+const initLine = (port: number) =>
+  `Share the dev server with \`npx wurmhol ${port}\` (or the port it prints) and send the user the URL; end it with \`npx wurmhol stop ${port}\`.`;
+
+/** Dev servers' default ports, first match wins; anything else is a Worker on 8787. */
+const DEV_PORTS: [name: string, port: number][] = [
+  ["next", 3000],
+  ["astro", 4321],
+  ["vite", 5173],
+];
 
 const HELP = `wurmhol ${pkg.version}: a private HTTPS URL for a local dev server
 
@@ -34,7 +43,8 @@ Usage:
     --ttl <duration>            How long it lasts, like 90m or 8h (default 4h, at most 12h)
   wurmhol ls [--json]           List open pipes
   wurmhol stop <port|id>        End a pipe (--all ends every one)
-  wurmhol init                  Add a line about wurmhol to AGENTS.md or CLAUDE.md
+  wurmhol init [--skill]        Tell this repo's agents how to share (AGENTS.md or
+                                CLAUDE.md); --skill also writes .claude/skills/wurmhol
   wurmhol login                 Approve this computer in the browser; stores a token
   wurmhol logout                Delete the stored token
 
@@ -239,8 +249,28 @@ function readIfExists(path: string): string | null {
   }
 }
 
-function init() {
+/** The dev server's port, from package.json's dependencies and scripts. */
+function devPort(cwd: string): number {
+  let manifest: { dependencies?: object; devDependencies?: object; scripts?: object } = {};
+  try {
+    manifest = JSON.parse(readIfExists(join(cwd, "package.json")) ?? "{}");
+  } catch {
+    // Not JSON: no hints.
+  }
+  const deps = new Set([
+    ...Object.keys(manifest.dependencies ?? {}),
+    ...Object.keys(manifest.devDependencies ?? {}),
+  ]);
+  const scripts = Object.values(manifest.scripts ?? {}).join("\n");
+  for (const [name, port] of DEV_PORTS) {
+    if (deps.has(name) || new RegExp(`(^|[\\s;&|(])${name}(\\s|$)`, "m").test(scripts)) return port;
+  }
+  return 8787;
+}
+
+function init(writeSkill: boolean) {
   const cwd = process.cwd();
+  const port = devPort(cwd);
   // Read instead of checking existence first, then append: no window where the file can change
   // between a check and the write.
   let target = join(cwd, "AGENTS.md");
@@ -252,13 +282,34 @@ function init() {
     current = text;
     break;
   }
+  const say = (line: string) => process.stdout.write(`${line}\n`);
   if (current.includes("npx wurmhol")) {
-    process.stdout.write(`${target} already mentions wurmhol\n`);
-    return;
+    say(`${relative(cwd, target)} already mentions wurmhol`);
+  } else {
+    const separator = current && !current.endsWith("\n") ? "\n\n" : current ? "\n" : "";
+    appendFileSync(target, `${separator}${initLine(port)}\n`);
+    say(`Added a line to ${relative(cwd, target)} (port ${port}, from package.json)`);
   }
-  const separator = current && !current.endsWith("\n") ? "\n\n" : current ? "\n" : "";
-  appendFileSync(target, `${separator}${INIT_LINE}\n`);
-  process.stdout.write(`added a line to ${target}\n`);
+  if (writeSkill) {
+    const dir = join(cwd, ".claude/skills/wurmhol");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), skill);
+    say(`Wrote ${relative(cwd, join(dir, "SKILL.md"))}`);
+  }
+  const stored = readCredentials();
+  if (process.env.WURMHOL_TOKEN?.trim()) {
+    say("WURMHOL_TOKEN is set.");
+  } else if (stored && stored.server === server()) {
+    say(`Logged in: wurmhol uses the token in ${credentialsFile()}.`);
+  } else {
+    const host = new URL(server()).hostname;
+    say(
+      `No token. On this computer, run wurmhol login. Where the agent runs, set WURMHOL_TOKEN to a token from ${consoleUrl()} (menu → Tokens).`,
+    );
+    say(
+      `In a Claude Code cloud environment: WURMHOL_TOKEN under Environment variables, ${host} under Allowed domains.`,
+    );
+  }
 }
 
 async function main() {
@@ -267,6 +318,7 @@ async function main() {
     options: {
       json: { type: "boolean", default: false },
       all: { type: "boolean", default: false },
+      skill: { type: "boolean", default: false },
       ttl: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", short: "v", default: false },
@@ -281,7 +333,7 @@ async function main() {
   }
   if (command === "ls") return ls(values.json);
   if (command === "stop") return stop(argument, values.all);
-  if (command === "init") return init();
+  if (command === "init") return init(values.skill);
   if (command === "login") return login();
   if (command === "logout") return logout();
   const port = parsePort(command);
