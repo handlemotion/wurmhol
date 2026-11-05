@@ -1,0 +1,94 @@
+name: Release
+
+# Keeps one release pull request open while changesets are pending (.changeset/README.md). On each
+# push to main, changesets/action runs `changeset version` on the branch `changeset-release/main`
+# and opens or updates the pull request "Release wurmhol <version>". It only versions:
+# production.yml publishes to npm when that pull request merges.
+#
+# The pull request is written with a GitHub App's token, because pull requests opened with the
+# workflow's GITHUB_TOKEN start no `pull_request` workflows, and main requires `Checks`. The App's
+# client id and private key are RELEASE_APP_CLIENT_ID and RELEASE_APP_PRIVATE_KEY in Doppler
+# prd_github, synced to the GitHub environment `production` (docs/operations/doppler.md). Without
+# them the job does nothing.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  release-pr:
+    name: Release pull request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - name: Check the release App is configured
+        id: app
+        env:
+          APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$APP_CLIENT_ID" ] && [ -n "$APP_PRIVATE_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "RELEASE_APP_CLIENT_ID or RELEASE_APP_PRIVATE_KEY is not set: no release pull request"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.app.outputs.configured == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: steps.app.outputs.configured == 'true'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - if: steps.app.outputs.configured == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - if: steps.app.outputs.configured == 'true'
+        run: pnpm install --frozen-lockfile
+
+      # The action's commit message and title are fixed strings, so the version comes first.
+      # Empty when only empty changesets (or none) are pending: nothing to release.
+      - name: Next version
+        id: next
+        if: steps.app.outputs.configured == 'true'
+        run: |
+          status="$RUNNER_TEMP/changeset-status.json"
+          pnpm changeset status --output="$status"
+          version="$(node -p "require(process.argv[1]).releases.find((r) => r.name === 'wurmhol')?.newVersion ?? ''" "$status")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Next wurmhol version: ${version:-none}"
+
+      - name: App token
+        id: token
+        if: steps.next.outputs.version != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      # No publish-script: version-only. Commits go through the GitHub API, signed and attributed
+      # to the App. `changeset version` formats with oxfmt (.changeset/config.json).
+      - name: Open or update the release pull request
+        if: steps.next.outputs.version != ''
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        with:
+          github-token: ${{ steps.token.outputs.token }}
+          version-script: pnpm changeset version
+          commit-message: Release wurmhol ${{ steps.next.outputs.version }}
+          pr-title: Release wurmhol ${{ steps.next.outputs.version }}
