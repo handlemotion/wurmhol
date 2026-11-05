@@ -7,24 +7,37 @@
 // - unbalanced: the ink's centre of mass more than 7% of the frame from its centre.
 // Mass is stroke length (paths, stroked circles and rects) plus the area of dots and text.
 //
-//   node check.mjs <file.svg ...>
+//   node check.mjs <file.svg ...> [--frame x,y,w,h]
+//
+// `--frame` judges the plate through a window of its viewBox instead of the whole of it: for an
+// anchored backdrop, the part one viewport shows (the login at 1440x900, form centre at
+// 536,450: `--frame -536,-450,1440,900`).
 import { readFileSync } from "node:fs";
 
 const uniq = (xs) => [...new Set(xs)];
 
+const argv = process.argv.slice(2);
+const fi = argv.indexOf("--frame");
+const frame = fi === -1 ? null : argv.splice(fi, 2)[1].split(",").map(Number);
+
 let failed = false;
-for (const file of process.argv.slice(2)) {
-  const svg = readFileSync(file, "utf8");
+for (const file of argv) {
+  // A void mask's black and white are luminance, not ink.
+  const svg = readFileSync(file, "utf8").replace(/<mask[\s\S]*?<\/mask>/g, "");
   const all = (re) => [...svg.matchAll(re)].map((m) => m[1]);
-  const [, , W, H] = svg
-    .match(/viewBox="([^"]+)"/)[1]
-    .split(/\s+/)
-    .map(Number);
+  const [X0, Y0, W, H] =
+    frame ??
+    svg
+      .match(/viewBox="([^"]+)"/)[1]
+      .split(/\s+/)
+      .map(Number);
   const strokes = uniq(all(/\sstroke="([^"]+)"/g).filter((c) => c !== "none"));
   const widths = uniq(all(/stroke-width="([^"]+)"/g));
   const fills = uniq(all(/\sfill="([^"]+)"/g).filter((c) => c !== "none"));
   const radii = uniq(all(/<circle (?![^>]*fill="none")[^>]*\sr="([^"]+)"/g));
-  const paper = svg.match(/^<rect width="[^"]+" height="[^"]+" fill="([^"]+)"\/>/m)?.[1];
+  const paper = svg.match(
+    /^<rect (?:x="[^"]+" y="[^"]+" )?width="[^"]+" height="[^"]+" fill="([^"]+)"\/>/m,
+  )?.[1];
   const colors = uniq([...strokes, ...fills]).filter((c) => c !== paper);
 
   // Ink geometry.
@@ -37,7 +50,7 @@ for (const file of process.argv.slice(2)) {
   let y0 = Infinity;
   let y1 = -Infinity;
   const see = (x, y) => {
-    if (x < 0 || y < 0 || x > W || y > H) return;
+    if (x < X0 || y < Y0 || x > X0 + W || y > Y0 + H) return;
     x0 = Math.min(x0, x);
     x1 = Math.max(x1, x);
     y0 = Math.min(y0, y);
@@ -51,10 +64,10 @@ for (const file of process.argv.slice(2)) {
     const dx = bx - ax;
     const dy = by - ay;
     for (const [pp, q] of [
-      [-dx, ax],
-      [dx, W - ax],
-      [-dy, ay],
-      [dy, H - ay],
+      [-dx, ax - X0],
+      [dx, X0 + W - ax],
+      [-dy, ay - Y0],
+      [dy, Y0 + H - ay],
     ]) {
       if (pp === 0) {
         if (q < 0) return;
@@ -125,13 +138,13 @@ for (const file of process.argv.slice(2)) {
     const [x, y, r] = [Number(m[1]), Number(m[2]), Number(m[3])];
     marks++;
     see(x, y);
-    if (x < 0 || y < 0 || x > W || y > H) continue;
+    if (x < X0 || y < Y0 || x > X0 + W || y > Y0 + H) continue;
     const w = Math.PI * r * 2;
     mass += w;
     mx += x * w;
     my += y * w;
   }
-  const off = mass ? Math.hypot(mx / mass / W - 0.5, my / mass / H - 0.5) : 1;
+  const off = mass ? Math.hypot((mx / mass - X0) / W - 0.5, (my / mass - Y0) / H - 0.5) : 1;
   const cover = [(x1 - x0) / W, (y1 - y0) / H];
 
   const problems = [];

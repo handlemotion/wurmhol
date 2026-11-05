@@ -4,7 +4,7 @@
 //   node render.mjs <scene.mjs ...> [--out dir] [--png] [--theme light|dark|both]
 //                   [--tone strong|quiet] [--seed n] [--size WxH] [--stroke px]
 //                   [--ink color] [--accent color] [--paper color|none] [--seeds n]
-//                   [--tsx ComponentName] [--sheet]
+//                   [--tsx ComponentName] [--set key=value ...] [--sheet]
 //
 // A scene file default-exports `(o) => scene`, where `o` is
 // `{ seed, theme, tone, ink, accent, paper, width, height, stroke }`. `--ink currentColor`
@@ -12,7 +12,8 @@
 // `index.html`, a contact sheet of everything rendered. `--seeds n` renders seeds 1..n of each
 // scene (`<name>-s<seed>`), to compare variants side by side. `--tsx Name` also writes
 // `<name>.tsx`, a React component with the SVG as JSX that passes `className` through, for
-// shipping a plate into apps/web (use with `--ink currentColor --paper none`).
+// shipping a plate into apps/web (use with `--ink currentColor --paper none`). `--set k=v`
+// (repeatable) passes scene options as `o.set.k`, such as leaving out the parts the app animates.
 /* oxlint-disable no-console -- a CLI: printing is its output */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -26,7 +27,15 @@ const flag = (name, fallback) => {
   return i === -1 ? fallback : args[i + 1];
 };
 const has = (name) => args.includes(`--${name}`);
+const sets = {};
+args.forEach((a, i) => {
+  if (a === "--set") {
+    const [k, ...v] = args[i + 1].split("=");
+    sets[k] = v.join("=");
+  }
+});
 const valued = new Set([
+  "set",
   "out",
   "theme",
   "tone",
@@ -59,13 +68,23 @@ const seeds = has("seeds")
   ? Array.from({ length: Number(flag("seeds")) }, (_, i) => i + 1)
   : [seed];
 
-/** SVG markup to a React component: attributes to camelCase, `className` on the root. */
+/**
+ * SVG markup to a React component: attributes to camelCase, `className` on the root. A plate
+ * with an `origin` (a viewBox that doesn't start at 0 0) is anchored: it renders at true size,
+ * offset so its (0, 0) lands on the top left of its positioned parent. Any other plate scales
+ * to cover its box.
+ */
 function toTsx(name, svg, scene) {
+  const [x, y, w, h] = svg
+    .match(/viewBox="([^"]+)"/)[1]
+    .split(" ")
+    .map(Number);
+  const anchored = x !== 0 || y !== 0;
+  const root = anchored
+    ? `<svg $1 className={className} aria-hidden="true" style={{ position: "absolute", left: ${x}, top: ${y}, width: ${w}, height: ${h}, maxWidth: "none" }}>`
+    : '<svg $1 className={className} aria-hidden="true" preserveAspectRatio="xMidYMid slice">';
   const jsx = svg
-    .replace(
-      /<svg ([^>]*?) width="[^"]+" height="[^"]+">/,
-      '<svg $1 className={className} aria-hidden="true" preserveAspectRatio="xMidYMid slice">',
-    )
+    .replace(/<svg ([^>]*?) width="[^"]+" height="[^"]+">/, root)
     .replace(
       / ([a-z]+)-([a-z]+)(?:-([a-z]+))?=/g,
       (_, a, b, c) =>
@@ -99,6 +118,7 @@ for (const file of files) {
         accent: flag("accent", t.accent),
         paper: paper === "none" ? null : paper,
         stroke: Number(flag("stroke", 1)),
+        set: sets,
       };
       const svg = mod.default(o).render();
       const name = `${basename(file, ".mjs")}${themes.length > 1 ? `-${theme}` : ""}${seeds.length > 1 ? `-s${seed}` : ""}`;

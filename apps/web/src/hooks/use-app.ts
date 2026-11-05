@@ -23,10 +23,28 @@ export function useMe() {
   return useQuery(meQuery);
 }
 
+/**
+ * The Worker writes the sign-in methods into the page it serves (`#sign-in-methods`), so the
+ * login form renders complete on its first paint. Without them (the Vite dev server), the
+ * query fetches as usual.
+ */
+function inlineSignInMethods(): SignInMethods | undefined {
+  const text = document.getElementById("sign-in-methods")?.textContent;
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text) as SignInMethods;
+  } catch {
+    return undefined;
+  }
+}
+
 export function useSignInMethods() {
+  const inline = inlineSignInMethods();
   return useQuery({
     queryKey: keys.methods,
     queryFn: () => api<SignInMethods>("/api/sign-in-methods"),
+    initialData: inline,
+    staleTime: inline ? Infinity : 0,
   });
 }
 

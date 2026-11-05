@@ -60,83 +60,89 @@ export function Login() {
   });
   const failure = passkey.error ?? social.error ?? magicLink.error;
 
+  const passkeyButton = (
+    <Button
+      intent="outline"
+      size="lg"
+      className="justify-start"
+      isPending={passkey.isPending}
+      onPress={() => passkey.mutate()}
+    >
+      <IconKey />
+      Using a passkey
+    </Button>
+  );
+
   return (
-    <main className="relative isolate flex min-h-dvh items-center justify-center overflow-hidden bg-background px-4 py-12">
-      <Wormhole className="pointer-events-none absolute inset-0 -z-10 size-full text-hairline-line" />
-      {/* The form sits raw on the canvas on the link between the backdrop's two points, where the drawing has faded out. */}
-      <div className="flex w-full max-w-88 flex-col gap-6">
-        <div className="flex flex-col gap-2">
-          <Heading>Welcome to the Wurmhol</Heading>
-          <Text>{reason ?? "Sign in to see what your agents are building."}</Text>
-        </div>
-        <div className="flex flex-col gap-2">
-          <Button
-            intent="outline"
-            size="lg"
-            className="justify-start"
-            isPending={passkey.isPending}
-            onPress={() => passkey.mutate()}
-          >
-            <IconKey />
-            Using a passkey
-          </Button>
-          {methods.data?.google && (
-            <Button
-              intent="outline"
-              size="lg"
-              className="justify-start"
-              isPending={social.isPending && social.variables === "google"}
-              onPress={() => social.mutate("google")}
+    <main className="relative isolate grid min-h-dvh place-items-center overflow-hidden bg-background px-4 py-12 lg:grid-cols-4 lg:justify-items-start lg:px-0">
+      {/* On wide screens the form starts a quarter of the way in, in the backdrop's hole, and
+          the ring opens into the open space to its right. */}
+      <Wormhole className="w-full max-w-88 lg:col-span-2 lg:col-start-2">
+        <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-2">
+            <Heading size="sm">Sign in to Wurmhol</Heading>
+            {reason && <Text>{reason}</Text>}
+          </div>
+          <div className="flex flex-col gap-2">
+            {passkeyButton}
+            {methods.data?.google && (
+              <Button
+                intent="outline"
+                size="lg"
+                className="justify-start"
+                isPending={social.isPending && social.variables === "google"}
+                onPress={() => social.mutate("google")}
+              >
+                <ProviderMark>
+                  <Google aria-hidden />
+                </ProviderMark>
+                Using Google
+              </Button>
+            )}
+            {methods.data?.github && (
+              <Button
+                intent="outline"
+                size="lg"
+                className="justify-start"
+                isPending={social.isPending && social.variables === "github"}
+                onPress={() => social.mutate("github")}
+              >
+                <ProviderMark>
+                  <GitHubLight aria-hidden className="dark:hidden" />
+                  <GitHubDark aria-hidden className="hidden dark:block" />
+                </ProviderMark>
+                Using GitHub
+              </Button>
+            )}
+          </div>
+          {methods.data?.magicLink && <Separator label="or" />}
+          {methods.data?.magicLink && (
+            <form
+              className="flex flex-col gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                magicLink.mutate();
+              }}
             >
-              <ProviderMark>
-                <Google aria-hidden />
-              </ProviderMark>
-              Using Google
-            </Button>
+              <TextField
+                type="email"
+                aria-label="Email"
+                autoComplete="username webauthn"
+                isRequired
+                value={email}
+                onChange={setEmail}
+              >
+                <Input size="lg" placeholder="you@example.com" />
+              </TextField>
+              <Button type="submit" intent="secondary" size="lg" isPending={magicLink.isPending}>
+                <IconMail />
+                {sent ? "Check your email" : "Email me a link"}
+              </Button>
+            </form>
           )}
-          {methods.data?.github && (
-            <Button
-              intent="outline"
-              size="lg"
-              className="justify-start"
-              isPending={social.isPending && social.variables === "github"}
-              onPress={() => social.mutate("github")}
-            >
-              <ProviderMark>
-                <GitHubLight aria-hidden className="dark:hidden" />
-                <GitHubDark aria-hidden className="hidden dark:block" />
-              </ProviderMark>
-              Using GitHub
-            </Button>
-          )}
+          {failure && <Text className="text-danger-subtle-foreground">{failure.message}</Text>}
         </div>
-        {methods.data?.magicLink && <Separator label="or" />}
-        {methods.data?.magicLink && (
-          <form
-            className="flex flex-col gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              magicLink.mutate();
-            }}
-          >
-            <TextField
-              type="email"
-              aria-label="Email"
-              autoComplete="username webauthn"
-              isRequired
-              value={email}
-              onChange={setEmail}
-            >
-              <Input size="lg" placeholder="you@example.com" />
-            </TextField>
-            <Button type="submit" intent="secondary" size="lg" isPending={magicLink.isPending}>
-              <IconMail />
-              {sent ? "Check your email" : "Email me a link"}
-            </Button>
-          </form>
-        )}
-        {failure && <Text className="text-danger-subtle-foreground">{failure.message}</Text>}
-      </div>
+      </Wormhole>
     </main>
   );
 }
