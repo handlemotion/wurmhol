@@ -1,4 +1,4 @@
-# 0022: A request log on the agent's machine
+# 0023: A request log on the agent's machine
 
 Status: accepted. Extends ADR 0008 (privacy, the SDK's `request` events) and spec v1 section 7.
 

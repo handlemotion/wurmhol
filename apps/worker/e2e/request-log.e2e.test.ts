@@ -1,4 +1,4 @@
-// The request log on the agent's machine (ADR 0022): the daemon writes each viewer request's
+// The request log on the agent's machine (ADR 0023): the daemon writes each viewer request's
 // method, path without query values, status and duration to its pipe's log, `wurmhol logs` and
 // the MCP server's `recent_requests` read it, and nothing else of the request is kept.
 import { spawn } from "node:child_process";
