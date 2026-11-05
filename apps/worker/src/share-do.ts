@@ -49,6 +49,8 @@ import { ViewLog } from "./share-views.ts";
 
 /** Headers the Worker uses to talk to this object; never forwarded, never trusted from clients. */
 const INTERNAL_HEADERS = {
+  /** To the object: the CLI's socket, from the bearer-checked `/connect` route only. */
+  cli: "x-wurmhol-cli",
   /** To the object: a new share's `ShareInit`, as JSON. */
   init: "x-wurmhol-init",
   /** To the object: the signed-in viewer's user id. */
@@ -64,20 +66,22 @@ export function shareStub(env: Env, shareId: string) {
 
 /**
  * A client's request rebuilt for the object: our own headers are never taken from the client,
- * only the one set here. With `url`, a bodiless GET to that URL (the CLI's `/connect`).
+ * only the ones set here. `cli` is the CLI's socket, a bodiless GET to `/connect` (with a new
+ * share's `ShareInit`, or null to bring one back); `viewer` is a signed-in viewer's request.
  */
 export function toShare(
   raw: Request,
-  internal: { init: ShareInit } | { viewer: string } | null,
-  url?: URL,
+  internal: { cli: ShareInit | null } | { viewer: string },
 ): Request {
   const headers = new Headers(raw.headers);
   for (const name of Object.values(INTERNAL_HEADERS)) headers.delete(name);
-  if (internal && "init" in internal) {
-    headers.set(INTERNAL_HEADERS.init, JSON.stringify(internal.init));
+  if ("viewer" in internal) {
+    headers.set(INTERNAL_HEADERS.viewer, internal.viewer);
+    return new Request(raw, { headers });
   }
-  if (internal && "viewer" in internal) headers.set(INTERNAL_HEADERS.viewer, internal.viewer);
-  return url ? new Request(url, { headers }) : new Request(raw, { headers });
+  headers.set(INTERNAL_HEADERS.cli, "1");
+  if (internal.cli) headers.set(INTERNAL_HEADERS.init, JSON.stringify(internal.cli));
+  return new Request(new URL("/connect", raw.url), { headers });
 }
 
 /**
@@ -286,7 +290,11 @@ export class Share extends DurableObject<Env> {
 
   override async fetch(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
-    if (path === "/connect") return this.#connect(request);
+    // Only the bearer-checked route marks the CLI's socket. A viewer's `/connect` on the pipe
+    // host is a path of the dev server like any other.
+    if (path === "/connect" && request.headers.has(INTERNAL_HEADERS.cli)) {
+      return this.#connect(request);
+    }
     return this.#view(request);
   }
 

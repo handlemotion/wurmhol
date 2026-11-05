@@ -118,6 +118,39 @@ describe("a share round-trip", () => {
     await local.close();
   });
 
+  it("relays a viewer's /connect to the dev server instead of taking it as the CLI's socket", async () => {
+    // Catches: `/connect` on a pipe host reaching the CLI's socket handler instead of the dev
+    // server.
+    const seen: string[] = [];
+    const local = await localServer((req, res) => {
+      seen.push(`${req.method} ${req.url}`);
+      res.end("dev server");
+    });
+    local.server.on("upgrade", (req, socket) => {
+      seen.push(`upgrade ${req.url}`);
+      socket.destroy();
+    });
+    const started = await share(stack, env, local.port);
+    const cookie = await viewerCookie(stack, ada, started.url);
+
+    const plain = await browserFetch(`${started.url}/connect`, { cookie });
+    expect(plain.status).toBe(200);
+    expect(await plain.text()).toBe("dev server");
+
+    const socket = browserSocket(`${started.url}/connect`, [], { cookie });
+    const status = await new Promise<number>((resolve) => {
+      socket.once("upgrade", (res) => resolve(res.statusCode ?? 0));
+      socket.once("unexpected-response", (_req, res) => resolve(res.statusCode ?? 0));
+      socket.once("error", () => {});
+    });
+    socket.terminate();
+    expect(status).toBe(502);
+    expect(seen).toEqual(["GET /connect", "upgrade /connect"]);
+
+    await cli(["stop", String(local.port)], env);
+    await local.close();
+  });
+
   it("carries a 50 MB download and a 50 MB upload intact", async () => {
     const local = await localServer(async (req, res) => {
       if (req.method === "POST") {
