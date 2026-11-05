@@ -16,6 +16,7 @@
     "@simplewebauthn/server": "13.3.3",
     "@wurmhol/db": "workspace:*",
     "better-auth": "^1.7.16",
+    "better-call": "1.4.5",
     "drizzle-orm": "^0.45.4",
     "stripe": "^23.1.0",
     "uuidv7": "^1.2.1",

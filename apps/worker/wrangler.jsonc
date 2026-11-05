@@ -46,6 +46,8 @@
     "LIMIT_ACTIVE_SHARES": "5",
     "LIMIT_MONTHLY_BYTES": "100000000000",
     "LIMIT_SHARE_SECONDS": "43200",
+    // A pipe's lifetime when the CLI passes no --ttl; capped at LIMIT_SHARE_SECONDS.
+    "DEFAULT_SHARE_SECONDS": "14400",
     // Rate limits as "<count>/<seconds>", or "off".
     "RATE_LIMIT_AUTH": "60/60",
     // Per email address: magic links, each of which sends mail.

@@ -7,6 +7,7 @@ import { createLogger, REQUEST_ID_HEADER, requestIdFrom } from "./log.ts";
 import { limitAuth } from "./rate-limiter.ts";
 import { account, api } from "./routes/api.ts";
 import { connect } from "./routes/connect.ts";
+import { deviceApproval, deviceFlow } from "./routes/device.ts";
 import { open } from "./routes/open.ts";
 import { pipes } from "./routes/pipes.ts";
 import { securityHeaders } from "./security-headers.ts";
@@ -39,12 +40,14 @@ const trace = createMiddleware<AppEnv>(async (c, next) => {
   }
 });
 
-/** The app, its API, `/connect` and `/v1`. Share hosts never reach this (index.ts). */
+/** The app's host: the console, its API, `/connect`, `/device/*` and `/v1`. Share hosts never reach this (index.ts). */
 export const app = new Hono<AppEnv>()
   .use(trace)
   .get("/health", (c) => c.json({ ok: true }))
   .use("/connect", requestScope)
   .route("/connect", connect)
+  .use("/device/*", requestScope)
+  .route("/device", deviceFlow)
   .use("/v1/*", requestScope, securityHeaders)
   .route("/v1/pipes", pipes)
   .all("/v1/*", (c) => c.json({ error: "not found" }, 404))
@@ -65,7 +68,13 @@ export const app = new Hono<AppEnv>()
   // Checkout and the portal go through /api/billing, which pins them to the active org and to
   // owners. The plugin's own POSTs would let anyone subscribe for themselves, so they are closed.
   .post("/api/auth/subscription/*", (c) => c.json({ error: "use /api/billing" }, 404))
+  // The device flow goes through /device and /api/device: the plugin's own token endpoint hands
+  // out a full session, and its approve route records no org.
+  .on(["GET", "POST"], ["/api/auth/device", "/api/auth/device/*"], (c) =>
+    c.json({ error: "use /api/device" }, 404),
+  )
   .on(["GET", "POST"], "/api/auth/*", limitAuth, (c) => c.var.auth.handler(c.req.raw))
+  .route("/api/device", deviceApproval)
   .route("/api", account)
   .route("/api", api)
   .all("/api/*", (c) => c.json({ error: "not found" }, 404))

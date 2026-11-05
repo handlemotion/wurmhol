@@ -1,6 +1,7 @@
 // A pipe in the caller's process: `openPipe`, the `wurmhol` package's export, and the CLI's daemon, which
 // adds only its state file and log on top (ADR 0008, section 3).
 import { EventEmitter } from "node:events";
+import { parseDuration } from "@wurmhol/protocol";
 import pkg from "../package.json" with { type: "json" };
 import { FixError } from "./errors.ts";
 import { type RequestEvent, Tunnel } from "./tunnel.ts";
@@ -40,6 +41,11 @@ export interface OpenPipeOptions {
   server?: string;
   /** Where the dev server listens. Default `127.0.0.1`; it still sees `Host: localhost:<port>`. */
   host?: string;
+  /**
+   * How long the pipe lasts: seconds, or a duration like `"90m"` or `"8h"`. Default 4 hours on
+   * wurmhol.com, at most 12; a longer one rejects with a fix that names the limit.
+   */
+  ttl?: number | string;
   /** Aborting rejects a pending `openPipe`, or closes an open pipe. */
   signal?: AbortSignal;
   /**
@@ -69,6 +75,8 @@ export interface Pipe {
   /** The private URL to send the humans. */
   readonly url: string;
   readonly port: number;
+  /** When the relay ends the pipe (reason `expired`). */
+  readonly endsAt: Date;
   on<E extends keyof PipeEvents>(event: E, listener: PipeEvents[E]): this;
   once<E extends keyof PipeEvents>(event: E, listener: PipeEvents[E]): this;
   off<E extends keyof PipeEvents>(event: E, listener: PipeEvents[E]): this;
@@ -80,18 +88,20 @@ class OpenPipe implements Pipe {
   readonly id: string;
   readonly url: string;
   readonly port: number;
+  readonly endsAt: Date;
   readonly #events = new EventEmitter();
   readonly #tunnel: Tunnel;
   readonly #closed: Promise<CloseReason>;
 
   constructor(
-    info: { id: string; url: string; port: number },
+    info: { id: string; url: string; endsAt: string; port: number },
     tunnel: Tunnel,
     closed: Promise<CloseReason>,
   ) {
     this.id = info.id;
     this.url = info.url;
     this.port = info.port;
+    this.endsAt = new Date(info.endsAt);
     this.#tunnel = tunnel;
     this.#closed = closed;
   }
@@ -140,6 +150,10 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
     const console = options.server ? server : DEFAULT_CONSOLE;
     throw new FixError(`Set WURMHOL_TOKEN to a token from ${console} (menu → Tokens).`);
   }
+  const ttl = typeof options.ttl === "string" ? parseDuration(options.ttl) : options.ttl;
+  if (ttl !== undefined && (ttl === null || !Number.isSafeInteger(ttl) || ttl < 1)) {
+    throw new FixError(`Not a lifetime: ${options.ttl}. Use one like 90m or 8h.`);
+  }
   const { signal } = options;
   signal?.throwIfAborted();
 
@@ -159,6 +173,7 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
     token,
     port: options.port,
     host: options.host ?? "127.0.0.1",
+    ttl,
     version: pkg.version,
     log,
     onRequest: (event) => pipe?.emit("request", event),

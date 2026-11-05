@@ -87,4 +87,21 @@ describe("openPipe", () => {
       `Create a new token at ${stack.url} (menu → Tokens) and set WURMHOL_TOKEN.`,
     );
   });
+
+  it("ends at its ttl with reason expired, and rejects one over the limit", async () => {
+    const local = await localServer((_req, res) => res.end("ok"));
+    const before = Date.now();
+    const pipe = await openPipe({ port: local.port, token, server: stack.url, ttl: "2s" });
+    // Catches: the SDK dropping `ttl`, so the pipe runs for the 4 h default.
+    expect(Math.abs(pipe.endsAt.getTime() - before - 2000)).toBeLessThan(2000);
+    const reason = await new Promise<CloseReason>((resolve) => pipe.once("close", resolve));
+    expect(reason).toBe("expired");
+    expect(Date.now() - before).toBeLessThan(6000);
+    await local.close();
+
+    const error = await openPipe({ port: 3000, token, server: stack.url, ttl: 13 * 3600 }).catch(
+      (e: unknown) => e,
+    );
+    expect((error as FixError).message).toBe("Pipes last at most 12h. Pass --ttl 12h or less.");
+  });
 });
