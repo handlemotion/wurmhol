@@ -58,3 +58,18 @@ if [ "$(doppler --version 2>/dev/null)" != "v$doppler_version" ]; then
     "https://github.com/DopplerHQ/cli/releases/download/$doppler_version/doppler_${doppler_version}_linux_amd64.tar.gz" \
     "$doppler_sha256" -z -C /usr/local/bin doppler
 fi
+
+# gh-stack, the GitHub CLI extension for stacked PRs (`gh stack`), from its GitHub release. gh runs
+# any executable at ~/.local/share/gh/extensions/gh-<name>/gh-<name> as `gh <name>`. The release
+# publishes no checksum file; the sha256 is the downloaded asset's.
+gh_stack_version=0.3.0
+gh_stack_sha256=957e822cfa7e435cd84a297cd96c419b58e51e3ac58be249762c24bd9e45099b
+gh_stack_dir="${HOME:-/root}/.local/share/gh/extensions/gh-stack"
+if [ "$("$gh_stack_dir/gh-stack" --version 2>/dev/null)" != "gh stack version $gh_stack_version" ]; then
+  mkdir -p "$gh_stack_dir"
+  curl -fsSL --retry 3 -o "$gh_stack_dir/gh-stack.tmp" \
+    "https://github.com/github/gh-stack/releases/download/v$gh_stack_version/linux-amd64"
+  echo "$gh_stack_sha256  $gh_stack_dir/gh-stack.tmp" | sha256sum -c --quiet
+  chmod +x "$gh_stack_dir/gh-stack.tmp"
+  mv "$gh_stack_dir/gh-stack.tmp" "$gh_stack_dir/gh-stack"
+fi
