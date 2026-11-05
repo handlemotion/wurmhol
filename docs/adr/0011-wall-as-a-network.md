@@ -15,12 +15,14 @@ command), and it gives every card the same weight whether you're looking at it o
 - **The wall is a network.** A **Create pipe** button is the anchor at the centre. Pressed, it
   opens into a fixed 288px square card: a list of ways to start one, each copied in one press
   (a prompt to paste to an agent, the `npx wurmhol <port>` command, and `npx wurmhol login`
-  first for this machine). The square leaves room for more. An open card, either kind, keeps
-  72px clear around it, so the pills it displaces stand further off than from each other. Each open pipe is a sharp, grey pill (its mark, its title or pipe id, its port) on
+  first for this machine). The square leaves room for more. Each open pipe is a sharp, grey pill (its mark, its title or pipe id, its port) on
   a hairline spoke from the anchor. Pills drift by a few pixels so the network reads as alive;
   under reduced motion they hold still. A new pipe comes out of the anchor.
-- **Pressing a pill opens it in place.** The pill becomes a card with a `primary` border in the
-  middle, the anchor just above it, and the other pills move around them to make room. The card
+- **Pressing a pill opens it in place.** The pill grows into a card with a `primary` border
+  where it stands, away from the anchor (its corner nearest the anchor stays put), and shrinks
+  back on close; both are fast springs. No other node moves: the layout keeps reading the pill's
+  size, the card stands over its neighbours, and a camera pans the whole network until the card
+  sits in the middle of the view, then back on close. Create pipe opens the same way. The card
   holds what a pipe has: its URL (`CopyField`), port, status, who started it, when, the last
   request, its viewers, plus Open and Terminate. It has no close button: a press anywhere
   outside it, or Escape, closes it, and focus goes back to the pill.
