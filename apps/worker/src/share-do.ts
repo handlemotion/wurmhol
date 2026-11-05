@@ -32,6 +32,7 @@ import {
   type HeaderList,
   HttpStreamOrder,
   PING_TEXT,
+  pipeSetCookie,
   type PipeSource,
   PONG_TEXT,
   ProtocolError,
@@ -599,7 +600,9 @@ export class Share extends DurableObject<Env> {
     }
 
     const headers = new Headers();
-    for (const [name, value] of forwardable(responseHead.headers)) {
+    for (const [name, raw] of forwardable(responseHead.headers)) {
+      const value = name.toLowerCase() === "set-cookie" ? pipeSetCookie(raw) : raw;
+      if (value === null) continue;
       try {
         headers.append(name, value);
       } catch {
