@@ -1,8 +1,11 @@
 // `GET /connect`: the CLI's one WebSocket (spec section 5). The token says which org; a `share`
-// query parameter brings back a share whose CLI dropped (it keeps its id for 60 s).
+// query parameter brings back a share whose CLI dropped (it keeps its id for 60 s). A new share
+// may ask for its lifetime in seconds (`ttl`), up to `LIMIT_SHARE_SECONDS`; without one it lasts
+// `DEFAULT_SHARE_SECONDS`.
 //
 // Refusals answer with plain HTTP before the upgrade, as `{ error, fix }`: the CLI prints `fix`,
 // one line that says what to do.
+import { formatDuration } from "@wurmhol/protocol";
 import { findShare, orgStanding, recordShareEnd, recordShareStart } from "@wurmhol/db";
 import { Hono } from "hono";
 import { bearerToken, refuse } from "../bearer.ts";
@@ -48,6 +51,20 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     return refuse(400, "bad port", "Pass the port your server listens on: npx wurmhol 8787.");
   }
+  const limit = config.LIMIT_SHARE_SECONDS;
+  const ttl = c.req.query("ttl");
+  const seconds = ttl === undefined ? Math.min(config.DEFAULT_SHARE_SECONDS, limit) : Number(ttl);
+  if (!Number.isSafeInteger(seconds) || seconds < 1) {
+    return refuse(400, "bad ttl", "Pass a lifetime like --ttl 90m or --ttl 8h.");
+  }
+  if (seconds > limit) {
+    return refuse(
+      400,
+      "ttl over the limit",
+      `Pipes last at most ${formatDuration(limit)}. Pass --ttl ${formatDuration(limit)} or less.`,
+      { limit },
+    );
+  }
   const started = await recordShareStart(db, {
     orgId: token.orgId,
     tokenId: token.id,
@@ -68,7 +85,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
     url: shareOrigin(config, started.id),
     startedBy: starter?.name || starter?.email || null,
     startedAt: started.startedAt.getTime(),
-    limits: { seconds: config.LIMIT_SHARE_SECONDS, monthlyBytes: config.LIMIT_MONTHLY_BYTES },
+    limits: { seconds, monthlyBytes: config.LIMIT_MONTHLY_BYTES },
   };
   const org = c.env.ORG.get(c.env.ORG.idFromName(token.orgId));
   const reservation = await org.reserve(

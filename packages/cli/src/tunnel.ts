@@ -28,6 +28,8 @@ import { FixError, explainConnectError, explainRefusal } from "./errors.ts";
 export interface ShareInfo {
   id: string;
   url: string;
+  /** When the relay ends the share (ISO 8601). */
+  endsAt: string;
 }
 
 export type Logger = (event: string, fields?: Record<string, unknown>) => void;
@@ -47,6 +49,8 @@ export interface TunnelOptions {
   port: number;
   /** Where the dev server listens. */
   host: string;
+  /** The lifetime a new share asks for, in seconds; the relay's default when absent. */
+  ttl?: number;
   version: string;
   log: Logger;
   onRequest: (event: RequestEvent) => void;
@@ -155,7 +159,10 @@ export class Tunnel {
     const url = new URL("/connect", this.#options.server);
     url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
     if (this.#share) url.searchParams.set("share", this.#share.id);
-    else url.searchParams.set("port", String(this.#options.port));
+    else {
+      url.searchParams.set("port", String(this.#options.port));
+      if (this.#options.ttl !== undefined) url.searchParams.set("ttl", String(this.#options.ttl));
+    }
     return url;
   }
 
@@ -178,8 +185,9 @@ export class Tunnel {
       socket.once("upgrade", (response) => {
         const id = response.headers["x-wurmhol-share-id"];
         const shareUrl = response.headers["x-wurmhol-share-url"];
-        if (typeof id === "string" && typeof shareUrl === "string") {
-          this.#share = { id, url: shareUrl };
+        const endsAt = response.headers["x-wurmhol-share-ends-at"];
+        if (typeof id === "string" && typeof shareUrl === "string" && typeof endsAt === "string") {
+          this.#share = { id, url: shareUrl, endsAt };
         }
       });
       socket.once("open", () => resolve(socket));

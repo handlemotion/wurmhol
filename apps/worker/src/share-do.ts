@@ -332,7 +332,13 @@ export class Share extends DurableObject<Env> {
     return new Response(null, {
       status: 101,
       webSocket: client,
-      headers: { "x-wurmhol-share-id": meta.id, "x-wurmhol-share-url": meta.url },
+      headers: {
+        "x-wurmhol-share-id": meta.id,
+        "x-wurmhol-share-url": meta.url,
+        "x-wurmhol-share-ends-at": new Date(
+          meta.startedAt + meta.limits.seconds * 1000,
+        ).toISOString(),
+      },
     });
   }
 

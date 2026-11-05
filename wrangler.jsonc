@@ -50,6 +50,7 @@
     "LIMIT_ACTIVE_SHARES": "5",
     "LIMIT_MONTHLY_BYTES": "100000000000",
     "LIMIT_SHARE_SECONDS": "43200",
+    "DEFAULT_SHARE_SECONDS": "14400",
     // Days a pipe's history is kept.
     "RETENTION_DAYS": "90",
     "RATE_LIMIT_AUTH": "60/60",
