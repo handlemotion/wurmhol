@@ -24,7 +24,7 @@ export function Checkbox({ className, children, ...props }: CheckboxProps) {
             className={cn(
               // 2px down: centres the 16px box on the label's 20px first line.
               "mt-0.5 flex size-4 shrink-0 items-center justify-center border border-input bg-background transition-colors duration-150 ease-out",
-              "group-hover:border-muted-foreground group-focus-visible:border-ring group-disabled:opacity-50",
+              "group-focus-visible:border-ring group-disabled:opacity-50",
               isSelected &&
                 "border-primary bg-primary text-primary-foreground group-hover:border-primary",
             )}

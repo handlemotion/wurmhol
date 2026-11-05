@@ -1,18 +1,27 @@
 import { LazyMotion } from "motion/react";
-import { useState } from "react";
+import { NPM } from "@ridemountainpig/svgl-react";
+import { cn } from "cn";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Skeleton } from "skullet/react";
 import {
   IconChevronsUpDown,
   IconCreditCard,
   IconEllipsis,
+  IconArrowUpRight,
+  IconCheck,
+  IconExternalLink,
+  IconLaptop,
+  IconPlus,
+  IconSparkles,
   IconKey,
   IconLogOut,
   IconUsers,
 } from "@/components/icons/lucide";
+import { ActionItem, ActionList } from "@/components/ui/action-list";
 import { Button } from "@/components/ui/button";
 import { CopyField } from "@/components/ui/copy-field";
-import { Link } from "@/components/ui/link";
 import { SkeletonProvider } from "@/components/ui/skeleton-provider";
+import { Link } from "@/components/ui/link";
 import { Menu, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
 import { Text } from "@/components/ui/text";
 import {
@@ -25,9 +34,12 @@ import {
   useTerminate,
   useWall,
 } from "@/hooks/use-app";
+import { useClipboard } from "@/hooks/use-clipboard";
 import type { Me, Share } from "@/lib/api";
 import { ago } from "@/lib/time";
 import { MembersDialog } from "./members-dialog";
+import { Constellation } from "./constellation";
+import { ANCHOR } from "./constellation-layout";
 import { TokensDialog } from "./tokens-dialog";
 
 const SAMPLE: Share[] = [1, 2, 3].map((n) => ({
@@ -47,7 +59,7 @@ const SAMPLE: Share[] = [1, 2, 3].map((n) => ({
 // the startup path, and long before anyone opens a menu.
 const motionFeatures = () => import("@/lib/motion-features").then((m) => m.default);
 
-/** The main page: every open share of the active org, live (spec section 3, Are.na style). */
+/** The main page: every open pipe of the active org, live, as one network (ADR 0011). */
 export function Wall({ me }: { me: Me }) {
   const shares = useWall(me.activeOrgId);
   const [dialog, setDialog] = useState<"members" | "tokens" | null>(null);
@@ -55,20 +67,10 @@ export function Wall({ me }: { me: Me }) {
   return (
     <div className="min-h-dvh bg-background">
       <Header me={me} onOpen={setDialog} />
-      <main className="mx-auto w-full max-w-6xl px-4 pt-6 pb-16 sm:px-8 sm:pt-10">
+      <main className="w-full px-4 sm:px-8">
         {me.standing && !me.standing.ok && <NeedsPlan owner={me.role === "owner"} />}
         <Skeleton id="wall" data={shares} sample={SAMPLE} label="Loading pipes">
-          {(list) =>
-            list.length === 0 ? (
-              <Empty />
-            ) : (
-              <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {list.map((share) => (
-                  <ShareCard key={share.id} share={share} />
-                ))}
-              </ul>
-            )
-          }
+          {(list) => <Network shares={list} />}
         </Skeleton>
       </main>
       <MembersDialog me={me} isOpen={dialog === "members"} onOpenChange={() => setDialog(null)} />
@@ -77,44 +79,76 @@ export function Wall({ me }: { me: Me }) {
   );
 }
 
+/**
+ * The header floats: sharp pills over the canvas, no bar behind them. The org on the left, the
+ * org's dialogs in the middle, logging out on the right. On a phone the middle and right fold
+ * into one menu. The same 16px above the pills as beside them, so the row sits balanced.
+ */
 function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens") => void }) {
   const switchOrg = useSwitchOrg();
   const signOut = useSignOut();
   const billing = useOpenBilling();
   const prefetchDialogs = usePrefetchDialogs();
   const active = me.orgs.find((org) => org.id === me.activeOrgId);
+  // Owners manage billing; with billing off (self-hosted) there is nothing to open.
+  const canBill = me.role === "owner" && me.standing?.reason !== "billing_off";
   return (
-    <header className="flex h-14 items-center justify-between gap-3 border-b border-border px-4 sm:px-8">
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="text-sm text-foreground">Wurmhol</span>
-        <span className="text-sm text-subtle-foreground">/</span>
-        <MenuTrigger>
-          <Button
-            intent="plain"
-            size="sm"
-            className="min-w-0"
-            isPending={switchOrg.isPending}
-            aria-label={`Switch org, currently ${active?.name ?? "none"}`}
-          >
-            <span className="truncate">{active?.name ?? "No org"}</span>
-            <IconChevronsUpDown />
+    <header className="sticky top-0 z-10 flex items-center justify-between gap-3 p-4">
+      <MenuTrigger>
+        <Button
+          intent="secondary"
+          className="min-w-0"
+          isPending={switchOrg.isPending}
+          aria-label={`Switch org, currently ${active?.name ?? "none"}`}
+        >
+          <span className="text-muted-foreground">Wurmhol</span>
+          <span className="truncate">{active?.name ?? "No org"}</span>
+          <IconChevronsUpDown />
+        </Button>
+        <Menu
+          placement="bottom start"
+          selectionMode="single"
+          selectedKeys={me.activeOrgId ? [me.activeOrgId] : []}
+          onAction={(key) => switchOrg.mutate(String(key))}
+        >
+          {me.orgs.map((org) => (
+            <MenuItem key={org.id} id={org.id} textValue={org.name}>
+              <MenuLabel>{org.name}</MenuLabel>
+            </MenuItem>
+          ))}
+        </Menu>
+      </MenuTrigger>
+      <nav
+        aria-label="Org"
+        className="absolute start-1/2 hidden -translate-x-1/2 gap-2 sm:flex"
+        onPointerEnter={prefetchDialogs}
+      >
+        <Button intent="secondary" onPress={() => onOpen("members")}>
+          <IconUsers />
+          Members
+        </Button>
+        <Button intent="secondary" onPress={() => onOpen("tokens")}>
+          <IconKey />
+          Tokens
+        </Button>
+        {canBill && (
+          <Button intent="secondary" isPending={billing.isPending} onPress={() => billing.mutate()}>
+            <IconCreditCard />
+            Billing
           </Button>
-          <Menu
-            placement="bottom start"
-            selectionMode="single"
-            selectedKeys={me.activeOrgId ? [me.activeOrgId] : []}
-            onAction={(key) => switchOrg.mutate(String(key))}
-          >
-            {me.orgs.map((org) => (
-              <MenuItem key={org.id} id={org.id} textValue={org.name}>
-                <MenuLabel>{org.name}</MenuLabel>
-              </MenuItem>
-            ))}
-          </Menu>
-        </MenuTrigger>
-      </div>
+        )}
+      </nav>
+      <Button
+        intent="danger"
+        className="hidden sm:inline-flex"
+        isPending={signOut.isPending}
+        onPress={() => signOut.mutate()}
+      >
+        <IconLogOut />
+        Log out
+      </Button>
       <MenuTrigger onOpenChange={(open) => open && prefetchDialogs()}>
-        <Button intent="plain" size="sq-sm" aria-label="Menu">
+        <Button intent="secondary" className="sm:hidden" aria-label="Menu">
           <IconEllipsis />
         </Button>
         <Menu placement="bottom end">
@@ -126,15 +160,14 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
             <IconKey />
             <MenuLabel>Tokens</MenuLabel>
           </MenuItem>
-          {/* Owners manage billing; with billing off (self-hosted) there is nothing to open. */}
-          {me.role === "owner" && me.standing?.reason !== "billing_off" && (
+          {canBill && (
             <MenuItem onAction={() => billing.mutate()}>
               <IconCreditCard />
               <MenuLabel>Billing</MenuLabel>
             </MenuItem>
           )}
           <MenuSeparator />
-          <MenuItem onAction={() => signOut.mutate()}>
+          <MenuItem intent="danger" onAction={() => signOut.mutate()}>
             <IconLogOut />
             <MenuLabel>Log out</MenuLabel>
           </MenuItem>
@@ -144,62 +177,282 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
   );
 }
 
-/** Viewers named on a card; the rest are counted. */
-const VIEWS_SHOWN = 2;
+const COMMAND = "npx wurmhol <port>";
+const PROMPT =
+  "Start the dev server, then run `npx wurmhol <port>` with its port and send me the URL it prints.";
 
-function ShareCard({ share }: { share: Share }) {
+/**
+ * Every pipe as a pill on a spoke from the anchor, the Create pipe button. Pressing a pill opens
+ * it into a card with its details; pressing Create pipe opens the ways to start one. One is open
+ * at a time, and the other pills make room around it.
+ */
+function Network({ shares }: { shares: Share[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const current = open === ANCHOR || shares.some((share) => share.id === open) ? open : null;
+
+  // Closing returns focus to the pill the card came from.
+  const close = () => {
+    const id = current;
+    setOpen(null);
+    if (id) {
+      const selector = id === ANCHOR ? "[data-create]" : `[data-pipe="${CSS.escape(id)}"]`;
+      requestAnimationFrame(() => document.querySelector<HTMLElement>(selector)?.focus());
+    }
+  };
+
+  // Escape, or a press anywhere outside the open card, closes it. A press on another pill opens
+  // that one instead, and presses inside a dialog, menu or tooltip are theirs.
+  useEffect(() => {
+    if (!current) return;
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && close();
+    const onPress = (event: PointerEvent) => {
+      const target = event.target as Element;
+      const keep = "[data-open], [data-pipe], [data-create], [role=dialog], [role=menu]";
+      if (target.closest(keep)) return;
+      close();
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPress);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPress);
+    };
+  });
+
+  return (
+    <Constellation
+      open={current}
+      anchor={
+        <div className="relative">
+          {shares.length === 0 && current !== ANCHOR && (
+            // Above the button, out of its box, so the button stays the network's centre.
+            <Text className="absolute start-1/2 bottom-full mb-3 -translate-x-1/2 text-nowrap">
+              No open pipes yet.
+            </Text>
+          )}
+          {current === ANCHOR ? (
+            <CreateCard />
+          ) : (
+            <Button
+              intent="secondary"
+              data-create
+              aria-expanded={false}
+              onPress={() => setOpen(ANCHOR)}
+            >
+              <IconPlus />
+              Create pipe
+            </Button>
+          )}
+        </div>
+      }
+      nodes={shares.map((share) => ({
+        id: share.id,
+        render:
+          share.id === current ? (
+            <PipeCard share={share} />
+          ) : (
+            <PipePill share={share} onPress={() => setOpen(share.id)} />
+          ),
+      }))}
+    />
+  );
+}
+
+const LOGIN = "npx wurmhol login && npx wurmhol <port>";
+/** The project's public docs: the same for hosted and self-hosted installs. */
+const DOCS = "https://wurmhol.com/docs";
+
+/** npm's mark (svgl) at 13px inside the rows' 15px icon slot, as the design draws it. */
+function NpmMark() {
+  return (
+    <span aria-hidden className="flex size-icon shrink-0 items-center justify-center">
+      <NPM className="size-3.25" />
+    </span>
+  );
+}
+
+/**
+ * The ways to start a pipe, each copied in one press. Every label is the verb and what it
+ * copies; once copied, the row names what is on the clipboard.
+ */
+const CREATE = [
+  {
+    id: "prompt",
+    label: "Copy agent prompt",
+    done: "Prompt copied",
+    value: PROMPT,
+    Icon: IconSparkles,
+  },
+  {
+    id: "command",
+    label: "Copy npx command",
+    done: "Command copied",
+    value: COMMAND,
+    Icon: NpmMark,
+  },
+  // Approves this computer in the browser first, then shares the port from it.
+  {
+    id: "machine",
+    label: "Copy setup for this computer",
+    done: "Setup copied",
+    value: LOGIN,
+    Icon: IconLaptop,
+  },
+] as const;
+
+/**
+ * Create pipe, open: a muted label over the ways to start one. A fixed square, so options can be
+ * added without the card changing shape. A row says "Copied" for a moment after its press.
+ */
+function CreateCard() {
+  const { copy, copied } = useClipboard();
+  const [last, setLast] = useState<string | null>(null);
+  return (
+    <section
+      data-open
+      aria-label="Create pipe"
+      className="flex size-72 animate-in flex-col gap-0.5 border border-border bg-background p-2 duration-200 ease-out fade-in zoom-in-95 motion-reduce:animate-none"
+    >
+      <span aria-hidden className="flex h-8 items-center px-2 text-xs text-subtle-foreground">
+        Create pipe
+      </span>
+      {/* Focus lands on the first row, so arrows, Enter and Escape work from the start. */}
+      <ActionList
+        aria-label="Create pipe"
+        autoFocus="first"
+        onAction={(key) => {
+          const option = CREATE.find((item) => item.id === key);
+          if (!option) return;
+          setLast(option.id);
+          void copy(option.value);
+        }}
+      >
+        {CREATE.map(({ id, label, done, Icon }) => (
+          <ActionItem key={id} id={id} textValue={label}>
+            {copied && last === id ? <IconCheck /> : <Icon aria-hidden />}
+            <span className="truncate">{copied && last === id ? done : label}</span>
+          </ActionItem>
+        ))}
+      </ActionList>
+      {/* The footer mirrors the label above: same row, same muted type, pinned to the bottom. */}
+      <Link
+        href={DOCS}
+        target="_blank"
+        rel="noopener"
+        className="mt-auto flex h-8 items-center gap-1 px-2 text-xs text-subtle-foreground hover:text-foreground"
+      >
+        Docs
+        <IconArrowUpRight className="size-3" />
+      </Link>
+    </section>
+  );
+}
+
+/** The page's title, else the host; a pill falls back to just the pipe's own label. */
+function name(share: Share, short = false) {
+  const host = new URL(share.url).host;
+  return share.title ?? (short ? host.split(".")[0] : host);
+}
+
+/** The pipe's mark: its favicon, or a filled square; hollow while its CLI reconnects. */
+function Mark({ share }: { share: Share }) {
+  // A favicon that won't load falls back to the square rather than a broken image.
+  const [broken, setBroken] = useState(false);
+  // One 16px slot for both, so every pill's label starts at the same place.
+  return (
+    <span aria-hidden className="flex size-4 shrink-0 items-center justify-center">
+      {share.favicon && !broken ? (
+        <img
+          src={`/api/shares/${share.id}/favicon`}
+          alt=""
+          width={16}
+          height={16}
+          className="size-4"
+          onError={() => setBroken(true)}
+        />
+      ) : (
+        <span
+          className={cn(
+            "size-3 border border-muted-foreground",
+            share.state === "live" && "bg-muted-foreground",
+          )}
+        />
+      )}
+    </span>
+  );
+}
+
+function PipePill({ share, onPress }: { share: Share; onPress: () => void }) {
+  return (
+    <Button
+      intent="outline"
+      data-pipe={share.id}
+      aria-expanded={false}
+      onPress={onPress}
+      className="max-w-64"
+    >
+      <Mark share={share} />
+      <span className="truncate">{name(share, true)}</span>
+      <span className="text-muted-foreground tabular-nums">:{share.port}</span>
+    </Button>
+  );
+}
+
+/** Viewers named in a card; the rest are counted. */
+const VIEWS_SHOWN = 3;
+
+function PipeCard({ share }: { share: Share }) {
+  // Focus moves to the card on opening, so Escape and Tab start from it.
+  const card = useRef<HTMLElement>(null);
+  useEffect(() => card.current?.focus({ preventScroll: true }), []);
   const now = useNow();
   const terminate = useTerminate();
-  const host = new URL(share.url).host;
-  const details = [
-    `:${share.port}`,
-    share.startedBy,
-    ago(share.startedAt, now),
-    share.lastRequestAt ? `last request ${ago(share.lastRequestAt, now)}` : "no requests yet",
-    share.state === "away" ? "reconnecting" : null,
-  ].filter(Boolean);
-  // Who opened it, most recent first: "Ana, 2 min ago · Bo, 1 h ago · +3".
   const shown = share.views.slice(0, VIEWS_SHOWN);
   const views = [
     ...shown.map((view) => `${view.name}, ${ago(view.lastSeenAt, now)}`),
     share.views.length > shown.length ? `+${share.views.length - shown.length}` : null,
   ].filter(Boolean);
+  const rows: [string, string][] = [
+    ["Port", String(share.port)],
+    ["Status", share.state === "live" ? "Live" : "Reconnecting"],
+    ["Started by", share.startedBy ?? "Unknown"],
+    ["Started", ago(share.startedAt, now) ?? ""],
+    ["Last request", ago(share.lastRequestAt, now) ?? "None yet"],
+    ["Viewers", views.length > 0 ? views.join(" · ") : "None yet"],
+  ];
 
   return (
-    // Same size everywhere: a fixed height, the title clamped to two lines.
-    <li className="relative flex h-40 flex-col justify-between rounded-xl border border-border bg-background p-5">
-      <div className="flex items-start gap-3 pe-20">
-        {share.favicon ? (
-          <img
-            src={`/api/shares/${share.id}/favicon`}
-            alt=""
-            width={16}
-            height={16}
-            className="mt-0.5 size-4 shrink-0"
-          />
-        ) : (
-          <span aria-hidden className="mt-0.5 size-4 shrink-0 rounded-sm bg-accent" />
-        )}
-        {/* The whole card opens the share: this link's hit area covers it. */}
-        <Link
-          href={share.url}
-          target="_blank"
-          rel="noopener"
-          className="line-clamp-2 text-sm text-foreground after:absolute after:inset-0 after:rounded-xl"
+    <section
+      ref={card}
+      tabIndex={-1}
+      data-open
+      aria-label={name(share)}
+      className="flex w-[min(22rem,calc(100vw-2rem))] animate-in outline-0 flex-col gap-4 border border-primary bg-background p-4 duration-200 ease-out fade-in zoom-in-95 motion-reduce:animate-none"
+    >
+      <div className="flex items-start gap-3">
+        <span className="flex h-4 shrink-0 items-center">
+          <Mark share={share} />
+        </span>
+        <span className="line-clamp-2 min-w-0 flex-1 text-sm text-foreground">{name(share)}</span>
+      </div>
+      <CopyField label="URL" value={share.url} />
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
+        {rows.map(([term, value]) => (
+          <Fragment key={term}>
+            <dt className="text-muted-foreground">{term}</dt>
+            <dd className="min-w-0 truncate text-foreground tabular-nums">{value}</dd>
+          </Fragment>
+        ))}
+      </dl>
+      <div className="flex justify-between gap-2">
+        <Button
+          intent="outline"
+          size="xs"
+          onPress={() => window.open(share.url, "_blank", "noopener")}
         >
-          {share.title ?? host}
-        </Link>
-      </div>
-      <div className="flex flex-col gap-1">
-        {views.length > 0 && (
-          <Text className="truncate text-xs text-foreground tabular-nums">{views.join(" · ")}</Text>
-        )}
-        <Text className="line-clamp-2 text-xs text-muted-foreground tabular-nums">
-          {details.join(" · ")}
-        </Text>
-      </div>
-      <div className="absolute end-4 top-4">
-        {/* xs, not sm: Intent UI's sm grows to a 36px touch target, larger than md. */}
+          <IconExternalLink />
+          Open
+        </Button>
         <Button
           intent="danger"
           size="xs"
@@ -209,7 +462,7 @@ function ShareCard({ share }: { share: Share }) {
           Terminate
         </Button>
       </div>
-    </li>
+    </section>
   );
 }
 
@@ -217,7 +470,7 @@ function ShareCard({ share }: { share: Share }) {
 function NeedsPlan({ owner }: { owner: boolean }) {
   const billing = useOpenBilling();
   return (
-    <div className="mb-8 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border p-5">
+    <div className="mx-auto mt-4 flex max-w-xl flex-wrap items-center justify-between gap-3 border border-border p-5">
       <Text>
         {owner
           ? "Subscribe to open pipes from your agents."
@@ -228,15 +481,6 @@ function NeedsPlan({ owner }: { owner: boolean }) {
           Subscribe
         </Button>
       )}
-    </div>
-  );
-}
-
-function Empty() {
-  return (
-    <div className="mx-auto flex max-w-md flex-col gap-3 pt-16 text-center">
-      <Text>No open pipes. From a dev server's machine, run:</Text>
-      <CopyField label="Run" value="npx wurmhol <port>" />
     </div>
   );
 }
