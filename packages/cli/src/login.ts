@@ -1,6 +1,8 @@
 // `wurmhol login`: the device-code flow (ADR 0008, RFC 8628). The CLI asks its server for a code,
 // the human approves it in the console on any device, and the CLI polls until it gets an org
 // token. Both calls go to the host the CLI already dials, through HTTPS_PROXY like the pipe.
+// `wurmhol host --code` skips the approval: Create pipe hands it a code already approved by the
+// signed-in member (ADR 0020), redeemed once on the same token endpoint.
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { HttpsProxyAgent } from "https-proxy-agent";
@@ -122,4 +124,38 @@ export async function login(options: LoginOptions): Promise<Granted> {
     throw explainRefusal(polled.status, polled.body, { server, viaProxy: polled.viaProxy });
   }
   throw new FixError("The code expired before anyone approved it. Run wurmhol login again.");
+}
+
+export interface RedeemOptions {
+  server: string;
+  /** The setup code from Create pipe's command. */
+  code: string;
+  /** The computer's name: the token is named after it. */
+  name: string;
+  version: string;
+}
+
+/** What the CLI says when a setup code cannot be redeemed: get a fresh one. */
+const STALE_CODE =
+  "This setup code was already used or has expired. Copy the command again from Create pipe.";
+
+/** Redeems a setup code: the granted token, or a FixError that says what to do. */
+export async function redeem(options: RedeemOptions): Promise<Granted> {
+  const { server, version } = options;
+  const answer = await postJson(
+    server,
+    "/device/token",
+    { device_code: options.code, name: options.name },
+    version,
+  );
+  if (answer.status === 200) {
+    const granted = parse<Granted>(answer);
+    if (granted?.token) return granted;
+  }
+  const refused = parse<{ error?: string; fix?: string }>(answer);
+  if (refused?.error === "invalid_grant" || refused?.error === "expired_token") {
+    throw new FixError(STALE_CODE, { final: true, reason: refused.error });
+  }
+  if (refused?.fix) throw new FixError(refused.fix, { final: true, reason: refused.error });
+  throw explainRefusal(answer.status, answer.body, { server, viaProxy: answer.viaProxy });
 }

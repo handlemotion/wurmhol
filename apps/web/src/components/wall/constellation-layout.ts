@@ -5,8 +5,8 @@
  * The anchor (the copy-the-command field) is the hub. Pipes sit on an ellipse around it, each
  * nudged off its even slot by a jitter hashed from its id, so the ring reads as a drawn network
  * rather than a clock face and a pipe keeps its look across renders. An open card opens where its
- * pill stands, growing away from the anchor (`grow`); only the pills it would cover step aside,
- * and the frame loop's camera pans to it. When the ring won't fit the width (a phone), the pipes stand in a column above and below the hub instead,
+ * pill stands, growing away from the anchor (`grow`); the network leans away from it (`shove`),
+ * the pills it would cover step aside, and the frame loop's camera pans to it. When the ring won't fit the width (a phone), the pipes stand in a column above and below the hub instead,
  * arranged so no spoke passes behind another node (`column`). A last pass pushes apart anything
  * that still overlaps and keeps every node inside the width.
  */
@@ -30,6 +30,11 @@ const MIN_RX = 260;
 const MIN_RY = 150;
 /** Clear space between an open card and the pills it pushes aside. */
 const CLEAR = GAP * 2;
+/** How far an open card shoves the network, as a share of its larger side, falling off with
+ * distance: the pills beside it gather round it, the far ones lean away a little. */
+const SHOVE = 0.35;
+/** How freely the anchor gives way to an open pipe's card, against a pill's 1. */
+const ANCHOR_GIVE = 0.3;
 
 /** A stable number in [-1, 1) from a string (FNV-1a), for per-pipe jitter. */
 export function hash(id: string, salt = 0) {
@@ -111,8 +116,10 @@ export function layout(input: {
   const slot = open ? at.get(open.id) : undefined;
   if (open && slot) {
     const d = grow(open.id, slot, at.get(ANCHOR)!, sizes.get(open.id)!, open.size);
-    at.set(open.id, { x: slot.x + d.x, y: slot.y + d.y });
+    const centre = { x: slot.x + d.x, y: slot.y + d.y };
+    at.set(open.id, centre);
     sizes.set(open.id, open.size);
+    shove(at, open.id, centre, Math.max(open.size.w, open.size.h));
   }
   relax(at, sizes, width, open && slot ? open.id : null);
 
@@ -240,14 +247,35 @@ function crosses(a: Point, b: Point, centre: Point, size: Size, spare = 4) {
   return lo < hi;
 }
 
-/** Push overlapping nodes apart along the shallower axis; the anchor and an open card hold still. */
+/**
+ * Every node but the open card leans away from it, most the nearest: a soft push, so the network
+ * answers the card as a whole rather than only where it overlaps. The anchor gives way less.
+ */
+function shove(at: Map<string, Point>, open: string, centre: Point, reach: number) {
+  for (const [id, p] of at) {
+    if (id === open) continue;
+    const dx = p.x - centre.x;
+    const dy = p.y - centre.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist === 0) continue;
+    const push = SHOVE * reach * Math.exp(-dist / reach) * (id === ANCHOR ? ANCHOR_GIVE : 1);
+    p.x += (dx / dist) * push;
+    p.y += (dy / dist) * push;
+  }
+}
+
+/**
+ * Push overlapping nodes apart along the shallower axis. An open card holds still; the anchor
+ * holds still at rest and gives way a little to an open pipe's card.
+ */
 function relax(
   at: Map<string, Point>,
   sizes: Map<string, Size>,
   width: number,
   open: string | null,
 ) {
-  const fixed = (id: string) => id === ANCHOR || id === open;
+  const give = (id: string) => (id === open ? 0 : id === ANCHOR ? (open ? ANCHOR_GIVE : 0) : 1);
+  const fixed = (id: string) => give(id) === 0;
   const ids = [...at.keys()];
   const clampX = (id: string) => {
     const p = at.get(id)!;
@@ -272,7 +300,8 @@ function relax(
         moved = true;
         // Sideways only when there is room for it: on a narrow screen, stack instead.
         const sideways = ox < oy && width / 2 - GAP > Math.max(sa.w, sb.w);
-        const [ma, mb] = fixed(a) ? [0, 1] : fixed(b) ? [1, 0] : [0.5, 0.5];
+        const ma = give(a) / (give(a) + give(b));
+        const mb = 1 - ma;
         if (sideways) {
           const d = ox * (dx < 0 ? -1 : 1);
           pa.x -= d * ma;

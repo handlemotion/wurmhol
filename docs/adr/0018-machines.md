@@ -1,7 +1,8 @@
 # 0018: Open pipes from the browser, through `wurmhol host`
 
-Status: accepted. Extends spec v1 section 3 (Create pipe) and section 7 (the CLI). Departs from
-section 3's "the wall only lists pipes": the wall can now start one, on a computer that asks it to.
+Status: accepted; the card's approval step is replaced by ADR 0020. Extends spec v1 section 3
+(Create pipe) and section 7 (the CLI). Departs from section 3's "the wall only lists pipes": the
+wall can now start one, on a computer that asks it to.
 
 ## Context
 
@@ -19,7 +20,12 @@ cannot relay them. Something has to run on the computer.
   authenticated by a bearer token like `/connect`. With no token it runs `wurmhol login` first.
 - **It reports web ports.** Every 3 s it reads the listening TCP ports (Linux `/proc/net/tcp{,6}`,
   `lsof` on macOS, `netstat` on Windows), from 1024 up. It asks each new one for `/` once and
-  offers it only if it answers HTTP, with its page's `<title>`. At most 64.
+  offers it, with its page's `<title>`, when it answers 2xx or 3xx, or 404 (an API with no root
+  route) from anything but a DevTools debugger: one whose `/json/version` has a
+  `Protocol-Version`, as Node's, Chrome's, workerd's and wrangler's inspectors do. Other errors
+  are what debuggers, proxies and keyed helpers answer, so those ports are left out. JSON APIs
+  stay: sharing one is a real use. `WURMHOL_HOST_IGNORE` (`9229,5555`) names ports never to
+  offer, and the CLI's own server is left out when `WURMHOL_URL` is local. At most 64.
 - **The Org object holds the sockets** (hibernation API), each tagged with its owner: the user
   who made the token. Nothing is stored; a machine is gone when its socket closes.
 - **Only its owner sees and uses a machine.** The Create pipe card watches
