@@ -7,7 +7,8 @@ name: Production
 # 2. Waits for this commit's Workers Builds check, then syncs Doppler prd_worker to the Worker's
 #    secrets with `wrangler secret bulk` (which deploys a new version of the latest one: waiting
 #    keeps it from putting the old code back).
-# 3. Publishes packages/cli to npm when its version is not on npm yet, with provenance.
+# 3. Publishes packages/cli to npm when its version is not on npm yet, through npm trusted
+#    publishing (OIDC): no npm token exists. npm links the package to this workflow file.
 #
 # prd_github arrives as secrets of the GitHub environment `production` (Doppler's GitHub sync).
 on:
@@ -101,7 +102,7 @@ jobs:
     environment: production
     permissions:
       contents: read
-      # npm provenance: a signed statement that this workflow built the package.
+      # npm trusted publishing: the OIDC token is the credential, and npm attaches provenance.
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -114,13 +115,10 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-          registry-url: https://registry.npmjs.org
 
       - run: pnpm install --frozen-lockfile --filter wurmhol...
 
       - name: Publish when the version is new
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         working-directory: packages/cli
         run: |
           version="$(node -p 'require("./package.json").version')"
@@ -128,5 +126,7 @@ jobs:
             echo "wurmhol@$version is already on npm"
             exit 0
           fi
+          # Trusted publishing needs npm 11.5.1 or later.
+          npm --version
           pnpm build
-          npm publish --provenance --access public
+          npm publish --access public
