@@ -1,6 +1,7 @@
 // A dev server bound only to ::1, as Vite is on its default `localhost` with Node 17+ on macOS:
-// the pipe and `wurmhol host` reach it with no --host, on a machine with an IPv6 loopback.
-import { spawn } from "node:child_process";
+// a pipe reaches it with no --host, on a machine with an IPv6 loopback. `wurmhol host` offering
+// such a port is in machines.e2e.test.ts, beside the one host that suite already runs: every
+// `wurmhol host` probes every dev server on the machine, other suites' included.
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -12,7 +13,6 @@ import {
   browserSocket,
   cli,
   cliEnv,
-  cliPath,
   createToken,
   type Person,
   share,
@@ -90,34 +90,4 @@ it("a pipe serves a dev server listening only on ::1, hot reload included", asyn
   await waitFor(() => messages.some((m) => m.type === "connected"), { what: "vite connected" });
   socket.close();
   await cli(["stop", String(port)], env);
-});
-
-it("wurmhol host offers a port that answers only on ::1", async () => {
-  const host = spawn(process.execPath, [cliPath, "host"], {
-    env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  try {
-    const feed = browserSocket(`${stack.url}/api/machines/live`, [], {
-      cookie: ada.cookie,
-      origin: stack.url,
-    });
-    let ports: { port: number; title: string | null }[] = [];
-    feed.on("message", (data) => {
-      const event = JSON.parse(String(data)) as {
-        type: string;
-        machines: { ports: typeof ports }[];
-      };
-      if (event.type === "machines") ports = event.machines.flatMap((m) => m.ports);
-    });
-    // Catches: the probe asking only 127.0.0.1, so the port never shows in Create pipe.
-    const offered = await waitFor(() => ports.find((p) => p.port === port), {
-      timeoutMs: 15_000,
-      what: `port ${port} offered`,
-    });
-    expect(offered.title).toBe("IPv6 app");
-    feed.close();
-  } finally {
-    host.kill();
-  }
 });
