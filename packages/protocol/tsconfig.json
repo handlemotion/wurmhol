@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": ".tsbuild",
+    "lib": ["es2024", "dom"],
+    "types": [],
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src"]
+}
