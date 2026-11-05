@@ -1,7 +1,12 @@
 // Named pipes (ADR 0009): `wurmhol <port> --name <name>` opens `<name>.<SHARE_DOMAIN>`, the same
-// host every time, held by the first org to use the name, one open pipe per name.
+// host every time, held by the first org to use the name, one open pipe per name. A pipe away
+// or stale gives its name to the next one (ADR 0025).
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import {
+  alive,
+  api,
   browserFetch,
   cli,
   cliEnv,
@@ -13,6 +18,7 @@ import {
   startStack,
   stopAll,
   viewerCookie,
+  waitFor,
 } from "./support.ts";
 
 let stack: Stack;
@@ -95,5 +101,67 @@ it("a name stays with its org, and one pipe at a time holds it", async () => {
   await stopAll(adaEnv);
   expect((await cli([String(local.port), "--name", "claimed"], beaEnv)).code).toBe(1);
 
+  await local.close();
+});
+
+it("re-running a crashed pipe's name takes it back at the same URL; another token waits until it is away", async () => {
+  const local = await localServer((_req, res) => res.end("back"));
+  const token = (await createToken(stack, ada)).token;
+  const env = cliEnv(stack, token);
+  const pidOf = (id: string) =>
+    (
+      JSON.parse(readFileSync(join(env.WURMHOL_HOME!, "shares", `${id}.json`), "utf8")) as {
+        pid: number;
+      }
+    ).pid;
+  const endReasons = () => {
+    const db = stack.db();
+    try {
+      return (
+        db
+          .prepare("select end_reason from shares where name = ? order by started_at")
+          .all("crashy") as { end_reason: string | null }[]
+      ).map((row) => row.end_reason);
+    } finally {
+      db.close();
+    }
+  };
+
+  // A killed CLI leaves its pipe away, not stopped; the agent runs the same command again, with
+  // the same token.
+  const first = await openNamed(env, local.port, "crashy");
+  const pid = pidOf(first.id);
+  process.kill(pid, "SIGKILL");
+  await waitFor(() => !alive(pid), { what: "the CLI to die" });
+  // Catches: 409 "name open" until the old pipe's grace runs out, 15 minutes later.
+  const second = await openNamed(env, local.port, "crashy");
+  expect(second.url).toBe(first.url);
+  expect(second.id).not.toBe(first.id);
+  const cookie = await viewerCookie(stack, ada, second.url);
+  expect(await (await browserFetch(`${second.url}/`, { cookie })).text()).toBe("back");
+  expect(endReasons()).toEqual(["stopped", null]);
+  const { body } = await api<{ shares: { id: string }[] }>(stack, ada, "/api/shares");
+  expect(body.shares.map((s) => s.id)).not.toContain(first.id);
+
+  // Another of the org's tokens takes the name once its pipe is away, not while it is live.
+  const other = cliEnv(stack, (await createToken(stack, ada)).token);
+  const secondPid = pidOf(second.id);
+  process.kill(secondPid, "SIGKILL");
+  await waitFor(
+    async () => {
+      const { body: wall } = await api<{ shares: { id: string; state: string }[] }>(
+        stack,
+        ada,
+        "/api/shares",
+      );
+      return wall.shares.find((s) => s.id === second.id)?.state === "away";
+    },
+    { what: "the killed pipe away" },
+  );
+  const third = await openNamed(other, local.port, "crashy");
+  expect(third.url).toBe(first.url);
+  expect(endReasons()).toEqual(["stopped", "stopped", null]);
+
+  await stopAll(other);
   await local.close();
 });

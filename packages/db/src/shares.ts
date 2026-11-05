@@ -25,7 +25,9 @@ export async function recordShareStart(
     source?: PipeSource | null;
   },
 ): Promise<
-  { ok: true; id: string; startedAt: Date } | { ok: false; reason: "taken" | "open"; port?: number }
+  | { ok: true; id: string; startedAt: Date }
+  | { ok: false; reason: "taken" }
+  | { ok: false; reason: "open"; open: { id: string; tokenId: string | null; port: number } }
 > {
   const name = input.name ?? null;
   const { source, ...share } = input;
@@ -59,7 +61,7 @@ export async function recordShareStart(
     if (inserted[0]) return { ok: true, ...inserted[0] };
     // The other conflict a named share can hit: its name's open pipe.
     const open = name ? await findOpenShareByName(db, name) : null;
-    if (open) return { ok: false, reason: "open", port: open.port };
+    if (open) return { ok: false, reason: "open", open };
   }
   throw new Error("could not draw an unused share id");
 }
@@ -67,7 +69,7 @@ export async function recordShareStart(
 /** The open share a name points at, or null. */
 export async function findOpenShareByName(db: Db, name: string) {
   const [row] = await db
-    .select({ id: shares.id, port: shares.port })
+    .select({ id: shares.id, tokenId: shares.tokenId, port: shares.port })
     .from(shares)
     .where(and(eq(shares.name, name), isNull(shares.endedAt)))
     .limit(1);

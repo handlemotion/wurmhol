@@ -8,7 +8,8 @@
 //
 // A `name` query parameter opens a named pipe (ADR 0009) at `<name>.<SHARE_DOMAIN>`: the same
 // host every time, held by the first org to use the name, one open pipe per name. The OAuth
-// relay's label (ADR 0010) is no pipe's name.
+// relay's label (ADR 0010) is no pipe's name. Asking for a name the org's open pipe holds takes it
+// over when that pipe is away or stale, or when the same token started it (ADR 0025).
 //
 // `Wurmhol-Source` says where a new pipe came from (ADR 0015): URI-encoded JSON of
 // `@wurmhol/protocol`'s `PipeSource`, every field optional and bounded. It goes on the share's
@@ -33,6 +34,7 @@ import {
   orgStanding,
   recordShareEnd,
   recordShareStart,
+  type Db,
 } from "@wurmhol/db";
 import { Hono } from "hono";
 import { bearerToken, refuse } from "../bearer.ts";
@@ -56,6 +58,30 @@ function readSource(header: string | undefined): SourceResult {
   } catch {
     return { ok: false, field: "note", fix: "The pipe's source is not URI-encoded JSON." };
   }
+}
+
+/**
+ * Ends the org's open pipe named as a new one asks, so the new one can have the name and its URL
+ * (ADR 0025): when its CLI is away, when its object already ended or never started (a row left
+ * open), or when the same token started it (the same agent, run again after a crash). A live pipe
+ * of another token keeps its name. True when the name is free to take again.
+ */
+async function takeOver(
+  env: Env,
+  db: Db,
+  token: { id: string; orgId: string },
+  open: { id: string; tokenId: string | null },
+) {
+  const stub = shareStub(env, open.id);
+  const { state } = await stub.status();
+  if (state === "live" && open.tokenId !== token.id) return false;
+  if (state === "live" || state === "away") {
+    await stub.terminate("stopped");
+  } else {
+    await recordShareEnd(db, { id: open.id, reason: "disconnected", bytes: 0 });
+    await orgStub(env, token.orgId).remove(open.id);
+  }
+  return true;
 }
 
 export const connect = new Hono<AppEnv>().get("/", async (c) => {
@@ -138,21 +164,31 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
     viewers = found.members.map((member) => member.userId);
   }
 
-  const started = await recordShareStart(db, {
-    orgId: token.orgId,
-    tokenId: token.id,
-    startedBy: token.createdBy,
-    port,
-    name,
-    source: source.source,
-  });
+  const record = () =>
+    recordShareStart(db, {
+      orgId: token.orgId,
+      tokenId: token.id,
+      startedBy: token.createdBy,
+      port,
+      name,
+      source: source.source,
+    });
+  let started = await record();
+  if (
+    !started.ok &&
+    started.reason === "open" &&
+    (await takeOver(c.env, db, token, started.open))
+  ) {
+    c.var.log.info("share.name_taken_over", { shareId: started.open.id, orgId: token.orgId });
+    started = await record();
+  }
   if (!started.ok) {
     return started.reason === "taken"
       ? refuse(409, "name taken", `Another org has the pipe name ${name}. Pick another --name.`)
       : refuse(
           409,
           "name open",
-          `The org already has a pipe named ${name} open on port ${started.port}. End it first: wurmhol stop ${name}, or terminate it on ${config.auth.baseURL}.`,
+          `The org already has a pipe named ${name} open on port ${started.open.port}. End it first: wurmhol stop ${name}, or terminate it on ${config.auth.baseURL}.`,
         );
   }
   const starter = token.createdBy
