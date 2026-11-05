@@ -1,0 +1,13 @@
+// The one Wurmhol Worker. Every value here is a neutral default; self-hosters change names and
+// ids in this file and set secrets with `wrangler secret put` (see docs/self-hosting.md).
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "wurmhol",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-03",
+  "compatibility_flags": ["nodejs_compat"],
+  // Production vars and secrets set in the dashboard or by CI survive deploys.
+  "keep_vars": true,
+  "observability": { "enabled": true },
+  "upload_source_maps": true,
+}
