@@ -272,7 +272,12 @@ export async function createToken(
   name = "e2e",
   options: { scope?: "pipes" | "org"; expiresInDays?: 30 | 90 | null } = {},
 ) {
-  const { status, body } = await api<{ id: string; token: string }>(stack, person, "/api/tokens", {
+  const { status, body } = await api<{
+    id: string;
+    token: string;
+    host: string;
+    url: string | null;
+  }>(stack, person, "/api/tokens", {
     method: "POST",
     body: { name, ...options },
   });

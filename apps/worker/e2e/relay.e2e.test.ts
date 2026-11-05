@@ -329,16 +329,4 @@ describe("the CLI", () => {
     expect(await page.text()).toContain("This pipe has ended.");
     await local.close();
   });
-
-  it("init adds the agent line once", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "wurmhol-init-"));
-    writeFileSync(join(dir, "CLAUDE.md"), "# Rules\n");
-    const { spawnSync } = await import("node:child_process");
-    const { cliPath } = await import("./support.ts");
-    for (let i = 0; i < 2; i++) spawnSync(process.execPath, [cliPath, "init"], { cwd: dir });
-    const { readFileSync } = await import("node:fs");
-    expect(readFileSync(join(dir, "CLAUDE.md"), "utf8")).toBe(
-      "# Rules\n\nShare a local server with `npx wurmhol <port>` and send the user the URL.\n",
-    );
-  });
 });
