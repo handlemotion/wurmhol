@@ -8,6 +8,7 @@ import { limitAuth } from "./rate-limiter.ts";
 import { account, api } from "./routes/api.ts";
 import { connect } from "./routes/connect.ts";
 import { open } from "./routes/open.ts";
+import { pipes } from "./routes/pipes.ts";
 import { securityHeaders } from "./security-headers.ts";
 
 /**
@@ -38,12 +39,15 @@ const trace = createMiddleware<AppEnv>(async (c, next) => {
   }
 });
 
-/** wurmhol.com: the app, its API and `/connect`. Share hosts never reach this (index.ts). */
+/** The app, its API, `/connect` and `/v1`. Share hosts never reach this (index.ts). */
 export const app = new Hono<AppEnv>()
   .use(trace)
   .get("/health", (c) => c.json({ ok: true }))
   .use("/connect", requestScope)
   .route("/connect", connect)
+  .use("/v1/*", requestScope, securityHeaders)
+  .route("/v1/pipes", pipes)
+  .all("/v1/*", (c) => c.json({ error: "not found" }, 404))
   .use("/open", requestScope, securityHeaders)
   .route("/open", open)
   .use("/api/*", requestScope, securityHeaders)
