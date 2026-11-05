@@ -6,15 +6,22 @@ description: "Share a dev server in a couple of minutes."
 <Steps>
   <Step title="Get a token">
     Sign in at [dirt.wurmhol.com](https://dirt.wurmhol.com), subscribe your org and create a token under Tokens. On your own computer you can skip that part, `npx wurmhol login` prints a code, you approve it in the browser and it saves the token for you.
+
+    Anywhere else, put the token in the environment.
+
+    ```bash
+    export WURMHOL_TOKEN=wh_…
+    ```
+
   </Step>
   <Step title="Open a pipe">
     ```bash
-    WURMHOL_TOKEN=wh_… npx wurmhol 8787
+    npx wurmhol 8787
     ```
 
     It prints the pipe's link and returns, so the agent can keep working. The link is new every time unless you [give the pipe a name](/pipes#a-url-that-stays). The wall's Create pipe button copies this command for you, or a prompt to paste to your agent.
 
-    <img src="/images/create-light.webp" alt="The Create pipe card on the wall, with Copy agent prompt, Copy npx command and Copy setup for this computer" width="1680" height="1050" />
+    <img className="shot" src="/images/create-light.webp" alt="The Create pipe card on the wall, with Copy agent prompt, Copy npx command and Copy setup for this computer" width="1680" height="1050" />
 
   </Step>
   <Step title="Open the link">

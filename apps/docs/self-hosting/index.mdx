@@ -41,8 +41,11 @@ Database migrations need nothing from you, the deploy command applies new ones o
 
 ## Point the CLI at it
 
+Set `WURMHOL_URL` to the host the CLI talks to, next to a token from your dirt.
+
 ```bash
-WURMHOL_URL=https://api.example.com WURMHOL_TOKEN=wh_… npx wurmhol 8787
+export WURMHOL_URL=https://api.example.com
+export WURMHOL_TOKEN=wh_…
 ```
 
-Or `WURMHOL_URL=https://api.example.com npx wurmhol login`, which prints a code to approve at `https://dirt.example.com/device`. In a sandbox, allowlist `api.example.com`, the only host the CLI talks to. Your dirt's Tokens dialog shows all three values after you create a token.
+From there it works like wurmhol.com, `npx wurmhol 8787` opens a pipe. On your own computer you can skip the token, with `WURMHOL_URL` set `npx wurmhol login` prints a code to approve at `https://dirt.example.com/device`. In a sandbox, allowlist `api.example.com`, the only host the CLI talks to. Your dirt's Tokens dialog shows all three values after you create a token.

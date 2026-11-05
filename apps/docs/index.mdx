@@ -7,8 +7,9 @@ Wurmhol gives your coding agent's dev server a private HTTPS link that you open 
 
 ```bash
 npx wurmhol 8787
-# https://k3x9p2m7qa.wurmhol.dev
 ```
+
+It prints a link like `https://k3x9p2m7qa.wurmhol.dev` and returns.
 
 ## Why it exists
 
@@ -17,6 +18,7 @@ Everyone is building agent orchestrators and cloud sandboxes right now, and most
 Wurmhol needs one outbound WebSocket on 443, the one thing every sandbox allows, and it goes through the proxy like any other request.
 
 <img
+  className="shot"
   src="/images/wall-dark.webp"
   alt="The wall, four open pipes with their titles and ports around the Create pipe button"
   width="2280"
