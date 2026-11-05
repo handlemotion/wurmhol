@@ -5,13 +5,13 @@ Status: accepted. Departs from spec v1 section 5 ("Domains"), which serves the a
 
 ## Decision
 
-| Host                 | Serves                                                     | Runs on                           |
-| -------------------- | ---------------------------------------------------------- | --------------------------------- |
-| `wurmhol.com`        | The marketing site                                         | `apps/site` (its own Worker)      |
-| `dirt.wurmhol.com`   | The console: sign-in, the pipes wall, its API, `/open`     | `apps/worker` (`BETTER_AUTH_URL`) |
-| `app.wurmhol.com`    | A 301 to the same path on `dirt.wurmhol.com`               | `apps/worker` (`APP_ALIASES`)     |
-| `api.wurmhol.com`    | What the CLI dials: `/connect` and `/health`, nothing else | `apps/worker` (`CONNECT_HOST`)    |
-| `*.pipe.wurmhol.com` | Pipes (ADR 0003)                                           | `apps/worker` (`SHARE_DOMAIN`)    |
+| Host               | Serves                                                     | Runs on                           |
+| ------------------ | ---------------------------------------------------------- | --------------------------------- |
+| `wurmhol.com`      | The marketing site                                         | `apps/site` (its own Worker)      |
+| `dirt.wurmhol.com` | The console: sign-in, the pipes wall, its API, `/open`     | `apps/worker` (`BETTER_AUTH_URL`) |
+| `app.wurmhol.com`  | A 301 to the same path on `dirt.wurmhol.com`               | `apps/worker` (`APP_ALIASES`)     |
+| `api.wurmhol.com`  | What the CLI dials: `/connect` and `/health`, nothing else | `apps/worker` (`CONNECT_HOST`)    |
+| `*.wurmhol.dev`    | Pipes (ADR 0003, ADR 0007)                                 | `apps/worker` (`SHARE_DOMAIN`)    |
 
 - **dirt**: worms live in it. `app` stays as the obvious name people type, and redirects.
 - **The console's API stays on the console's host.** Its session cookies are `__Host-` cookies

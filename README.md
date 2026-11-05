@@ -5,7 +5,7 @@ A private HTTPS URL for a coding agent's dev server, from inside sandboxed cloud
 
 ```bash
 npx wurmhol 8787
-# https://k3x9p2.pipe.wurmhol.com
+# https://k3x9p2m7qa.wurmhol.dev
 ```
 
 The URL (a pipe) opens only for signed-in members of the org that owns the token, on any device. The CLI

@@ -264,7 +264,7 @@ describe("headers", () => {
     // server, which desyncs its parser or leaks a header meant for one hop.
     expect(
       forwardable([
-        ["Host", "abc.pipe.wurmhol.com"],
+        ["Host", "abcdefghij.wurmhol.dev"],
         ["Connection", "keep-alive, X-Hop"],
         ["x-hop", "1"],
         ["Transfer-Encoding", "chunked"],

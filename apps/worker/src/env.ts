@@ -49,11 +49,11 @@ const configSchema = z
   .object({
     /**
      * The domain under which shares live: a share is `<id>.<SHARE_DOMAIN>`, on the same scheme
-     * and port as BETTER_AUTH_URL. `pipe.wurmhol.com` in production, `pipe.localhost` locally.
+     * and port as BETTER_AUTH_URL. `wurmhol.dev` in production, `pipe.localhost` locally.
      */
     SHARE_DOMAIN: z
       .string()
-      .regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, "use a lowercase domain like pipe.example.com"),
+      .regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, "use a lowercase domain like example-pipes.dev"),
     /**
      * The host the CLI dials (ADR 0006), e.g. `api.wurmhol.com`: it answers `/connect` and
      * `/health` only. Empty: the CLI dials the app's own host (BETTER_AUTH_URL).
@@ -140,7 +140,7 @@ export function loadConfig(env: Env): Config {
   return config;
 }
 
-/** The public origin of share `id`: `https://<id>.pipe.wurmhol.com`. */
+/** The public origin of share `id`: `https://<id>.wurmhol.dev`. */
 export function shareOrigin(config: Config, id: string) {
   const app = new URL(config.auth.baseURL);
   return `${app.protocol}//${id}.${config.SHARE_DOMAIN}${app.port ? `:${app.port}` : ""}`;

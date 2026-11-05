@@ -1,4 +1,4 @@
-// Requests to a share host, `<id>.pipe.wurmhol.com` (spec section 6). Every one needs the viewer's
+// Requests to a share host, `<id>.wurmhol.dev` (spec section 6). Every one needs the viewer's
 // `__Host-wurmhol` cookie for this share; without it a page navigation goes to the app to sign
 // in (`/open`), and comes back with a one-time code that this swaps for the cookie. The cookie
 // is stripped before anything reaches the dev server.

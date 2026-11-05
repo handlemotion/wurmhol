@@ -29,7 +29,7 @@ import { TokensDialog } from "./tokens-dialog";
 
 const SAMPLE: Share[] = [1, 2, 3].map((n) => ({
   id: `sample${n}`,
-  url: "https://sample.pipe.wurmhol.com",
+  url: "https://sample.wurmhol.dev",
   port: 5173,
   startedBy: "Someone",
   startedAt: 0,

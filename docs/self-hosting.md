@@ -4,24 +4,29 @@ One Cloudflare account, two hostnames, `wrangler deploy`. No other service is re
 the data, Durable Objects hold the shares, and billing stays off unless you set Stripe keys.
 
 Below, `dirt.example.com` is the console (the app: sign-in, the wall, its API), `api.example.com`
-the host the CLI dials, and `pipe.example.com` the domain your pipes live under (ADR 0006). One
-host for everything also works: leave `CONNECT_HOST` and `APP_ALIASES` empty.
+the host the CLI dials (ADR 0006), and `example-pipes.dev` a second domain your pipes live under
+(ADR 0007). One host for the app also works: leave `CONNECT_HOST` and `APP_ALIASES` empty.
 
 ## 1. Domains and TLS
 
 - The console: `dirt.example.com`, a custom domain on the Worker (`BETTER_AUTH_URL`). Optional
   aliases that redirect to it (`APP_ALIASES`, e.g. `app.example.com`) are custom domains too.
 - The CLI's host: `api.example.com`, a custom domain on the Worker (`CONNECT_HOST`).
-- Shares: `<id>.pipe.example.com`. A two-level wildcard needs a certificate that covers
-  `*.pipe.example.com`: in Cloudflare that is **Advanced Certificate Manager** (or a second zone
-  whose apex wildcard covers shares, e.g. `*.example-shares.dev`; spec open question 2).
-  - DNS: a proxied wildcard record `*.pipe` (an `AAAA` to `100::` is enough; the Worker route
-    answers).
-  - Route: `*.pipe.example.com/*` → the Worker.
-- **Public Suffix List.** Submit `pipe.example.com` to the [PSL](https://github.com/publicsuffix/list)
-  so browsers treat every share as its own site: one share's JavaScript then cannot read or set
-  cookies for another share or for the app. Wurmhol's cookies are `__Host-` cookies either way,
-  but the PSL entry is what isolates shares from each other.
+- Pipes: `<id>.example-pipes.dev`, on a domain of their own, added as a second zone in the same
+  Cloudflare account. The zone's free Universal SSL certificate covers `*.example-pipes.dev`, and
+  every pipe is a different site from the console.
+  - DNS: a proxied wildcard record `*` (an `AAAA` to `100::` is enough; the Worker route
+    answers). The apex needs no record.
+  - Route: `*.example-pipes.dev/*` → the Worker.
+- Alternative, one domain: pipes at `<id>.pipe.example.com`. That is a two-level wildcard, which
+  the free certificate does not cover: in Cloudflare it needs **Advanced Certificate Manager**
+  (paid) for `*.pipe.example.com`, a proxied `*.pipe` record and the route `*.pipe.example.com/*`.
+  Pipes are then the same site as the console until the Public Suffix List entry lands.
+- **Public Suffix List.** Submit the pipe domain (`example-pipes.dev`, or `pipe.example.com`) to
+  the [PSL](https://github.com/publicsuffix/list) so browsers treat every pipe as its own site:
+  one pipe's JavaScript then cannot read or set cookies for another pipe. Wurmhol's cookies are
+  `__Host-` cookies either way, but the PSL entry is what isolates pipes from each other. The PSL
+  asks for more than two years of registration left on the domain.
 
 ## 2. Database and Worker
 
@@ -41,7 +46,7 @@ dashboard, or `WORKER_VAR_<NAME>` build variables for the deploy script.
 | `BETTER_AUTH_URL`                      | `https://dirt.example.com`                    |
 | `CONNECT_HOST`                         | `api.example.com` (optional)                  |
 | `APP_ALIASES`                          | `app.example.com` (optional)                  |
-| `SHARE_DOMAIN`                         | `pipe.example.com`                            |
+| `SHARE_DOMAIN`                         | `example-pipes.dev`                           |
 | `AUTH_TRUSTED_ORIGINS`                 | empty (or extra origins allowed to call auth) |
 | `ENVIRONMENT`                          | `production`                                  |
 | `GOOGLE_CLIENT_ID`, `GITHUB_CLIENT_ID` | optional OAuth clients                        |
@@ -54,8 +59,8 @@ Deploy:
 
 ```bash
 D1_DATABASE_ID=<id> WORKER_DOMAIN=dirt.example.com,api.example.com,app.example.com \
-  WORKER_ROUTE='*.pipe.example.com/*' WORKER_VAR_BETTER_AUTH_URL=https://dirt.example.com \
-  WORKER_VAR_SHARE_DOMAIN=pipe.example.com WORKER_VAR_CONNECT_HOST=api.example.com \
+  WORKER_ROUTE='*.example-pipes.dev/*' WORKER_VAR_BETTER_AUTH_URL=https://dirt.example.com \
+  WORKER_VAR_SHARE_DOMAIN=example-pipes.dev WORKER_VAR_CONNECT_HOST=api.example.com \
   WORKER_VAR_APP_ALIASES=app.example.com \
   pnpm --filter @wurmhol/worker deploy:cloudflare
 ```

@@ -1,7 +1,7 @@
 # 0003: Shares are "pipes", at `<id>.pipe.wurmhol.com`
 
-Status: accepted. Departs from spec v1 section 5 ("Domains"), which puts shares at
-`<id>.on.wurmhol.com`.
+Status: accepted; the pipe host is superseded by ADR 0007 (`<id>.wurmhol.dev`). Departs from
+spec v1 section 5 ("Domains"), which puts shares at `<id>.on.wurmhol.com`.
 
 ## Decision
 
