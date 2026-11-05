@@ -53,6 +53,11 @@ describe("a computer running wurmhol host", () => {
   let exited: number | null | undefined;
   let local: Awaited<ReturnType<typeof localServer>>;
   let hits = 0;
+  // What else answers on a dev machine: an API with no root route, a Node-style inspector, and a
+  // web server its owner listed in WURMHOL_HOST_IGNORE.
+  let apiServer: Awaited<ReturnType<typeof localServer>>;
+  let inspector: Awaited<ReturnType<typeof localServer>>;
+  let ignored: Awaited<ReturnType<typeof localServer>>;
 
   beforeAll(async () => {
     stack = await startStack();
@@ -67,8 +72,20 @@ describe("a computer running wurmhol host", () => {
       hits++;
       res.writeHead(200, { "content-type": "text/html" }).end("<title>Machine &amp; test</title>");
     });
+    apiServer = await localServer((req, res) => {
+      res.writeHead(req.url === "/" ? 404 : 200, { "content-type": "application/json" }).end("{}");
+    });
+    inspector = await localServer((req, res) => {
+      if (req.url !== "/json/version") return res.writeHead(404).end();
+      res
+        .writeHead(200, { "content-type": "application/json" })
+        .end(JSON.stringify({ Browser: "node.js/v26", "Protocol-Version": "1.1" }));
+    });
+    ignored = await localServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/html" }).end("<title>Helper</title>");
+    });
     token = await createToken(stack, ada, "laptop");
-    env = cliEnv(stack, token.token);
+    env = cliEnv(stack, token.token, { WURMHOL_HOST_IGNORE: `9229, ${ignored.port}` });
     host = spawn(process.execPath, [cliPath, "host"], {
       env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
       stdio: ["ignore", "pipe", "pipe"],
@@ -81,7 +98,7 @@ describe("a computer running wurmhol host", () => {
   afterAll(async () => {
     host?.kill();
     await stopAll(env);
-    await local?.close();
+    await Promise.all([local, apiServer, inspector, ignored].map((server) => server?.close()));
     await stack?.stop();
   });
 
@@ -104,6 +121,27 @@ describe("a computer running wurmhol host", () => {
     expect(asBea.status).toBe(404);
     adas.socket.close();
     beas.socket.close();
+  });
+
+  it("lists dev servers and APIs, but not debuggers or the ports its owner ignores", async () => {
+    const adas = watch(stack, ada);
+    // Every port open before the CLI started is probed in its first scan, so once these two are
+    // listed the others have been decided. Catches: an API whose `/` is a 404 dropped as noise.
+    const machine = await waitFor(
+      () =>
+        adas.machines?.find((m) =>
+          [local.port, apiServer.port].every((port) => m.ports.some((p) => p.port === port)),
+        ) ?? null,
+      { timeoutMs: 15_000, what: "the dev server and the API listed" },
+    );
+    const ports = machine.ports.map((p) => p.port);
+    // Catches: a debugger's port offered as a web server to share.
+    expect(ports).not.toContain(inspector.port);
+    // Catches: WURMHOL_HOST_IGNORE not read, or not parsed past its first entry.
+    expect(ports).not.toContain(ignored.port);
+    // Catches: the CLI offering its own server, a pipe that would loop through itself.
+    expect(ports).not.toContain(Number(new URL(stack.url).port));
+    adas.socket.close();
   });
 
   it("opens a pipe to a port it reported when its owner picks it, and to no other port", async () => {
