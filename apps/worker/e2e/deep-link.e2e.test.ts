@@ -27,7 +27,9 @@ beforeAll(async () => {
   stack = await startStack();
   ada = await signIn(stack);
   env = cliEnv(stack, (await createToken(stack, ada)).token);
-  local = await localServer((req, res) => res.end(`page ${req.url}`));
+  local = await localServer((req, res) =>
+    res.writeHead(200, { "content-type": "text/plain" }).end(`page ${req.url}`),
+  );
 });
 
 afterAll(async () => {
