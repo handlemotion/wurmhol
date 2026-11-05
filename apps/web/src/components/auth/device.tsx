@@ -8,11 +8,7 @@ import { SkeletonProvider } from "@/components/ui/skeleton-provider";
 import { Input } from "@/components/ui/input";
 import { Code, Strong, Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
-import { api, ApiError, type DeviceLogin } from "@/lib/api";
-
-function toLogin() {
-  location.assign(`/login?next=${encodeURIComponent(`${location.pathname}${location.search}`)}`);
-}
+import { api, type DeviceLogin, isSignedOut, toLogin } from "@/lib/api";
 
 /** No code in the link: type the one the terminal shows. */
 function EnterCode() {
@@ -52,10 +48,10 @@ function Review({ code }: { code: string }) {
     mutationFn: (decision: "approve" | "deny") =>
       api(`/api/device/${decision}`, { method: "POST", body: { code } }),
     onError: (error) => {
-      if (error instanceof ApiError && error.status === 401) toLogin();
+      if (isSignedOut(error)) toLogin();
     },
   });
-  if (login.error instanceof ApiError && login.error.status === 401) {
+  if (isSignedOut(login.error)) {
     toLogin();
     return null;
   }
@@ -126,7 +122,7 @@ function Review({ code }: { code: string }) {
           ) : (
             <Text>This code was already used.</Text>
           )}
-          {decide.error && !(decide.error instanceof ApiError && decide.error.status === 401) && (
+          {decide.error && !isSignedOut(decide.error) && (
             <Text className="text-danger-subtle-foreground">{decide.error.message}</Text>
           )}
         </div>

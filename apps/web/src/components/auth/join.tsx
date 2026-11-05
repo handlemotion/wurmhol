@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Heading } from "@/components/ui/heading";
 import { SkeletonProvider } from "@/components/ui/skeleton-provider";
 import { Text } from "@/components/ui/text";
-import { api, ApiError } from "@/lib/api";
+import { api, isSignedOut, toLogin } from "@/lib/api";
 
 /** An invite link (`/join/<code>`): join the org as a member, after signing in. */
 export function Join({ code }: { code: string }) {
@@ -18,9 +18,7 @@ export function Join({ code }: { code: string }) {
     mutationFn: () => api(`/api/invites/${encodeURIComponent(code)}/accept`, { method: "POST" }),
     onSuccess: () => location.assign("/"),
     onError: (error) => {
-      if (error instanceof ApiError && error.status === 401) {
-        location.assign(`/login?next=${encodeURIComponent(location.pathname)}`);
-      }
+      if (isSignedOut(error)) toLogin();
     },
   });
 
