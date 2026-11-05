@@ -2,7 +2,7 @@
 // (`packages/ui/src/components/ui/fluid-hover-highlight.tsx`): an absolutely positioned fill that
 // springs between the rects `useFluidHoverList` measures. The container must be `relative`; rows
 // sit over it and carry no hover fill of their own.
-import { AnimatePresence, motion, useReducedMotion, type Transition } from "motion/react";
+import { AnimatePresence, m, useReducedMotion, type Transition } from "motion/react";
 import { cn } from "cn";
 import type { ItemRect } from "@/hooks/use-fluid-hover-list";
 
@@ -35,7 +35,7 @@ export function FluidHoverHighlight({ rect, session, className, style }: FluidHo
   return (
     <AnimatePresence>
       {rect && (
-        <motion.div
+        <m.div
           key={session}
           aria-hidden
           data-slot="fluid-hover-highlight"

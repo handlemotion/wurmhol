@@ -12,3 +12,8 @@
   Referrer-Policy: same-origin
   Permissions-Policy: accelerometer=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), publickey-credentials-create=(self), publickey-credentials-get=(self)
   Cross-Origin-Opener-Policy: same-origin
+
+# Vite's build output: every name carries a content hash, so a file under it never changes. The
+# browser keeps it for a year and never asks again; a new build ships new names.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

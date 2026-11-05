@@ -45,12 +45,15 @@ export const account = new Hono<AppEnv>()
   .get("/me", async (c) => {
     const session = await resolveSession(c);
     if (!session) throw new HTTPException(401, { message: "sign in first" });
-    const orgs = await listOrgsForUser(c.var.db, session.user.id);
-    const standing = session.member
-      ? await orgStanding(c.var.db, session.member.orgId, {
-          enabled: c.var.config.auth.billing !== undefined,
-        })
-      : null;
+    // Independent reads: one round trip to D1 instead of two.
+    const [orgs, standing] = await Promise.all([
+      listOrgsForUser(c.var.db, session.user.id),
+      session.member
+        ? orgStanding(c.var.db, session.member.orgId, {
+            enabled: c.var.config.auth.billing !== undefined,
+          })
+        : null,
+    ]);
     return c.json({
       user: session.user,
       orgs,
