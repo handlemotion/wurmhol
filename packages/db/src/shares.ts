@@ -1,7 +1,7 @@
 // Share history. The live state of an open share is its Durable Object; these rows record that
 // a share existed (ids are never reused) and how it ended.
 import type { EndReason, PipeSource } from "@wurmhol/protocol";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import type { Db } from "./client.ts";
 import { randomShareId } from "./crypto.ts";
 import { pipeNames, shares, shareViews, users } from "./schema/index.ts";
@@ -70,6 +70,17 @@ export async function findOpenShareByName(db: Db, name: string) {
     .select({ id: shares.id, port: shares.port })
     .from(shares)
     .where(and(eq(shares.name, name), isNull(shares.endedAt)))
+    .limit(1);
+  return row ?? null;
+}
+
+/** The newest share that took `name`, open or ended, or null: a report may name one that ended. */
+export async function latestShareByName(db: Db, name: string) {
+  const [row] = await db
+    .select({ id: shares.id })
+    .from(shares)
+    .where(eq(shares.name, name))
+    .orderBy(desc(shares.startedAt))
     .limit(1);
   return row ?? null;
 }

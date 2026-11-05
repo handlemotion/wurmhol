@@ -1,20 +1,16 @@
 // The ports this computer serves web pages on, for `wurmhol host` (ADR 0018). Listening TCP
 // ports come from the OS (Linux's /proc, `lsof` on macOS, `netstat` on Windows); each new one is
-// asked for `/` once, and offered with its page's <title> when it answers like a dev server.
+// asked for `/` once, on 127.0.0.1 or else ::1, and offered with its page's <title> when it
+// answers like a dev server.
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import http from "node:http";
 import { promisify } from "node:util";
+import { MACHINE_LIMITS, type MachinePort } from "@wurmhol/protocol";
+import { Loopback } from "./loopback.ts";
 
 const run = promisify(execFile);
 
-export interface LocalPort {
-  port: number;
-  title: string | null;
-}
-
-/** Most ports the CLI reports: the relay refuses more. */
-const MAX_PORTS = 64;
 /** System services sit below 1024; dev servers do not. */
 const MIN_PORT = 1024;
 const PROBE_MS = 1500;
@@ -67,17 +63,27 @@ function titleOf(html: string) {
     // Last, so `&amp;lt;` reads as `&lt;`, not `<`.
     .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ");
-  return text.slice(0, 200) || null;
+  return text.slice(0, MACHINE_LIMITS.title) || null;
 }
 
-/** `GET path` on the port, or null when nothing answers HTTP in time. */
+/** Remembers which loopback address each port answered on, as a pipe does. */
+const loopback = new Loopback();
+
+/** `GET path` on the port (127.0.0.1, else ::1), or null when nothing answers HTTP in time. */
 function get(port: number, path: string): Promise<http.IncomingMessage | null> {
   return new Promise((resolve) => {
     const req = http.get(
-      // A `localhost` Host passes dev servers' host checks (Vite's, webpack's).
-      { host: "127.0.0.1", port, path, headers: { host: `localhost:${port}` }, timeout: PROBE_MS },
+      {
+        ...loopback.target(port, undefined),
+        port,
+        path,
+        // A `localhost` Host passes dev servers' host checks (Vite's, webpack's).
+        headers: { host: `localhost:${port}` },
+        timeout: PROBE_MS,
+      },
       resolve,
     );
+    req.on("socket", (socket) => loopback.watch(port, socket));
     req.on("timeout", () => req.destroy());
     // After a response this is only its body cut short, which `read` ends on.
     req.on("error", () => resolve(null));
@@ -117,7 +123,7 @@ async function isDebugger(port: number) {
  * errors are what debuggers (400, 500), proxies (405) and helpers that want a key (401, 403)
  * answer, and are not offered.
  */
-async function probe(port: number): Promise<LocalPort | null> {
+async function probe(port: number): Promise<MachinePort | null> {
   const res = await get(port, "/");
   if (!res) return null;
   const status = res.statusCode ?? 0;
@@ -148,7 +154,7 @@ const RETRY_MS = 30_000;
 
 /** Watches this computer's web ports; remembers each port's answer while it stays open. */
 export class PortScanner {
-  #known = new Map<number, { answer: LocalPort | null; at: number }>();
+  #known = new Map<number, { answer: MachinePort | null; at: number }>();
   readonly #skip: Set<number>;
 
   /** `server`: the origin the CLI dials, never offered when it is on this computer. */
@@ -156,7 +162,7 @@ export class PortScanner {
     this.#skip = new Set(ignored(server));
   }
 
-  async scan(): Promise<LocalPort[]> {
+  async scan(): Promise<MachinePort[]> {
     const open = new Set((await listening()).filter((p) => p >= MIN_PORT && !this.#skip.has(p)));
     for (const port of this.#known.keys()) if (!open.has(port)) this.#known.delete(port);
     const now = Date.now();
@@ -168,8 +174,8 @@ export class PortScanner {
     fresh.forEach((port, i) => this.#known.set(port, { answer: answers[i] ?? null, at: now }));
     return [...this.#known.values()]
       .map((known) => known.answer)
-      .filter((p): p is LocalPort => p !== null)
+      .filter((p): p is MachinePort => p !== null)
       .toSorted((a, b) => a.port - b.port)
-      .slice(0, MAX_PORTS);
+      .slice(0, MACHINE_LIMITS.ports);
   }
 }

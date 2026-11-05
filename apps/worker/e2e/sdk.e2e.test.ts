@@ -9,6 +9,7 @@ import {
   api,
   browserFetch,
   browserSocket,
+  connectProxy,
   createToken,
   localServer,
   type Person,
@@ -287,6 +288,37 @@ describe("openPipe", () => {
     expect(closes).toEqual(["revoked"]);
     expect(sharesOf(own.id)).toEqual([{ id: pipe.id, end_reason: "revoked" }]);
     await local.close();
+  });
+
+  // Catches a refused reconnect (here: the token expired while the pipe ran) closing the pipe as
+  // `disconnected` instead of the reason the relay gave.
+  it("emits revoked when a reconnect finds its token expired", async () => {
+    const own = await createToken(stack, ada, "to-expire");
+    const local = await localServer((_req, res) => res.end("ok"));
+    const proxy = await connectProxy([stack.port]);
+    const saved = { ...process.env };
+    Object.assign(process.env, { HTTP_PROXY: proxy.url, HTTPS_PROXY: proxy.url });
+    for (const name of ["NO_PROXY", "no_proxy", "http_proxy", "https_proxy"]) {
+      delete process.env[name];
+    }
+    try {
+      const pipe = await openPipe({ port: local.port, token: own.token, server: stack.url });
+      expect(proxy.connects).toBe(1);
+      const { closes } = watch(pipe);
+      const db = stack.db({ write: true });
+      try {
+        db.prepare("update tokens set expires_at = ? where id = ?").run(Date.now() - 1000, own.id);
+      } finally {
+        db.close();
+      }
+      proxy.cutAll();
+      await waitFor(() => closes.length > 0, { what: "the close event" });
+      expect(closes).toEqual(["revoked"]);
+    } finally {
+      process.env = saved;
+      await proxy.close();
+      await local.close();
+    }
   });
 
   it("ends at its ttl with reason expired, and rejects one over the limit", async () => {

@@ -81,6 +81,17 @@ export interface WsClosePayload {
   reason: string;
 }
 
+/**
+ * `code` if an endpoint may send it in a close frame, else 1000. RFC 6455 reserves 1004-1006 and
+ * 1015 for reporting a close that had no code, so a code relayed from the other side may be one.
+ */
+export function sendableCloseCode(code: number) {
+  const valid =
+    (code >= 1000 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006) ||
+    (code >= 3000 && code <= 4999);
+  return valid ? code : 1000;
+}
+
 export interface WindowPayload {
   /** Bytes the sender may send on this stream on top of what it was granted before. */
   bytes: number;

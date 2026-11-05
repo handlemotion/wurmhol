@@ -8,6 +8,7 @@ description: "Every command, flag and variable of `npx wurmhol`."
 | `wurmhol <port>`                | Open a pipe to a port, print its link and return                                    |
 | `wurmhol ls`                    | List open pipes and when each one ends                                              |
 | `wurmhol stop <port\|id\|name>` | End one, or every one with `--all`                                                  |
+| `wurmhol logs <port\|id\|name>` | Recent requests and connection events; `--follow`, `--json`                         |
 | `wurmhol init`                  | Tell this repo's agents how to share, `--skill` adds the skill                      |
 | `wurmhol host`                  | Connect this computer, to open pipes from Create pipe; `--install` keeps it running |
 | `wurmhol login`                 | Approve this computer in the browser and save a token                               |
@@ -42,6 +43,14 @@ a systemd user service, `wurmhol-host` (`systemctl --user status wurmhol-host`);
 keep `wurmhol host` open in a terminal. Windows is not supported yet. If you switch Node versions
 and remove the old one, run `wurmhol host --install` again.
 
+## Logs
+
+`wurmhol logs 5173` prints a pipe's last 50 lines: each request your viewers made, as method, path,
+status and time taken, and when the pipe connected or dropped. `--follow` keeps printing new ones.
+Query values, bodies, headers and cookies are never written; `/cb?code=abc` is logged as
+`/cb?code=`. The log stays on this computer, in `~/.wurmhol/logs`, at most about 2 MB per pipe,
+and Wurmhol's servers keep none of it.
+
 ## Flags
 
 | Flag                     | Does                                                                        |
@@ -51,6 +60,7 @@ and remove the old one, run `wurmhol host --install` again.
 | `--only a@x.com,b@y.com` | Only these org members can open it                                          |
 | `--note "text"`          | A line of text on the pipe's card, up to 280 characters                     |
 | `--link <url>`           | A link on the pipe's card                                                   |
+| `--path /checkout`       | Print the link opened at this page; `pageUrl` in `--json`                   |
 | `--json`                 | Print JSON, `{url, port, id, endsAt}` for a pipe                            |
 
 ## Variables
@@ -62,5 +72,9 @@ and remove the old one, run `wurmhol host --install` again.
 | `WURMHOL_HOST_IGNORE` | Ports `wurmhol host` never lists, like `9229,5555`       |
 | `HTTPS_PROXY`         | The proxy to go through                                  |
 | `NODE_EXTRA_CA_CERTS` | Your proxy's certificate                                 |
+
+Run the same `wurmhol <port>` again and it prints the pipe that is already open instead of opening
+a second one. A different `--name`, `--only`, `--link` or `--note`, or any `--ttl`, opens a new
+pipe; for a new URL with the same flags, `wurmhol stop <port>` first.
 
 When something fails, the error is one line with what to do about it. Node 22 or later.

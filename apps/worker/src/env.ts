@@ -1,5 +1,5 @@
 import { authEnvSchema } from "@wurmhol/auth";
-import { pipeName } from "@wurmhol/protocol";
+import { pipeName, SHARE_ID } from "@wurmhol/protocol";
 import { z } from "zod";
 
 // Secrets are not in wrangler.jsonc, so `wrangler types` cannot see them. Documented in
@@ -15,6 +15,7 @@ declare global {
       GITHUB_APP_PRIVATE_KEY?: string;
       GITHUB_APP_CLIENT_SECRET?: string;
       GITHUB_APP_WEBHOOK_SECRET?: string;
+      OPERATOR_TOKEN?: string;
     }
   }
 }
@@ -198,6 +199,13 @@ const configSchema = z
     /** Per person (OAuth) or token (`wh_`): calls to the hosted MCP server (ADR 0014). */
     RATE_LIMIT_MCP: rateLimit("120/60"),
     /**
+     * Secret. The bearer token of the operator's takedown route, `/operator/*` on the app's host
+     * (ADR 0022). Empty: the route answers 404.
+     */
+    OPERATOR_TOKEN: optional.pipe(
+      z.string().min(32, "use at least 32 random characters (openssl rand -base64 32)").optional(),
+    ),
+    /**
      * The hosted MCP server at `/mcp` on the CLI's host (ADR 0014). On by default; `false` turns
      * it off, and `/mcp` and its OAuth routes answer 404.
      */
@@ -312,9 +320,6 @@ export function shareLabelFromHost(config: Config, host: string | null): string 
   if (label === null) return null;
   return SHARE_ID.test(label) || pipeName(label) === label ? label : "";
 }
-
-/** A share id: 10 lowercase letters and digits. */
-export const SHARE_ID = /^[a-z0-9]{10}$/;
 
 /** The relay's public origin (ADR 0010), on the app's scheme and port; null when it is off. */
 export function relayOrigin(config: Config) {

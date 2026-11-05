@@ -1,5 +1,5 @@
 // The Worker's API (apps/worker/src/routes/api.ts), as the web app reads it.
-import type { PipeSource } from "@wurmhol/protocol";
+import type { Role, TokenScope, TokenSource } from "@wurmhol/protocol";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -39,56 +39,16 @@ export interface Me {
   user: { id: string; email: string; name: string; image: string | null };
   orgs: { id: string; name: string; role: string; personal: boolean }[];
   activeOrgId: string | null;
-  role: "owner" | "member" | null;
+  role: Role | null;
   standing: { ok: boolean; reason: "billing_off" | "subscribed" | "no_subscription" } | null;
 }
-
-/** One card on the wall (apps/worker/src/org-do.ts `ShareCard`). */
-export interface Share {
-  id: string;
-  url: string;
-  port: number;
-  startedBy: string | null;
-  startedAt: number;
-  title: string | null;
-  favicon: boolean;
-  lastRequestAt: number | null;
-  views: { name: string; lastSeenAt: number }[];
-  state: "live" | "away";
-  /** Where it came from (ADR 0015); null when its CLI said nothing. */
-  source: PipeSource | null;
-  /** The pull request it is posted to as a GitHub deployment (ADR 0016). */
-  preview: { pullRequest: number; url: string } | null;
-}
-
-export type WallEvent =
-  | { type: "snapshot"; shares: Share[] }
-  | { type: "share.started"; share: Share }
-  | { type: "share.updated"; share: Share }
-  | { type: "share.ended"; id: string };
-
-/** A computer running `wurmhol host` (apps/worker/src/org-do.ts `Machine`, ADR 0018). */
-export interface Machine {
-  id: string;
-  name: string;
-  /** Web servers answering on it, with their page's title. */
-  ports: { port: number; title: string | null }[];
-  connectedAt: number;
-}
-
-/** What `/api/machines/live` sends (apps/worker/src/org-do.ts `MachinesEvent`). */
-export type MachinesEvent = { type: "machines"; machines: Machine[] };
-
-export type TokenScope = "pipes" | "org";
-/** Days until a new token expires; null never. */
-export type TokenExpiry = 30 | 90 | null;
 
 export interface Token {
   id: string;
   name: string;
   scope: TokenScope;
   /** `login`: a computer approved with `wurmhol login`, shown under Computers. */
-  source: "console" | "login";
+  source: TokenSource;
   createdAt: string;
   expiresAt: string | null;
   lastUsedAt: string | null;

@@ -8,6 +8,7 @@
   },
   "type": "module",
   "scripts": {
+    "bench": "node scripts/bench/bench.mjs",
     "build": "turbo run build",
     "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
     "dev": "turbo run dev --ui=tui",

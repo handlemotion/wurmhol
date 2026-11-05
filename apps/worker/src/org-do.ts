@@ -6,60 +6,21 @@
 // reports the ports open on its computer and opens a pipe to one when its owner asks from the
 // wall. Each machine is visible to the person whose token it runs on, and no one else.
 import { DurableObject } from "cloudflare:workers";
-import type { PipeSource } from "@wurmhol/protocol";
-import { z } from "zod";
-
-/** One card on the wall. */
-export interface ShareCard {
-  id: string;
-  url: string;
-  port: number;
-  /** Name of the person whose token started it. */
-  startedBy: string | null;
-  startedAt: number;
-  /** The last HTML response's `<title>`; null until one passed through. */
-  title: string | null;
-  /** Whether the relay has seen the dev server serve a favicon. */
-  favicon: boolean;
-  lastRequestAt: number | null;
-  /** Who opened it, most recent first (the view log, ADR 0008). */
-  views: { name: string; lastSeenAt: number }[];
-  /** `away`: its CLI dropped and has up to 60 s to come back. */
-  state: "live" | "away";
-  /** Where it came from (ADR 0015): repo, branch, commit, agent session, link and note. */
-  source: PipeSource | null;
-  /** The pull request it is posted to as a deployment (ADR 0016), once it is. */
-  preview: { pullRequest: number; url: string } | null;
-}
-
-export type WallEvent =
-  | { type: "snapshot"; shares: ShareCard[] }
-  | { type: "share.started"; share: ShareCard }
-  | { type: "share.updated"; share: ShareCard }
-  | { type: "share.ended"; id: string };
+import {
+  type Machine,
+  type MachinesEvent,
+  newShareCard,
+  parseHostMessage,
+  type RelayMessage,
+  sendableCloseCode,
+  type ShareCard,
+  type WallEvent,
+} from "@wurmhol/protocol";
 
 export type Reservation =
   | { ok: true }
   | { ok: false; reason: "active_limit"; limit: number }
   | { ok: false; reason: "monthly_limit"; limit: number };
-
-/** A local port a machine reports: a web server answering on it, and its page's `<title>`. */
-export interface MachinePort {
-  port: number;
-  title: string | null;
-}
-
-/** A running `wurmhol host`, as its owner's Create pipe card lists it. */
-export interface Machine {
-  id: string;
-  /** The computer's name, as the CLI reports it. */
-  name: string;
-  ports: MachinePort[];
-  connectedAt: number;
-}
-
-/** What the Org object sends to its owner's open Create pipe cards. */
-export type MachinesEvent = { type: "machines"; machines: Machine[] };
 
 /** Who a machine's socket belongs to: kept on the socket, so it survives hibernation. */
 interface MachineAttachment extends Machine {
@@ -102,23 +63,6 @@ export type OpenPortResult =
   | { ok: true; url: string }
   | { ok: false; status: 404 | 409 | 502 | 504; error: string };
 
-/** What `wurmhol host` sends. Ports are bounded, so a machine cannot fill the object's memory. */
-const machineMessage = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("ports"),
-    ports: z
-      .array(
-        z.object({
-          port: z.number().int().min(1).max(65535),
-          title: z.string().max(200).nullable(),
-        }),
-      )
-      .max(64),
-  }),
-  z.object({ type: z.literal("opened"), id: z.string().max(64), url: z.url().max(2048) }),
-  z.object({ type: z.literal("failed"), id: z.string().max(64), message: z.string().max(500) }),
-]);
-
 /** How long the wall waits for a machine to open a pipe: the CLI's own connect is 15 s. */
 const OPEN_TIMEOUT_MS = 30_000;
 
@@ -127,21 +71,13 @@ function month(at = Date.now()) {
   return new Date(at).toISOString().slice(0, 7);
 }
 
-/**
- * A stored card in the current shape. Cards written by an older Worker lack the fields added
- * since (`views`, ADR 0008; `source`, ADR 0015; `preview`, ADR 0016); they get those fields' empty values so walls can rely on the shape.
- */
-function current(card: Partial<ShareCard> & Pick<ShareCard, "id">): ShareCard {
-  return { views: [], source: null, preview: null, ...card } as ShareCard;
-}
-
 export class Org extends DurableObject<Env> {
   /** Opens waiting on a machine's answer, by request id. In memory: an RPC keeps it awake. */
   #pending = new Map<string, (result: OpenPortResult) => void>();
 
   #cards(): ShareCard[] {
     return [...this.ctx.storage.kv.list<ShareCard>({ prefix: "share:" })]
-      .map(([, card]) => current(card))
+      .map(([, card]) => newShareCard(card))
       .toSorted((a, b) => b.startedAt - a.startedAt);
   }
 
@@ -184,7 +120,7 @@ export class Org extends DurableObject<Env> {
   update(id: string, patch: Partial<Omit<ShareCard, "id">>) {
     const card = this.ctx.storage.kv.get<ShareCard>(`share:${id}`);
     if (!card) return;
-    const next = { ...current(card), ...patch };
+    const next = newShareCard({ ...card, ...patch });
     this.ctx.storage.kv.put(`share:${id}`, next);
     this.#broadcast({ type: "share.updated", share: next });
   }
@@ -260,7 +196,7 @@ export class Org extends DurableObject<Env> {
       );
     });
     try {
-      socket.send(JSON.stringify({ type: "open", id, port }));
+      socket.send(JSON.stringify({ type: "open", id, port } satisfies RelayMessage));
     } catch {
       this.#pending.delete(id);
       return { ok: false, status: 404, error: "That computer is not connected." };
@@ -313,7 +249,7 @@ export class Org extends DurableObject<Env> {
     if (kind === "machine" && userId) {
       const machine: MachineAttachment = {
         id: crypto.randomUUID(),
-        name: request.headers.get(ORG_SOCKET_HEADERS.name) || "Computer",
+        name: request.headers.get(ORG_SOCKET_HEADERS.name) ?? "",
         ports: [],
         connectedAt: Date.now(),
         userId,
@@ -340,14 +276,13 @@ export class Org extends DurableObject<Env> {
   /** Walls and cards only listen; a machine reports its ports and answers opens. */
   override webSocketMessage(socket: WebSocket, data: string | ArrayBuffer) {
     if (!this.ctx.getTags(socket).includes("machine") || typeof data !== "string") return;
-    let parsed;
+    let message;
     try {
-      parsed = machineMessage.safeParse(JSON.parse(data));
+      message = parseHostMessage(JSON.parse(data));
     } catch {
       return;
     }
-    if (!parsed.success) return;
-    const message = parsed.data;
+    if (!message) return;
     if (message.type === "ports") {
       const machine = socket.deserializeAttachment() as MachineAttachment;
       socket.serializeAttachment({ ...machine, ports: message.ports });
@@ -364,9 +299,8 @@ export class Org extends DurableObject<Env> {
   }
 
   override webSocketClose(socket: WebSocket, code: number) {
-    // 1005/1006 are reserved and cannot be sent back.
     try {
-      socket.close(code === 1005 || code === 1006 ? 1000 : code, "bye");
+      socket.close(sendableCloseCode(code), "bye");
     } catch {
       // Already closed.
     }

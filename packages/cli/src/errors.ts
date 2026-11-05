@@ -1,15 +1,18 @@
 // Every failure the CLI reports says the fix in one line (spec section 7).
+import { parseRefusal } from "@wurmhol/protocol";
+import type { CloseReason } from "./pipe.ts";
 
 export class FixError extends Error {
   override name = "FixError";
-  /** The relay says the share cannot continue: a reconnect would fail the same way. */
+  /** Retrying cannot help: a reconnect would fail the same way. */
   readonly final: boolean;
-  readonly reason: string | undefined;
+  /** Why the relay says the share is over, on a refusal that ends it. */
+  readonly reason: CloseReason | undefined;
 
-  constructor(message: string, options: { final?: boolean; reason?: string } = {}) {
+  constructor(message: string, options: { final?: boolean; reason?: CloseReason } = {}) {
     super(message);
-    this.final = options.final ?? false;
     this.reason = options.reason;
+    this.final = options.final ?? options.reason !== undefined;
   }
 }
 
@@ -18,24 +21,14 @@ function hosts(server: string) {
   return new URL(server).hostname;
 }
 
-/** A refused handshake: the relay's own `{ error, fix }`, or a proxy saying no. */
+/** A refused handshake: the relay's own `Refusal`, or a proxy saying no. */
 export function explainRefusal(
   status: number,
   body: string,
   context: { server: string; viaProxy: boolean },
 ): FixError {
-  type Refusal = { error?: string; fix?: string; reason?: string };
-  let parsed: Refusal | null = null;
-  try {
-    parsed = JSON.parse(body) as Refusal;
-  } catch {
-    // Not ours: a proxy or a captive portal.
-  }
-  if (parsed?.fix) {
-    // Token, plan and ended shares do not get better by retrying; a busy limit might.
-    const final = [401, 402, 404, 410].includes(status);
-    return new FixError(parsed.fix, { final, reason: parsed.reason ?? parsed.error });
-  }
+  const refusal = parseRefusal(body);
+  if (refusal) return new FixError(refusal.fix, { reason: refusal.reason });
   if (context.viaProxy && [403, 407].includes(status)) {
     return new FixError(
       `The network proxy refused the connection (HTTP ${status}). Allowlist ${hosts(context.server)} in the sandbox's network settings.`,
