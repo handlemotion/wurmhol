@@ -1,15 +1,70 @@
 ---
 title: "MCP server"
-description: "Let an agent open, list and stop pipes as MCP tools with `wurmhol mcp`."
+description: "Connect your assistant to Wurmhol's hosted MCP server, or run `wurmhol mcp` next to the code."
 ---
 
-`wurmhol mcp` is a local MCP server on stdio. It gives an agent three tools that do what
-`npx wurmhol <port>`, `wurmhol ls` and `wurmhol stop` do, with structured results.
+Wurmhol has two MCP servers. Most people want the hosted one.
 
-## Add it to Claude Code
+| You want to                                          | Use                                                            |
+| ---------------------------------------------------- | -------------------------------------------------------------- |
+| Ask your assistant what pipes are open, and end them | The hosted server, `https://api.wurmhol.com/mcp` (recommended) |
+| Let an agent open a pipe to the dev server it runs   | The local server, `npx wurmhol mcp`, where the code runs       |
+
+The hosted server can't open pipes: it can't reach anyone's `localhost`. Opening a pipe stays with the CLI and the local server, running next to the dev server.
+
+## Hosted server (recommended)
+
+Add `https://api.wurmhol.com/mcp` to your assistant and sign in. There is no token to create, copy or keep out of a repo.
+
+### Connect your assistant
+
+**claude.ai and Claude Desktop.** Settings, Connectors, Add custom connector. Paste `https://api.wurmhol.com/mcp`, then Connect.
+
+**Claude Code.**
 
 ```bash
-claude mcp add wurmhol -- npx -y wurmhol mcp
+claude mcp add --transport http wurmhol https://api.wurmhol.com/mcp
+```
+
+Then run `/mcp` in Claude Code and pick wurmhol to sign in.
+
+**Any other assistant** that takes a remote MCP server: the URL is `https://api.wurmhol.com/mcp`, over Streamable HTTP.
+
+Connecting opens Wurmhol in your browser. Sign in the way you always do, then Allow. The assistant gets access to the orgs you belong to, for as long as you're a member: leave an org, or be removed from it, and the next call stops seeing it.
+
+### What it can do
+
+| Tool         | Takes                                   | Returns                                    |
+| ------------ | --------------------------------------- | ------------------------------------------ |
+| `list_orgs`  | nothing                                 | `{ orgs: [{ id, name, openPipes }] }`      |
+| `list_pipes` | optional `org` (an id from `list_orgs`) | `{ pipes: [...] }`, every org's by default |
+| `get_pipe`   | `pipe`, an id or a name                 | `{ pipe }`                                 |
+| `stop_pipe`  | `pipe`, an id or a name                 | `{ stopped: { id, url } }`                 |
+
+A pipe is what the wall shows on its card: URL, port, page title, who started it and when, the last request, who opened it, and where it came from (repo, branch, agent). Nothing that passes through a pipe is ever stored, so the server has none of it to give.
+
+`stop_pipe` ends the pipe as Terminate on the wall does, and the CLI that opened it hears it was terminated. Any member may stop any of the org's pipes. Assistants ask before they call it.
+
+The consent screen has two permissions: seeing pipes, and stopping them. An assistant that asks only to see them can't stop one.
+
+### With a token instead
+
+For a client with no sign-in flow, send an org-wide token as a header. Create one in dirt (menu, Tokens) with "Can list and close every pipe in the org" ticked.
+
+```bash
+claude mcp add --transport http wurmhol https://api.wurmhol.com/mcp --header "Authorization: Bearer $WURMHOL_TOKEN"
+```
+
+A token reaches only its own org. Tokens for opening pipes, which is what `wurmhol login` and most agents hold, are refused here.
+
+## Local server
+
+`wurmhol mcp` is an MCP server on stdio, run where the code runs. It gives an agent three tools that do what `npx wurmhol <port>`, `wurmhol ls` and `wurmhol stop` do, with structured results.
+
+### Add it to Claude Code
+
+```bash
+claude mcp add wurmhol-local -- npx -y wurmhol mcp
 ```
 
 To set it up for everyone who works in a repository, commit a `.mcp.json` at its root:
@@ -17,14 +72,14 @@ To set it up for everyone who works in a repository, commit a `.mcp.json` at its
 ```json .mcp.json
 {
   "mcpServers": {
-    "wurmhol": { "command": "npx", "args": ["-y", "wurmhol", "mcp"] }
+    "wurmhol-local": { "command": "npx", "args": ["-y", "wurmhol", "mcp"] }
   }
 }
 ```
 
 Other agent hosts take the same command: `npx -y wurmhol mcp`, over stdio.
 
-## Token
+### Token
 
 The server finds its token the way the CLI does:
 
@@ -37,7 +92,7 @@ Without either, a tool call fails with the fix: run `npx wurmhol login`, or set 
 The next call picks the token up; there is nothing to restart. Never put a token in a committed
 `.mcp.json`. `WURMHOL_URL` points the server at a self-hosted install.
 
-## Tools
+### Tools
 
 | Tool         | Takes                                                                       | Returns                                      |
 | ------------ | --------------------------------------------------------------------------- | -------------------------------------------- |
@@ -51,9 +106,10 @@ unless you ask for another lifetime, up to 12 hours on wurmhol.com.
 Errors come back as tool errors whose text is the one-line fix the CLI would print, such as a
 revoked token, a lifetime over the limit or an email outside the org.
 
-## How long pipes last
+### How long pipes last
 
 Pipes live in the MCP server's process, like pipes from the [SDK](/sdk). They end when the
 agent's session ends and the host stops the server, or earlier at their `ttl`, from the wall, or
 with `stop_pipe`. They are separate from pipes started with `npx wurmhol` in a terminal: `wurmhol
-ls` does not list them, and `list_pipes` lists only the pipes this server opened.
+ls` does not list them, and its `list_pipes` lists only the pipes this server opened. The hosted
+server's `list_pipes` sees all of them.

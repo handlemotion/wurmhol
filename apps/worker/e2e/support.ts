@@ -106,7 +106,8 @@ export interface Stack {
   output(): string;
   port: number;
   shareUrl(id: string): string;
-  db(): DatabaseSync;
+  /** The local D1 database, read-only unless `write` (to seed what has no route, like an OAuth client). */
+  db(options?: { write?: boolean }): DatabaseSync;
   /**
    * Stops wrangler dev and starts it again on the same port and persisted state, as a deploy
    * replaces the Worker. `whileStopped` runs in between, with no process holding the state.
@@ -207,7 +208,7 @@ export async function startStack(vars: Record<string, string> = {}): Promise<Sta
     port,
     output: () => output,
     shareUrl: (id) => `http://${id}.pipe.localhost:${port}`,
-    db: () => new DatabaseSync(dbFile(), { readOnly: true }),
+    db: (options) => new DatabaseSync(dbFile(), { readOnly: !options?.write }),
     restart: async (whileStopped) => {
       await kill(child);
       await whileStopped?.();

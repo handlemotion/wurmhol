@@ -128,6 +128,8 @@ for (const file of argv) {
     const [x, y, w] = [Number(m[1]), Number(m[2]), m[3].length * 20];
     marks++;
     see(x, y);
+    // Like a dot: a label outside the frame weighs nothing there.
+    if (x < X0 || y < Y0 || x > X0 + W || y > Y0 + H) continue;
     mass += w;
     mx += x * w;
     my += y * w;
