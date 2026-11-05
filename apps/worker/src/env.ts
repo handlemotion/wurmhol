@@ -84,6 +84,8 @@ const configSchema = z
     LIMIT_MONTHLY_BYTES: positive(100 * 1000 ** 3),
     /** Longest a share stays open, in seconds. 12 hours by default. */
     LIMIT_SHARE_SECONDS: positive(12 * 3600),
+    /** Days the daily retention job keeps a pipe's history (`shares` rows). 90 by default. */
+    RETENTION_DAYS: positive(90),
     /**
      * `production` by default. `test` (the e2e suites) and `development` turn on magic-link
      * sign-in with the link logged (and kept for the suites) instead of mailed: no mail sender

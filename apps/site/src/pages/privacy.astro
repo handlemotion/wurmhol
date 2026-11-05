@@ -22,20 +22,20 @@ const kept = [
   {
     what: "Sign-in with Google or GitHub",
     detail:
-      "Which provider account you used, and the tokens the provider returns at sign-in. Wurmhol does not call the provider again with them.",
+      "Which provider account you used, and the tokens the provider returns at sign-in, stored encrypted (tokens from sign-ins before November 5, 2026 are encrypted the next time you sign in with that provider). Wurmhol does not call the provider again with them.",
     kept: "Until the account is deleted",
   },
   {
     what: "Sessions",
     detail:
-      "A random session id, its expiry, and the IP address and browser user agent it was created from.",
-    kept: "Until the session expires",
+      "A random session id, its expiry, and the browser user agent it was created from. No IP address.",
+    kept: "Deleted within a day of expiring",
   },
   {
     what: "Orgs and members",
     detail:
       "Org names, who belongs to which org and their role. Invite links are stored only as hashes.",
-    kept: "Until removed",
+    kept: "Until removed; invite links deleted within a day of expiring",
   },
   {
     what: "Tokens",
@@ -47,13 +47,19 @@ const kept = [
     what: "Pipe history",
     detail:
       "For each pipe: its id, org, the token that opened it, who started it, the local port number, when it started and ended, why it ended, and how many bytes it relayed.",
-    kept: "Kept as history",
+    kept: "90 days from the pipe's start, then deleted",
   },
   {
     what: "Page title and favicon",
     detail:
       "The <title> of the last HTML page and the favicon the dev server serves, so the pipe has a recognizable card on the org's wall.",
-    kept: "Favicon deleted when the pipe ends; the title stays in the pipe's record",
+    kept: "Deleted when the pipe ends",
+  },
+  {
+    what: "Sign-in links",
+    detail:
+      "Magic links and the state of a Google or GitHub sign-in in progress, each valid for minutes.",
+    kept: "Deleted within a day of expiring",
   },
   {
     what: "Billing",
@@ -70,7 +76,7 @@ const kept = [
   {
     what: "Logs",
     detail:
-      "Wurmhol's own log lines: event, route pattern, status, duration, and org, pipe and request ids. Cloudflare's platform logs also record the method and full URL of each request, including paths on a pipe.",
+      "Wurmhol's own log lines: event, route pattern, status, duration, and org, pipe and request ids. No URLs, query strings or IP addresses. Cloudflare's per-request invocation logs, which would record each URL, are turned off.",
     kept: "7 days, in Cloudflare Workers Logs",
   },
 ];
@@ -116,7 +122,8 @@ const processors = [
         <ul class="points">
           <li>
             Request and response bodies that pass through a pipe are never logged or stored. Only
-            the page's title and favicon are kept, for the org's wall.
+            the page's title and favicon are kept, for the org's wall, and only until the pipe
+            ends.
           </li>
           <li>
             Only signed-in members of the org that owns a pipe can open it. Wurmhol's own cookies
@@ -161,9 +168,9 @@ const processors = [
           kept. Wurmhol's sign-in cookie is removed before the request is forwarded.
         </p>
         <p>
-          The dev server receives the viewer's IP address in the <code>X-Forwarded-For</code> header.
-          The dev server runs wherever its owner runs it, and what it does with requests is up to
-          them.
+          The dev server does not receive the viewer's IP address: the relay removes
+          <code>X-Forwarded-For</code> and similar headers before forwarding. The dev server runs
+          wherever its owner runs it, and what it does with the requests it gets is up to them.
         </p>
       </div>
     </section>

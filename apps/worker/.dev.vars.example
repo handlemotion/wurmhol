@@ -65,6 +65,11 @@ LIMIT_MONTHLY_BYTES=100000000000
 # Longest a share stays open, in seconds. Default 12 hours.
 LIMIT_SHARE_SECONDS=43200
 
+# --- Retention (ADR 0008); the daily cron in wrangler.jsonc `triggers.crons` ---
+# Days a pipe's history (its `shares` row) is kept. Default 90. Expired sessions, sign-in links
+# and invite links are deleted by the same job whatever this is.
+RETENTION_DAYS=90
+
 # --- Rate limits as "<count>/<seconds>" or "off"; empty uses the default in wrangler.jsonc ---
 RATE_LIMIT_AUTH=
 RATE_LIMIT_MAGIC_LINK=

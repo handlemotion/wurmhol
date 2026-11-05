@@ -4,7 +4,8 @@
 // the share's limits: its lifetime, the org's monthly bytes, and membership of each viewer.
 //
 // Request and response bodies pass through and are never logged or stored. Only the `<title>`
-// of HTML responses and the favicon are kept.
+// of HTML responses and the favicon are kept, while the share is open: at its end the object
+// keeps a tombstone (`state`, `endReason`) and nothing else. The viewer's IP is not forwarded.
 import { DurableObject } from "cloudflare:workers";
 import { createDb, findMember, randomSecret, recordShareEnd, sha256Hex } from "@wurmhol/db";
 import {
@@ -44,14 +45,19 @@ export interface ShareInit {
 }
 
 interface Meta extends ShareInit {
-  state: "live" | "away" | "ended";
+  state: "live" | "away";
   awaySince: number | null;
-  endReason: string | null;
   title: string | null;
   faviconPath: string | null;
   favicon: boolean;
   lastRequestAt: number | null;
   bytes: number;
+}
+
+/** All an ended share keeps: enough to answer "ended", and why, to a viewer or its CLI. */
+interface Tombstone {
+  state: "ended";
+  endReason: EndReason;
 }
 
 export type EndReason =
@@ -80,8 +86,10 @@ const REPLACED = 4000;
 export const INTERNAL_HEADERS = {
   init: "x-wurmhol-init",
   viewer: "x-wurmhol-viewer",
-  clientIp: "x-wurmhol-client-ip",
 } as const;
+
+/** Headers that carry the viewer's IP address. */
+const CLIENT_IP = new Set(["x-forwarded-for", "x-real-ip", "true-client-ip"]);
 
 /** How long a viewer's membership check stays good before D1 is asked again. */
 const MEMBERSHIP_TTL_MS = 10_000;
@@ -191,11 +199,20 @@ export class Share extends DurableObject<Env> {
 
   // --- State -------------------------------------------------------------------------------
 
-  #meta(): Meta | undefined {
-    return this.ctx.storage.kv.get<Meta>("meta");
+  #stored(): Meta | Tombstone | undefined {
+    return this.ctx.storage.kv.get<Meta | Tombstone>("meta");
   }
 
+  /** The open share's meta; undefined when it never started or has ended. */
+  #meta(): Meta | undefined {
+    const stored = this.#stored();
+    return stored?.state === "ended" ? undefined : stored;
+  }
+
+  /** Writes an open share's meta. Never over a tombstone: a request in flight at the end must
+   * not bring the title back. */
   #save(meta: Meta) {
+    if (this.#stored()?.state === "ended") return;
     this.ctx.storage.kv.put("meta", meta);
   }
 
@@ -231,9 +248,10 @@ export class Share extends DurableObject<Env> {
 
   /** The share's state for the Worker's routing: unknown, open (live or away), or ended. */
   status() {
-    const meta = this.#meta();
-    if (!meta) return { state: "unknown" as const };
-    return { state: meta.state, orgId: meta.orgId, tokenId: meta.tokenId, port: meta.port };
+    const stored = this.#stored();
+    if (!stored) return { state: "unknown" as const };
+    if (stored.state === "ended") return { state: "ended" as const };
+    return { state: stored.state, orgId: stored.orgId, tokenId: stored.tokenId, port: stored.port };
   }
 
   /** A one-time code for `userId` (60 s, single use), after the app checked their membership. */
@@ -275,7 +293,11 @@ export class Share extends DurableObject<Env> {
 
   /** Accepts the CLI's WebSocket: a new share, or the same CLI coming back within the grace. */
   #connect(request: Request) {
-    let meta = this.#meta();
+    const stored = this.#stored();
+    if (stored?.state === "ended") {
+      return Response.json({ error: "share ended", reason: stored.endReason }, { status: 410 });
+    }
+    let meta = stored;
     const init = request.headers.get(INTERNAL_HEADERS.init);
     if (!meta) {
       if (!init) return Response.json({ error: "share not found" }, { status: 404 });
@@ -284,15 +306,12 @@ export class Share extends DurableObject<Env> {
         ...parsed,
         state: "live",
         awaySince: null,
-        endReason: null,
         title: null,
         faviconPath: null,
         favicon: false,
         lastRequestAt: null,
         bytes: 0,
       };
-    } else if (meta.state === "ended") {
-      return Response.json({ error: "share ended", reason: meta.endReason }, { status: 410 });
     }
     const { 0: client, 1: server } = new WebSocketPair();
     // One CLI per share: a reconnect replaces a socket the proxy left half-open.
@@ -320,7 +339,7 @@ export class Share extends DurableObject<Env> {
   /** One viewer request (HTTP or a browser WebSocket), already signed in by the Worker. */
   async #view(request: Request): Promise<Response> {
     const meta = this.#meta();
-    if (!meta || meta.state === "ended") return errorPage(410, "This pipe has ended.");
+    if (!meta) return errorPage(410, "This pipe has ended.");
     const viewer = request.headers.get(INTERNAL_HEADERS.viewer);
     if (!viewer || !(await this.#isMember(viewer, meta.orgId))) {
       return new Response("not a member", { status: 403, headers: { "x-wurmhol-refused": "1" } });
@@ -353,7 +372,7 @@ export class Share extends DurableObject<Env> {
     const deadline = Date.now() + AWAY_WAIT_MS;
     while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 250));
-      if (this.#meta()?.state === "ended") return false;
+      if (!this.#meta()) return false;
       if (this.#cli()) return true;
     }
     return false;
@@ -375,8 +394,9 @@ export class Share extends DurableObject<Env> {
     const headers: HeaderList = [];
     for (const [name, value] of request.headers) {
       const lower = name.toLowerCase();
-      // Cloudflare's and our own headers stay on this side; so does the share cookie.
-      if (lower.startsWith("cf-") || lower.startsWith("x-wurmhol-") || lower === "x-real-ip") {
+      // Cloudflare's and our own headers stay on this side; so does the share cookie. So does
+      // the viewer's IP, which Cloudflare puts in X-Forwarded-For: no dev server needs it.
+      if (lower.startsWith("cf-") || lower.startsWith("x-wurmhol-") || CLIENT_IP.has(lower)) {
         continue;
       }
       if (lower === "cookie") {
@@ -391,8 +411,6 @@ export class Share extends DurableObject<Env> {
     const shareUrl = new URL(meta.url);
     headers.push(["x-forwarded-host", shareUrl.host]);
     headers.push(["x-forwarded-proto", shareUrl.protocol.replace(":", "")]);
-    const ip = request.headers.get(INTERNAL_HEADERS.clientIp);
-    if (ip) headers.push(["x-forwarded-for", ip]);
     return { method: request.method, path: `${url.pathname}${url.search}`, headers };
   }
 
@@ -505,7 +523,7 @@ export class Share extends DurableObject<Env> {
     const title = extractTitle(html);
     if (!title && !final) return;
     const meta = this.#meta();
-    if (!meta || meta.state === "ended") return;
+    if (!meta) return;
     const faviconPath = extractFaviconPath(html) ?? "/favicon.ico";
     const changed = title !== null && title !== meta.title;
     if (title) meta.title = title;
@@ -538,7 +556,7 @@ export class Share extends DurableObject<Env> {
       if (body.byteLength === 0 || body.byteLength > FAVICON_MAX_BYTES) return;
       this.ctx.storage.kv.put("favicon", { type, body });
       const current = this.#meta();
-      if (!current || current.state === "ended") return;
+      if (!current) return;
       current.favicon = true;
       this.#save(current);
       await this.#org(current.orgId).update(current.id, { favicon: true });
@@ -788,7 +806,7 @@ export class Share extends DurableObject<Env> {
 
   override async alarm() {
     const meta = this.#meta();
-    if (!meta || meta.state === "ended") return;
+    if (!meta) return;
     const now = Date.now();
     if (now >= meta.startedAt + meta.limits.seconds * 1000) {
       await this.#end("expired");
@@ -823,15 +841,16 @@ export class Share extends DurableObject<Env> {
     meta.bytes += bytes;
     this.#save(meta);
     const usage = await this.#org(meta.orgId).addUsage(bytes, meta.limits.monthlyBytes);
-    if (usage.over && meta.state !== "ended") await this.#end("limit");
+    if (usage.over) await this.#end("limit");
   }
 
   async #end(reason: EndReason) {
     const meta = this.#meta();
-    if (!meta || meta.state === "ended") return;
-    meta.state = "ended";
-    meta.endReason = reason;
-    this.#save(meta);
+    if (!meta) return;
+    // Everything but the tombstone goes now: the title, the favicon, unredeemed codes. The D1
+    // `shares` row is the pipe's history.
+    this.ctx.storage.kv.put("meta", { state: "ended", endReason: reason } satisfies Tombstone);
+    this.ctx.storage.kv.delete("nextStream");
     for (const cli of this.ctx.getWebSockets("cli")) {
       try {
         cli.close(CLOSE_CODES[reason], reason);
@@ -849,7 +868,6 @@ export class Share extends DurableObject<Env> {
     const pending = this.#pendingUsage;
     this.#pendingUsage = 0;
     meta.bytes += pending;
-    this.#save(meta);
     const org = this.#org(meta.orgId);
     if (pending) await org.addUsage(pending, meta.limits.monthlyBytes);
     await org.remove(meta.id);

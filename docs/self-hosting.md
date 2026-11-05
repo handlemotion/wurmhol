@@ -100,7 +100,17 @@ Per org, enforced by the Durable Objects: `LIMIT_ACTIVE_SHARES` (5), `LIMIT_MONT
 (100 GB), `LIMIT_SHARE_SECONDS` (12 h). Rate limits: `RATE_LIMIT_AUTH`, `RATE_LIMIT_CONNECT`,
 `RATE_LIMIT_MANAGE` as `<count>/<seconds>` or `off`.
 
-## 6. Using it
+## 6. Retention
+
+A daily cron trigger (`triggers.crons` in `wrangler.jsonc`, 03:17 UTC) deletes pipe history
+(`shares` rows) older than `RETENTION_DAYS` (90), and expired sessions, sign-in links and invite
+links. `wrangler deploy` registers it; no other setup. Locally, `wrangler dev --test-scheduled`
+runs it on `GET /__scheduled`.
+
+The Worker logs only its own JSON lines: `observability.logs.invocation_logs` is `false`, so
+Cloudflare does not record each request's URL.
+
+## 7. Using it
 
 ```bash
 WURMHOL_URL=https://api.example.com WURMHOL_TOKEN=wh_… npx wurmhol 8787
@@ -109,7 +119,7 @@ WURMHOL_URL=https://api.example.com WURMHOL_TOKEN=wh_… npx wurmhol 8787
 In a sandbox with a Limited network policy, allowlist `api.example.com` (the only host the CLI
 dials).
 
-## 7. Marketing site (optional)
+## 8. Marketing site (optional)
 
 `apps/site` is hosted Wurmhol's landing page: a static Astro build that its own Worker
 (`wurmhol-site`) serves with Workers static assets. Nothing in the app depends on it, so most

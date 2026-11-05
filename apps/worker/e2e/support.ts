@@ -107,6 +107,8 @@ export interface Stack {
   port: number;
   shareUrl(id: string): string;
   db(): DatabaseSync;
+  /** Runs one write against the local D1: only to age rows, which no API can do. */
+  exec(sql: string, ...params: (string | number)[]): void;
   stop(): Promise<void>;
 }
 
@@ -146,6 +148,8 @@ export async function startStack(vars: Record<string, string> = {}): Promise<Sta
     "--persist-to",
     persist,
     "--show-interactive-dev-session=false",
+    // `GET /__scheduled` runs the cron handler.
+    "--test-scheduled",
     "--inspector-port",
     String(await freePort()),
   ];
@@ -184,6 +188,14 @@ export async function startStack(vars: Record<string, string> = {}): Promise<Sta
     output: () => output,
     shareUrl: (id) => `http://${id}.pipe.localhost:${port}`,
     db: () => new DatabaseSync(dbFile(), { readOnly: true }),
+    exec: (sql, ...params) => {
+      const db = new DatabaseSync(dbFile());
+      try {
+        db.prepare(sql).run(...params);
+      } finally {
+        db.close();
+      }
+    },
     stop: async () => {
       try {
         process.kill(-child.pid!, "SIGTERM");
@@ -212,8 +224,15 @@ export interface Person {
   cookie: string;
 }
 
-/** Signs `email` in through Better Auth's magic-link flow; the link's token is read from D1. */
-export async function signIn(stack: Stack, email = `${randomUUID()}@example.com`): Promise<Person> {
+/**
+ * Signs `email` in through Better Auth's magic-link flow; the link's token is read from D1.
+ * `headers` go on the request that creates the session.
+ */
+export async function signIn(
+  stack: Stack,
+  email = `${randomUUID()}@example.com`,
+  headers: Record<string, string> = {},
+): Promise<Person> {
   const sent = await browserFetch(`${stack.url}/api/auth/sign-in/magic-link`, {
     method: "POST",
     headers: { "content-type": "application/json", origin: stack.url },
@@ -239,6 +258,7 @@ export async function signIn(stack: Stack, email = `${randomUUID()}@example.com`
   );
   const verified = await browserFetch(
     `${stack.url}/api/auth/magic-link/verify?token=${token}&callbackURL=%2F`,
+    { headers },
   );
   const cookie = cookiesOf(verified).join("; ");
   if (!cookie.includes("session_token")) throw new Error(`no session cookie (${verified.status})`);

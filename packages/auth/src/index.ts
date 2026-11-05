@@ -240,6 +240,9 @@ export function createAuth(env: AuthEnv) {
     session: { modelName: "sessions" },
     account: {
       modelName: "accounts",
+      // The provider's access, refresh and id tokens, encrypted with BETTER_AUTH_SECRET. Wurmhol
+      // never calls the provider after sign-in; Better Auth has no switch to not store them.
+      encryptOAuthTokens: true,
       // One person, one user: an OAuth sign-in joins the user who has that address only when the
       // provider says it verified it and our user has verified it too.
       accountLinking: {
@@ -252,6 +255,9 @@ export function createAuth(env: AuthEnv) {
     verification: { modelName: "verifications" },
     advanced: {
       database: { generateId: () => uuidv7() },
+      // No IP addresses at rest (ADR 0008): `sessions.ip_address` stays empty. Better Auth's own
+      // rate limiter, which would key on it, is off; the Worker's keys on cf-connecting-ip.
+      ipAddress: { disableIpTracking: true },
       useSecureCookies: false,
       cookiePrefix: SESSION_COOKIE_PREFIX,
       defaultCookieAttributes: { secure: true, path: "/", sameSite: "lax", httpOnly: true },

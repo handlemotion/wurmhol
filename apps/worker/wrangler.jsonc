@@ -8,7 +8,11 @@
   "compatibility_flags": ["nodejs_compat"],
   // Production vars and secrets set in the dashboard or by CI survive deploys.
   "keep_vars": true,
-  "observability": { "enabled": true },
+  // Our own JSON log lines only (log.ts). Invocation logs would record every request's full URL,
+  // pipe paths and query strings included (ADR 0008).
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
+  // Daily retention (ADR 0008): prunes old pipe history and expired sign-in rows.
+  "triggers": { "crons": ["17 3 * * *"] },
   "upload_source_maps": true,
   // The web app (apps/web) is served from here, on the app's host. The Worker runs first for
   // every request: share hosts (`*.<SHARE_DOMAIN>`) must never fall through to the app's files.
@@ -46,6 +50,8 @@
     "LIMIT_ACTIVE_SHARES": "5",
     "LIMIT_MONTHLY_BYTES": "100000000000",
     "LIMIT_SHARE_SECONDS": "43200",
+    // Days a pipe's history (the `shares` row) is kept. Empty means 90.
+    "RETENTION_DAYS": "90",
     // Rate limits as "<count>/<seconds>", or "off".
     "RATE_LIMIT_AUTH": "60/60",
     // Per email address: magic links, each of which sends mail.
