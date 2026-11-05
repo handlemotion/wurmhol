@@ -108,10 +108,26 @@ you pick a variant instead of guessing. `--tsx Name` writes a React component of
    ```
 
    Copy `/tmp/ship/backdrop.tsx` into place. The caller's text class sets the ink
-   (`text-hairline-line` for a quiet backdrop). The login backdrop
-   (`apps/web/src/components/auth/wormhole*.tsx`) ships this way, with a landscape cut and a
-   portrait cut (`--size 1000x1600`; the scene transposes itself) switched by the `landscape:`
-   and `portrait:` variants. Check it on the real stack in both themes and at phone width.
+   (`text-hairline-line` for a quiet backdrop). Check it on the real stack in both themes and
+   at phone width.
+
+   **A backdrop is designed around the layout, not thrown behind it.** The thing on the page
+   (a form, a panel) must sit inside a shape of the construction (a hole, a frame), with the
+   drawing built outward from it. Never cover the drawing with a fill or fade it out to make
+   room. `plate({ origin })` draws in that element's coordinates, and `--tsx` emits the SVG
+   unscaled, offset so (0, 0) lands on its positioned parent. Anchor at a point CSS can place
+   exactly at any size (the column's centre, `top-1/2 left-1/2`), not at a child whose position
+   depends on content. The login (`apps/web/src/components/auth/wormhole*.tsx`, scene
+   `backdrop`) puts the form in the hole of a Steiner chain. `void()` is the fallback for text
+   that can't sit inside a shape.
+
+   Check an anchored plate through real viewports with `check.mjs --frame x,y,w,h` (the window
+   a screen shows, in the plate's coordinates), then on the real stack at 1440, 1024 and 390.
+
+   **Favicon** (`favicon`, `--seed 2`): the lens, on a 32px grid. `--stroke 1` with
+   `scaleStroke` (a hairline at any size) and `scheme` (inks switch with the viewer's color
+   scheme inside the file). Copy it to `apps/web/public/` and `apps/site/public/`. Preview it at
+   16, 32, 64 and 128px on light and dark before shipping; drop any mark that vanishes at 16.
 
 ## Constructions that work
 
@@ -139,7 +155,9 @@ you pick a variant instead of guessing. `--tsx Name` writes a React component of
   diagonals, voussoir joints and dimension lines in modules. The keystone is the pivot.
 - **Polar instrument** (`polar`): rings on a √2 scale, spokes every 15°, a hatched bezel, and
   routes that hop between grid crossings into the centre.
-- **Backdrop** (`backdrop`): the Apollonian construction set wide for the login.
+- **Backdrop** (`backdrop`): the login. The form sits in a 260px hole, ringed by an eccentric
+  Steiner chain that is tight on the form's left and opens into the page on its right; the hole's
+  rim is the accent.
 
 When lines converge on a point, stop them short of it (as `corridor` does). A fan of 20 lines
 into one pixel reads as a smudge.

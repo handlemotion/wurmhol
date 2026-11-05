@@ -50,6 +50,14 @@ it("emails a link that signs the person in", async () => {
   expect((await me.json()).user.email).toBe("ada@example.com");
 });
 
+it("serves the login page with its sign-in methods inline, so the buttons paint at once", async () => {
+  const api = await (await browserFetch(`${stack.url}/api/sign-in-methods`)).json();
+  const page = await (await browserFetch(`${stack.url}/login`)).text();
+  const inline = /<script id="sign-in-methods" type="application\/json">(.+?)<\/script>/.exec(page);
+  expect(inline, "the page carries no sign-in methods").not.toBeNull();
+  expect(JSON.parse(inline![1]!)).toEqual(api);
+});
+
 it("limits links per address, so nobody mail-bombs an inbox through us", async () => {
   expect((await requestLink("bob@example.com")).status).toBe(200);
   expect((await requestLink("Bob@Example.com")).status).toBe(200);

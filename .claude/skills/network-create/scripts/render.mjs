@@ -59,13 +59,23 @@ const seeds = has("seeds")
   ? Array.from({ length: Number(flag("seeds")) }, (_, i) => i + 1)
   : [seed];
 
-/** SVG markup to a React component: attributes to camelCase, `className` on the root. */
+/**
+ * SVG markup to a React component: attributes to camelCase, `className` on the root. A plate
+ * with an `origin` (a viewBox that doesn't start at 0 0) is anchored: it renders at true size,
+ * offset so its (0, 0) lands on the top left of its positioned parent. Any other plate scales
+ * to cover its box.
+ */
 function toTsx(name, svg, scene) {
+  const [x, y, w, h] = svg
+    .match(/viewBox="([^"]+)"/)[1]
+    .split(" ")
+    .map(Number);
+  const anchored = x !== 0 || y !== 0;
+  const root = anchored
+    ? `<svg $1 className={className} aria-hidden="true" style={{ position: "absolute", left: ${x}, top: ${y}, width: ${w}, height: ${h}, maxWidth: "none" }}>`
+    : '<svg $1 className={className} aria-hidden="true" preserveAspectRatio="xMidYMid slice">';
   const jsx = svg
-    .replace(
-      /<svg ([^>]*?) width="[^"]+" height="[^"]+">/,
-      '<svg $1 className={className} aria-hidden="true" preserveAspectRatio="xMidYMid slice">',
-    )
+    .replace(/<svg ([^>]*?) width="[^"]+" height="[^"]+">/, root)
     .replace(
       / ([a-z]+)-([a-z]+)(?:-([a-z]+))?=/g,
       (_, a, b, c) =>

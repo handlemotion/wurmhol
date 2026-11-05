@@ -95,6 +95,12 @@ const DEFAULT_STYLE = {
   dash: [10, 8],
   font: "ui-monospace, 'SF Mono', Menlo, monospace",
   text: 15,
+  // Icons: strokes scale with the drawing (no non-scaling-stroke), so a 32px mark keeps its
+  // proportions at 16px.
+  scaleStroke: false,
+  // Standalone files that can't inherit color (a favicon): { light, dark } inks, switched by the
+  // viewer's color scheme inside the SVG itself.
+  scheme: null,
 };
 
 export function plate(options = {}) {
@@ -102,7 +108,13 @@ export function plate(options = {}) {
 }
 
 class Plate {
-  constructor({ width = 1200, height = 1200, style = {} } = {}) {
+  /**
+   * `origin` puts (0, 0) at that point of the frame instead of its top left: a plate anchored to
+   * something on a page (a form field) is drawn in that thing's coordinates.
+   */
+  constructor({ width = 1200, height = 1200, style = {}, origin = [0, 0] } = {}) {
+    this.origin = origin;
+    this.voids = [];
     this.width = width;
     this.height = height;
     this.style = { ...DEFAULT_STYLE, ...style };
@@ -160,6 +172,15 @@ class Plate {
   /** Lines from `from` to each point: projection rays. */
   fan(from, points, o = {}) {
     for (const p of points) this.line(from, p, o);
+    return this;
+  }
+
+  /**
+   * A void: a rectangle the drawing stops at, crisply, like a plan around an opening. Use it to
+   * keep lines off the text a plate sits under; align it to that text's column.
+   */
+  void(x, y, w, h) {
+    this.voids.push({ x, y, w, h });
     return this;
   }
 
@@ -260,7 +281,10 @@ class Plate {
   samples() {
     const pts = [];
     const push = (x, y, w = 1) => {
-      if (x >= 0 && y >= 0 && x <= this.width && y <= this.height) pts.push([x, y, w]);
+      const [ox, oy] = this.origin;
+      if (x >= -ox && y >= -oy && x <= this.width - ox && y <= this.height - oy) {
+        pts.push([x + ox, y + oy, w]);
+      }
     };
     for (const it of this.items) {
       if (it.kind === "line") {
@@ -375,14 +399,32 @@ function arrowhead(p, angle, size) {
 
 function renderPlate(pl) {
   const { width: W, height: H, style: st } = pl;
-  const color = (it) => (it.accent ? st.accent : st.ink);
+  const ink = st.scheme ? "currentColor" : st.ink;
+  const color = (it) => (it.accent ? st.accent : ink);
   const dash = (it) => (it.dashed ? ` stroke-dasharray="${st.dash.join(" ")}"` : "");
   const strokeAttrs = (it) =>
-    `fill="none" stroke="${color(it)}" stroke-width="${st.stroke}" vector-effect="non-scaling-stroke"${dash(it)}`;
+    `fill="none" stroke="${color(it)}" stroke-width="${st.stroke}"${st.scaleStroke ? "" : ' vector-effect="non-scaling-stroke"'}${dash(it)}`;
   const out = [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-pl.origin[0]} ${-pl.origin[1]} ${W} ${H}" width="${W}" height="${H}">`,
   ];
-  if (st.paper) out.push(`<rect width="${W}" height="${H}" fill="${st.paper}"/>`);
+  if (st.scheme) {
+    out.push(
+      `<style>svg{color:${st.scheme.light}}@media (prefers-color-scheme:dark){svg{color:${st.scheme.dark}}}</style>`,
+    );
+  }
+  if (st.paper) {
+    out.push(
+      `<rect x="${-pl.origin[0]}" y="${-pl.origin[1]}" width="${W}" height="${H}" fill="${st.paper}"/>`,
+    );
+  }
+  // Voids: a luminance mask, white everywhere but the voids. Applied to all ink.
+  const masked = pl.voids.length > 0;
+  if (masked) {
+    out.push(
+      `<mask id="void" maskUnits="userSpaceOnUse" x="${-pl.origin[0]}" y="${-pl.origin[1]}" width="${W}" height="${H}"><rect x="${-pl.origin[0]}" y="${-pl.origin[1]}" width="${W}" height="${H}" fill="white"/>${pl.voids.map((v) => `<rect x="${f(v.x)}" y="${f(v.y)}" width="${f(v.w)}" height="${f(v.h)}" fill="black"/>`).join("")}</mask>`,
+      `<g mask="url(#void)">`,
+    );
+  }
 
   // Strokes first, then nodes and labels on top, so a node always sits on its lines.
   for (const it of pl.items) {
@@ -458,6 +500,7 @@ function renderPlate(pl) {
       }
     }
   }
+  if (masked) out.push("</g>");
   out.push("</svg>");
   return out.join("\n");
 }
