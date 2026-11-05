@@ -18,7 +18,7 @@ You can put pipes one level down on your main domain instead, like `<id>.pipe.ex
 
 ## Public Suffix List
 
-Submit your pipe domain to the [Public Suffix List](https://github.com/publicsuffix/list) so browsers treat each pipe as its own site, then one pipe's JavaScript can't read or set cookies for another. Wurmhol's own cookies are `__Host-` cookies either way. The list asks for more than two years of registration left on the domain.
+Submit your pipe domain to the [Public Suffix List](https://github.com/publicsuffix/list) so browsers treat each pipe as its own site, then one pipe's JavaScript can't read or set cookies for another. Wurmhol's own cookies are `__Host-` cookies either way, and the relay drops the `Domain` attribute from a dev server's `Set-Cookie`, so a response can only set cookies for its own pipe. Until the domain is on the list, a page's JavaScript can still set a cookie for the whole domain. The list asks for more than two years of registration left on the domain.
 
 ## Sign-in for apps behind pipes
 

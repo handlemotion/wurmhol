@@ -121,6 +121,24 @@ export function withoutCookie(cookieHeader: string, name: string): string | null
   return kept.length ? kept.join("; ") : null;
 }
 
+/**
+ * A dev server's `Set-Cookie`, as the relay hands it to the viewer: host-only, and never the
+ * share cookie. Its `Domain` attribute is dropped, so a pipe sets cookies for its own host only,
+ * not for the pipe domain and so for every other pipe on it. A cookie named like the share
+ * cookie is dropped whole (null): the dev server must not set or clear the viewer's sign-in.
+ */
+export function pipeSetCookie(setCookie: string): string | null {
+  const [pair = "", ...attributes] = setCookie.split(";");
+  const eq = pair.indexOf("=");
+  const name = (eq === -1 ? pair : pair.slice(0, eq)).trim();
+  if (name.toLowerCase() === SHARE_COOKIE.toLowerCase()) return null;
+  const kept = attributes.filter((attribute) => {
+    const key = attribute.split("=", 1)[0]!.trim().toLowerCase();
+    return key !== "domain";
+  });
+  return [pair, ...kept].join(";");
+}
+
 /** The value of cookie `name` in a `Cookie` header, or null. The first one wins, as browsers send. */
 export function readCookie(cookieHeader: string | null | undefined, name: string): string | null {
   if (!cookieHeader) return null;

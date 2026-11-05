@@ -12,6 +12,7 @@ import {
 import { parseRefusal, refusal } from "./connect.ts";
 import {
   forwardable,
+  pipeSetCookie,
   readCookie,
   SHARE_COOKIE,
   viewerRequestHeaders,
@@ -320,6 +321,24 @@ describe("headers", () => {
       ["x-forwarded-host", "abcdefghij.wurmhol.dev"],
       ["x-forwarded-proto", "https"],
     ]);
+  });
+
+  it("keeps a dev server's cookies on its own pipe host", () => {
+    // Catches: a pipe setting `Domain=<pipe domain>`, so its cookie reaches every other pipe
+    // while the pipe domain is not on the Public Suffix List.
+    expect(pipeSetCookie("sid=1; Path=/; Domain=wurmhol.dev; HttpOnly")).toBe(
+      "sid=1; Path=/; HttpOnly",
+    );
+    expect(pipeSetCookie("sid=1;domain=.wurmhol.dev;Secure; DOMAIN = x")).toBe("sid=1;Secure");
+    // A value or another attribute that only mentions domain stays.
+    expect(pipeSetCookie("domain=a.b; Path=/domain")).toBe("domain=a.b; Path=/domain");
+  });
+
+  it("never lets a dev server set or clear the share cookie", () => {
+    // Catches: a dev server overwriting or deleting the viewer's sign-in on its pipe host.
+    expect(pipeSetCookie(`${SHARE_COOKIE}=forged; Path=/; Secure`)).toBeNull();
+    expect(pipeSetCookie(` ${SHARE_COOKIE.toLowerCase()} = ; Max-Age=0`)).toBeNull();
+    expect(pipeSetCookie(`${SHARE_COOKIE}-x=1`)).toBe(`${SHARE_COOKIE}-x=1`);
   });
 
   it("reads a cookie by exact name", () => {

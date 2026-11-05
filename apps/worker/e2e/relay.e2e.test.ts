@@ -49,6 +49,8 @@ for (let i = 0; i < BIG; i += 4096) big.writeUInt32BE((i * 2654435761) >>> 0, i)
 
 describe("a share round-trip", () => {
   it("prints the URL fast, forwards to the local server, and keeps the share cookie from it", async () => {
+    // Also catches: a dev server setting a cookie for the whole pipe domain (every other pipe
+    // gets it), or setting the viewer's share cookie on its pipe host.
     const seen: { host?: string; xfh?: string; xfp?: string; cookie?: string; path?: string }[] =
       [];
     const local = await localServer((req, res) => {
@@ -65,7 +67,11 @@ describe("a share round-trip", () => {
       }
       res.writeHead(201, {
         "content-type": "text/html",
-        "set-cookie": ["a=1; Path=/", "b=2; Path=/"],
+        "set-cookie": [
+          "a=1; Path=/",
+          "b=2; Path=/; Domain=pipe.localhost",
+          "__Host-wurmhol=forged; Path=/; Secure",
+        ],
       });
       res.end(
         "<!doctype html><html><head><title>Ada&#39;s app</title></head><body>hi</body></html>",
