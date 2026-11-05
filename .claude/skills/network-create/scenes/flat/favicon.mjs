@@ -46,10 +46,10 @@ const CANDIDATES = {
   },
   /** A small and a large circle, their inner tangents crossing at the centre of similitude. */
   tangents(p) {
-    const c1 = [5, 16];
-    const r1 = 3;
-    const c2 = [23, 16];
-    const r2 = 7;
+    const c1 = [5.5, 16];
+    const r1 = 3.5;
+    const c2 = [22, 16];
+    const r2 = 9;
     p.circle(c1, r1).circle(c2, r2);
     // The inner tangents cross at I; by similar triangles each one touches the small circle at
     // I − (t − I)·r1/r2, where it touches the large one at t.
@@ -148,13 +148,26 @@ export default (o) => {
   const p = plate({
     width: 32,
     height: 32,
-    style: {
-      ink: o.ink,
-      accent: o.accent,
-      stroke: o.stroke,
-      scaleStroke: true,
-      scheme: { light: "#171717", dark: "#ededed" },
-    },
+    // `--set tile=on`: black ink on a white tile with barely rounded corners, the same on every
+    // tab bar. Otherwise bare, inked for the viewer's color scheme.
+    style:
+      o.set?.tile === "on"
+        ? {
+            ink: "#171717",
+            accent: o.accent,
+            stroke: o.stroke,
+            scaleStroke: true,
+            paper: "#ffffff",
+            paperRadius: 3,
+            inset: 3,
+          }
+        : {
+            ink: o.ink,
+            accent: o.accent,
+            stroke: o.stroke,
+            scaleStroke: true,
+            scheme: { light: "#171717", dark: "#ededed" },
+          },
   });
   const name = o.set?.name ?? NAMES[(o.seed - 1) % NAMES.length] ?? SHIPPED;
   CANDIDATES[name](p);

@@ -1765,7 +1765,7 @@ export function WormholePlate({ className }: { className?: string }) {
       />
       <circle
         fill="none"
-        stroke="var(--primary)"
+        stroke="currentColor"
         strokeWidth="1"
         vectorEffect="non-scaling-stroke"
         cx="0"

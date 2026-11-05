@@ -7,8 +7,9 @@ import { WormholePlate } from "@/components/auth/wormhole-plate";
  * the column it wraps, at true size, so the hole stays around the form at any viewport and the
  * ring opens into the page on the form's right. Nothing is drawn inside the hole, so the form
  * needs no fill or mask. The ring of circles around the hole is drawn live (`WormholeChain`):
- * it drifts around the hole and rolls with the cursor, and holds still for reduced motion. Behind the page's content (`-z-10` inside the page's `isolate`), inked
- * by `text-hairline-line`; the hole's rim takes `--primary`.
+ * it drifts around the hole and rolls with the cursor, and holds still for reduced motion.
+ * Behind the page's content (`-z-10` inside the page's `isolate`), inked by
+ * `text-hairline-line`.
  */
 export function Wormhole({
   children,

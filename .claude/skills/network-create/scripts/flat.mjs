@@ -101,6 +101,10 @@ const DEFAULT_STYLE = {
   // Standalone files that can't inherit color (a favicon): { light, dark } inks, switched by the
   // viewer's color scheme inside the SVG itself.
   scheme: null,
+  // A background tile: `paper` fills it, `paperRadius` rounds its corners, and `inset` shrinks
+  // the drawing toward the centre so it sits inside the tile with a margin (a favicon on a tile).
+  paperRadius: 0,
+  inset: 0,
 };
 
 export function plate(options = {}) {
@@ -402,8 +406,9 @@ function renderPlate(pl) {
   const ink = st.scheme ? "currentColor" : st.ink;
   const color = (it) => (it.accent ? st.accent : ink);
   const dash = (it) => (it.dashed ? ` stroke-dasharray="${st.dash.join(" ")}"` : "");
+  const zoom = st.inset ? (Math.min(W, H) - 2 * st.inset) / Math.min(W, H) : 1;
   const strokeAttrs = (it) =>
-    `fill="none" stroke="${color(it)}" stroke-width="${st.stroke}"${st.scaleStroke ? "" : ' vector-effect="non-scaling-stroke"'}${dash(it)}`;
+    `fill="none" stroke="${color(it)}" stroke-width="${f(st.stroke / zoom)}"${st.scaleStroke ? "" : ' vector-effect="non-scaling-stroke"'}${dash(it)}`;
   const out = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-pl.origin[0]} ${-pl.origin[1]} ${W} ${H}" width="${W}" height="${H}">`,
   ];
@@ -414,7 +419,13 @@ function renderPlate(pl) {
   }
   if (st.paper) {
     out.push(
-      `<rect x="${-pl.origin[0]}" y="${-pl.origin[1]}" width="${W}" height="${H}" fill="${st.paper}"/>`,
+      `<rect x="${-pl.origin[0]}" y="${-pl.origin[1]}" width="${W}" height="${H}"${st.paperRadius ? ` rx="${st.paperRadius}"` : ""} fill="${st.paper}"/>`,
+    );
+  }
+  if (st.inset) {
+    // Keep the drawing's stroke at `stroke` after the scale-down.
+    out.push(
+      `<g transform="translate(${f(W / 2)} ${f(H / 2)}) scale(${f(zoom)}) translate(${f(-W / 2)} ${f(-H / 2)})">`,
     );
   }
   // Voids: a luminance mask, white everywhere but the voids. Applied to all ink.
@@ -501,6 +512,7 @@ function renderPlate(pl) {
     }
   }
   if (masked) out.push("</g>");
+  if (st.inset) out.push("</g>");
   out.push("</svg>");
   return out.join("\n");
 }

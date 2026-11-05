@@ -3,8 +3,8 @@
 // two-line notice) reaches 249 px from the centre, so the form keeps about 60 px of air. Around the hole runs an eccentric Steiner chain: nine circles,
 // each tangent to its neighbours, to the hole and to the outer circle, built concentric and then
 // inverted so the ring is tight on the form's left and opens wide into the page on its right.
-// Nothing crosses the hole; every node is an exact tangency, and the hole's rim, the one accent,
-// is the pivot the whole construction turns on.
+// Nothing crosses the hole, and every node is an exact tangency. The rim is drawn in the same ink
+// as the rest: the form inside it is what the eye goes to, so the plate carries no accent.
 import { meet, PHI, plate } from "../../scripts/flat.mjs";
 
 const HOLE = 310;
@@ -53,7 +53,7 @@ export default (o) => {
   p.ticks(outer.c, outer.r, { count: 240, length: 7, every: 12 });
   p.circle(outer.c, outer.r * 1.08, { dashed: true });
   p.circle(outer.c, outer.r * PHI, { dashed: true });
-  p.circle(hole.c, hole.r, { accent: true });
+  p.circle(hole.c, hole.r);
   p.node([outer.c[0], 0], { size: 10 });
   p.node([outer.c[0] + outer.r, 0], { size: 8 });
 
