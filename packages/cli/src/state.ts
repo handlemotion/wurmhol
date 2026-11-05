@@ -11,6 +11,17 @@ export interface ShareState {
   pid: number;
   startedAt: string;
   endsAt: string;
+  /** What the pipe was opened with, so a repeat of the same command can reuse it. */
+  request?: ShareRequest;
+}
+
+/** The options a pipe was asked for that change what it is; `--ttl` is not one of them. */
+export interface ShareRequest {
+  name: string | null;
+  /** `--only`'s emails, trimmed, lowercased and sorted. */
+  only: string[];
+  link: string | null;
+  note: string | null;
 }
 
 /** `WURMHOL_HOME`, or `~/.wurmhol`. */
@@ -65,4 +76,15 @@ export function listStates(): ShareState[] {
     }
   }
   return states.toSorted((a, b) => a.startedAt.localeCompare(b.startedAt));
+}
+
+/** Whether `state` is the pipe `target` names: its port, its id, or a named pipe's name. */
+export function matches(state: ShareState, target: string) {
+  const wanted = target.trim().toLowerCase();
+  return (
+    state.id === target ||
+    (/^\d+$/.test(wanted) && state.port === Number(wanted)) ||
+    // A named pipe, by the first label of its host.
+    new URL(state.url).hostname.split(".")[0] === wanted
+  );
 }

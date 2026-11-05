@@ -91,7 +91,12 @@ describe("wurmhol mcp", () => {
 
     // Catches a tool missing from tools/list, or one advertised without its output schema.
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).toSorted()).toEqual(["list_pipes", "open_pipe", "stop_pipe"]);
+    expect(tools.map((t) => t.name).toSorted()).toEqual([
+      "list_pipes",
+      "open_pipe",
+      "recent_requests",
+      "stop_pipe",
+    ]);
     expect(tools.every((t) => t.outputSchema)).toBe(true);
 
     const opened = await call("open_pipe", { port: local.port });

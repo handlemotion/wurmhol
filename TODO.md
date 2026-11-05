@@ -45,12 +45,12 @@ The PSL maintainers expect, before they accept a private entry:
 - [ ] An established user base (their guidelines say roughly 2,000–3,000 distinct users).
 - [ ] A role contact address, such as `security@wurmhol.com` (Cloudflare Email Routing can forward
       it). Update the "Submitted by" line on the branch to match.
-- [ ] A public abuse and security contact page on wurmhol.com (`SECURITY.md` has the content).
+- [x] A public abuse and security contact page on wurmhol.com (`SECURITY.md` has the content).
 - [ ] Then open the pull request from `add-wurmhol` with their template, and add the TXT record
       `_psl.wurmhol.dev` with the pull request's URL as its value.
 
 ## Small things
 
-- [ ] Marketing site: an `og:image` for link previews.
+- [x] Marketing site: an `og:image` for link previews.
 - [x] `packages/cli/package.json`: `bin` as `dist/cli.js` (no `./`), which silences npm's
       "script name was invalid" publish warning. Ride along with the next CLI change.
