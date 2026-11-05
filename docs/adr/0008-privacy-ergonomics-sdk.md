@@ -165,10 +165,10 @@ Next 3000, Astro 4321, else 8787), writes the line with that port, says whether 
 
 ### 3. An SDK for orchestrators
 
-**`wurmhol/sdk`, an export of the `wurmhol` package**, which the CLI is rebuilt on:
+**`openPipe`, the export of the `wurmhol` package**, which the CLI is rebuilt on:
 
 ```ts
-import { openPipe } from "wurmhol/sdk";
+import { openPipe } from "wurmhol";
 
 const pipe = await openPipe({ port: 5173, token: process.env.WURMHOL_TOKEN! });
 pipe.url; // https://k3x9p2m7qa.pipe.wurmhol.com
@@ -177,12 +177,18 @@ pipe.on("close", (reason) => {}); // "stopped", "terminated", "expired", "revoke
 await pipe.close();
 ```
 
-- `openPipe({ port, token, server?, host?, viewers?, ttl?, signal? })` resolves once the relay
+- `openPipe({ port, token, server?, host?, viewers?, ttl?, signal?, log? })` resolves once the relay
   has given the pipe its URL, or rejects with the same one-line fix the CLI prints.
 - It runs in the caller's process, no daemon. The CLI's detached daemon is `openPipe` plus
   local state files.
 - `request` events carry metadata only and never leave the caller's process.
 - `packages/protocol` stays the only codec; the SDK bundles it like the CLI does.
+- The package's root export is the SDK and its `bin` is the CLI, as with `vite` or `esbuild`. A
+  `wurmhol/sdk` subpath would make every import longer for nothing: nobody imports the CLI.
+- `log` passes on the connection's own events (connects, drops, reconnects), the ones the CLI
+  writes to its log file, so an orchestrator can tell why a pipe went `disconnected`.
+- The SDK's types declare `on`, `once` and `off` themselves instead of extending Node's
+  `EventEmitter`, so they do not depend on a recent `@types/node`.
 
 Rejected: a separate `@wurmhol/sdk` package. Two packages from one codebase means two versions
 that drift, and an orchestrator that installs one will want the CLI too. One package, MIT, one
@@ -207,7 +213,7 @@ Each is one pull request, in a stack on `main`:
 
 1. A privacy and data page on wurmhol.com (`/privacy`), from the table above. Unblocks publishing
    Google sign-in (`TODO.md`).
-2. Extract `wurmhol/sdk`; rebuild the CLI on it, behavior unchanged.
+2. Extract the SDK (`openPipe` from `wurmhol`); rebuild the CLI on it, behavior unchanged.
 3. `wurmhol login` (device code).
 4. Data minimization: invocation logs off, no IPs, Share DO tombstones, no `X-Forwarded-For`.
 5. Token scopes and expiry, and the pipes API.
