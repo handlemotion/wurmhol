@@ -252,11 +252,6 @@ export class Org extends DurableObject<Env> {
     this.#drop((machine) => machine.tokenId === tokenId, "token revoked");
   }
 
-  /** Disconnects a person's machines: they are no longer a member of this org. */
-  dropUser(userId: string) {
-    this.#drop((machine) => machine.userId === userId, "no longer a member of this org");
-  }
-
   /** Disconnects every machine: the org is being deleted. */
   dropAll() {
     this.#drop(() => true, "org deleted");

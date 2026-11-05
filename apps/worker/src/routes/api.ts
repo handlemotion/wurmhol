@@ -8,7 +8,6 @@ import {
   listMembers,
   listOrgsForUser,
   listTokens,
-  openSharesOfToken,
   orgStanding,
   peekInvite,
   removeMember,
@@ -21,6 +20,7 @@ import { z } from "zod";
 import { type AppEnv, requireMember, requireOwner, resolveSession } from "../context.ts";
 import { SHARE_ID } from "../env.ts";
 import { limitPerMember } from "../rate-limiter.ts";
+import { endTokens, revokeTokensOfLeaver } from "../revoke.ts";
 import { billing } from "./billing.ts";
 import { machines, toOrg } from "./machines.ts";
 import { org } from "./org.ts";
@@ -163,16 +163,13 @@ export const api = new Hono<AppEnv>()
     if (!(await revokeToken(c.var.db, c.var.member.orgId, tokenId))) {
       throw new HTTPException(404, { message: "no such token" });
     }
-    for (const share of await openSharesOfToken(c.var.db, tokenId)) {
-      await c.env.SHARE.get(c.env.SHARE.idFromName(share.id)).terminate("revoked");
-    }
-    await c.env.ORG.get(c.env.ORG.idFromName(c.var.member.orgId)).dropToken(tokenId);
+    await endTokens(c.env, c.var.db, c.var.member.orgId, [tokenId]);
     return c.json({ ok: true });
   })
   .get("/members", async (c) =>
     c.json({ members: await listMembers(c.var.db, c.var.member.orgId), you: c.var.member.id }),
   )
-  /** Removes a member and disconnects their machines (ADR 0018). */
+  /** Removes a member and revokes their tokens, ending their pipes and machines (ADR 0019). */
   .delete("/members/:id", requireOwner, async (c) => {
     const orgId = c.var.member.orgId;
     const memberId = c.req.param("id");
@@ -182,7 +179,7 @@ export const api = new Hono<AppEnv>()
     if (result === "last_owner") {
       throw new HTTPException(409, { message: "an org needs at least one owner" });
     }
-    if (target) await c.env.ORG.get(c.env.ORG.idFromName(orgId)).dropUser(target.userId);
+    if (target) await revokeTokensOfLeaver(c.env, c.var.db, orgId, target.userId);
     return c.json({ ok: true });
   })
   /** A single-use invite link (spec section 3, Members). */

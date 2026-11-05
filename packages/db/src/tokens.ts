@@ -65,6 +65,16 @@ export async function revokeToken(db: Db, orgId: string, tokenId: string) {
   return revoked.length > 0;
 }
 
+/** Revokes every live token `userId` made in `orgId`: they are leaving it. Returns their ids. */
+export async function revokeTokensOf(db: Db, orgId: string, userId: string) {
+  const revoked = await db
+    .update(tokens)
+    .set({ revokedAt: new Date() })
+    .where(and(eq(tokens.orgId, orgId), eq(tokens.createdBy, userId), isNull(tokens.revokedAt)))
+    .returning({ id: tokens.id });
+  return revoked.map((token) => token.id);
+}
+
 export type TokenUse =
   | { ok: true; id: string; orgId: string; createdBy: string | null; scope: TokenScope }
   | { ok: false; reason: "unknown" | "expired" };
