@@ -1,4 +1,4 @@
-# 0012: A hosted MCP server, so a person's assistant can see and end the org's pipes
+# 0014: A hosted MCP server, so a person's assistant can see and end the org's pipes
 
 Status: proposed. Departs from ADR 0006 (the CLI's host answers more than `/connect`, `/device/*`,
 `/v1/*` and `/health`) and from spec v1 section 6 (a second kind of credential besides `wh_`
