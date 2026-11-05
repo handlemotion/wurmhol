@@ -140,16 +140,24 @@ interface WsStream {
 
 const textDecoder = new TextDecoder();
 
+const TITLE_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  "#39": "'",
+};
+
 /** The `<title>` of an HTML document's start, decoded, or null. */
 export function extractTitle(html: string): string | null {
   const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
   if (!match) return null;
+  // One pass, so `&amp;lt;` decodes to `&lt;`, not `<`.
   const title = match[1]!
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
+    .replace(
+      /&(amp|lt|gt|quot|#39);/g,
+      (whole: string, entity: string) => TITLE_ENTITIES[entity] ?? whole,
+    )
     .replace(/\s+/g, " ")
     .trim();
   return title ? title.slice(0, 200) : null;
