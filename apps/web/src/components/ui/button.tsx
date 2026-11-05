@@ -11,16 +11,14 @@ import { Loader } from "./loader";
  * React Aria's Button, for press, pending and the triggers that wrap it (MenuTrigger,
  * DialogTrigger), styled from tokens. Hover is React Aria's `data-hovered` (see styles.css), and
  * the fill, edge, label and icon all change on one 150ms ease-out, so they move together.
+ * Press changes colour only: the box never moves or shrinks, so a press near an edge stays on
+ * the button (a squeeze would pull the edge out from under the pointer and drop the click).
  */
 export const buttonStyles = tv({
   base: [
     "inline-flex items-center justify-center border",
-    "transition-[scale,background-color,border-color,color] duration-150 ease-out",
+    "transition-[background-color,border-color,color] duration-150 ease-out",
     "*:[svg]:shrink-0 *:[svg]:transition-colors *:[svg]:duration-150 *:[svg]:ease-out",
-    // Tactile press (DESIGN.md): a short squeeze on native `:active`, which never waits on a
-    // React render. Not on menu triggers (a squeezed trigger looks narrower than its menu), when
-    // disabled or pending, or under reduced motion.
-    "motion-safe:[&:active]:not-aria-[haspopup]:scale-97 disabled:[&:active]:scale-100 pending:[&:active]:scale-100",
     "outline-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
     "disabled:opacity-50 pending:opacity-50",
   ],
