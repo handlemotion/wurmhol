@@ -1,3 +1,4 @@
+import { LazyMotion } from "motion/react";
 import { useState } from "react";
 import { Skeleton } from "skullet/react";
 import {
@@ -11,12 +12,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { CopyField } from "@/components/ui/copy-field";
 import { Link } from "@/components/ui/link";
+import { SkeletonProvider } from "@/components/ui/skeleton-provider";
 import { Menu, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
 import { Text } from "@/components/ui/text";
 import {
   useMe,
   useNow,
   useOpenBilling,
+  usePrefetchDialogs,
   useSignOut,
   useSwitchOrg,
   useTerminate,
@@ -39,6 +42,10 @@ const SAMPLE: Share[] = [1, 2, 3].map((n) => ({
   views: [],
   state: "live",
 }));
+
+// Motion's animation code (the menus' hover highlight) loads after the wall's first paint, off
+// the startup path, and long before anyone opens a menu.
+const motionFeatures = () => import("@/lib/motion-features").then((m) => m.default);
 
 /** The main page: every open share of the active org, live (spec section 3, Are.na style). */
 export function Wall({ me }: { me: Me }) {
@@ -74,6 +81,7 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
   const switchOrg = useSwitchOrg();
   const signOut = useSignOut();
   const billing = useOpenBilling();
+  const prefetchDialogs = usePrefetchDialogs();
   const active = me.orgs.find((org) => org.id === me.activeOrgId);
   return (
     <header className="flex h-14 items-center justify-between gap-3 border-b border-border px-4 sm:px-8">
@@ -105,7 +113,7 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
           </Menu>
         </MenuTrigger>
       </div>
-      <MenuTrigger>
+      <MenuTrigger onOpenChange={(open) => open && prefetchDialogs()}>
         <Button intent="plain" size="sq-sm" aria-label="Menu">
           <IconEllipsis />
         </Button>
@@ -239,5 +247,11 @@ export function WallPage() {
     location.assign(`/login?next=${encodeURIComponent(location.pathname + location.search)}`);
     return null;
   }
-  return me.data ? <Wall me={me.data} /> : null;
+  return me.data ? (
+    <SkeletonProvider>
+      <LazyMotion features={motionFeatures} strict>
+        <Wall me={me.data} />
+      </LazyMotion>
+    </SkeletonProvider>
+  ) : null;
 }

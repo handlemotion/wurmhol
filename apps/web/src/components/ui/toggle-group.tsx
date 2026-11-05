@@ -27,10 +27,9 @@ export function ToggleGroup({ className, ...props }: ToggleButtonGroupProps) {
 const itemStyles = tv({
   base: [
     "inline-flex h-7 flex-1 items-center justify-center whitespace-nowrap px-3 text-sm text-muted-foreground tabular-nums outline-hidden",
-    "transition-colors duration-150 ease-out",
+    "transition-colors duration-150 ease-out hover:text-foreground",
   ],
   variants: {
-    isHovered: { true: "text-foreground" },
     isSelected: { true: "bg-accent text-accent-foreground" },
     isFocusVisible: { true: "ring-1 ring-ring" },
     isDisabled: { true: "opacity-50" },

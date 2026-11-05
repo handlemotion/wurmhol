@@ -4,6 +4,7 @@ import { Skeleton } from "skullet/react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Heading } from "@/components/ui/heading";
+import { SkeletonProvider } from "@/components/ui/skeleton-provider";
 import { Input } from "@/components/ui/input";
 import { Code, Strong, Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
@@ -138,10 +139,12 @@ function Review({ code }: { code: string }) {
 export function Device() {
   const code = new URLSearchParams(location.search).get("code")?.trim();
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-surface px-4">
-      <div className="flex w-full max-w-100 flex-col pb-12">
-        <Card className="gap-6 p-6">{code ? <Review code={code} /> : <EnterCode />}</Card>
-      </div>
-    </main>
+    <SkeletonProvider>
+      <main className="flex min-h-dvh items-center justify-center bg-surface px-4">
+        <div className="flex w-full max-w-100 flex-col pb-12">
+          <Card className="gap-6 p-6">{code ? <Review code={code} /> : <EnterCode />}</Card>
+        </div>
+      </main>
+    </SkeletonProvider>
   );
 }

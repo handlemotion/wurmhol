@@ -1,27 +1,26 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import {
   api,
-  type Me,
   type Member,
   type Share,
   type SignInMethods,
   type Token,
   type TokenExpiry,
   type TokenScope,
-  type WallEvent,
 } from "@/lib/api";
-import { setActiveOrg, signOut } from "@/lib/auth";
+import { earlyShares, takeWall } from "@/lib/live";
+import { meQuery } from "@/lib/me";
 
 export const keys = {
-  me: ["me"] as const,
+  me: meQuery.queryKey,
   methods: ["sign-in-methods"] as const,
   tokens: ["tokens"] as const,
   members: ["members"] as const,
 };
 
 export function useMe() {
-  return useQuery({ queryKey: keys.me, queryFn: () => api<Me>("/api/me"), retry: false });
+  return useQuery(meQuery);
 }
 
 export function useSignInMethods() {
@@ -32,45 +31,17 @@ export function useSignInMethods() {
 }
 
 /**
- * The active org's open shares, live: the Org Durable Object pushes a snapshot, then every start,
- * change and end (spec section 3, no polling). Reconnects with backoff if the socket drops.
+ * The active org's open shares, live (`lib/live.ts`). The first wall adopts the socket opened at
+ * startup, so a snapshot that already arrived renders on the first frame, with no skeleton.
  */
 export function useWall(orgId: string | null) {
-  const [shares, setShares] = useState<Share[] | undefined>(undefined);
+  const [shares, setShares] = useState<Share[] | undefined>(earlyShares);
   useEffect(() => {
     if (!orgId) return;
-    let socket: WebSocket | null = null;
-    let stopped = false;
-    let delay = 500;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const connect = () => {
-      const url = new URL("/api/live", location.href);
-      url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
-      socket = new WebSocket(url);
-      socket.onmessage = (message) => {
-        delay = 500;
-        const event = JSON.parse(String(message.data)) as WallEvent;
-        setShares((current) => {
-          if (event.type === "snapshot") return event.shares;
-          const list = current ?? [];
-          if (event.type === "share.ended") return list.filter((s) => s.id !== event.id);
-          const others = list.filter((s) => s.id !== event.share.id);
-          return [event.share, ...others].toSorted((a, b) => b.startedAt - a.startedAt);
-        });
-      };
-      socket.onclose = () => {
-        if (stopped) return;
-        timer = setTimeout(connect, delay);
-        delay = Math.min(delay * 2, 10_000);
-      };
-    };
-    setShares(undefined);
-    connect();
-    return () => {
-      stopped = true;
-      clearTimeout(timer);
-      socket?.close();
-    };
+    const wall = takeWall();
+    setShares(wall.shares);
+    wall.listen(setShares);
+    return () => wall.close();
   }, [orgId]);
   return shares;
 }
@@ -81,12 +52,13 @@ export function useTerminate() {
   });
 }
 
+const tokensQuery = queryOptions({
+  queryKey: keys.tokens,
+  queryFn: () => api<{ tokens: Token[] }>("/api/tokens"),
+});
+
 export function useTokens(enabled: boolean) {
-  return useQuery({
-    queryKey: keys.tokens,
-    queryFn: () => api<{ tokens: Token[] }>("/api/tokens"),
-    enabled,
-  });
+  return useQuery({ ...tokensQuery, enabled });
 }
 
 export function useCreateToken() {
@@ -109,12 +81,25 @@ export function useRevokeToken() {
   });
 }
 
+const membersQuery = queryOptions({
+  queryKey: keys.members,
+  queryFn: () => api<{ members: Member[]; you: string }>("/api/members"),
+});
+
 export function useMembers(enabled: boolean) {
-  return useQuery({
-    queryKey: keys.members,
-    queryFn: () => api<{ members: Member[]; you: string }>("/api/members"),
-    enabled,
-  });
+  return useQuery({ ...membersQuery, enabled });
+}
+
+/**
+ * Loads what the menu's dialogs show as soon as the menu opens, so Members and Tokens open on
+ * their lists instead of a skeleton. Data that's fresh (`staleTime`) isn't fetched again.
+ */
+export function usePrefetchDialogs() {
+  const client = useQueryClient();
+  return () => {
+    void client.prefetchQuery(membersQuery);
+    void client.prefetchQuery(tokensQuery);
+  };
 }
 
 export function useRemoveMember() {
@@ -134,7 +119,10 @@ export function useCreateInvite() {
 export function useSwitchOrg() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (organizationId: string) => setActiveOrg(organizationId),
+    mutationFn: async (organizationId: string) => {
+      const { setActiveOrg } = await import("@/lib/auth");
+      await setActiveOrg(organizationId);
+    },
     onSuccess: () => client.invalidateQueries(),
   });
 }
@@ -142,6 +130,7 @@ export function useSwitchOrg() {
 export function useSignOut() {
   return useMutation({
     mutationFn: async () => {
+      const { signOut } = await import("@/lib/auth");
       await signOut();
       location.assign("/login");
     },
