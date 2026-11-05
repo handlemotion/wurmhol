@@ -38,10 +38,18 @@ function month(at = Date.now()) {
   return new Date(at).toISOString().slice(0, 7);
 }
 
+/**
+ * A stored card in the current shape. Cards written by an older Worker lack the fields added
+ * since (`views`, ADR 0008); they get those fields' empty values so walls can rely on the shape.
+ */
+function current(card: Partial<ShareCard> & Pick<ShareCard, "id">): ShareCard {
+  return { views: [], ...card } as ShareCard;
+}
+
 export class Org extends DurableObject<Env> {
   #cards(): ShareCard[] {
     return [...this.ctx.storage.kv.list<ShareCard>({ prefix: "share:" })]
-      .map(([, card]) => card)
+      .map(([, card]) => current(card))
       .toSorted((a, b) => b.startedAt - a.startedAt);
   }
 
@@ -82,7 +90,7 @@ export class Org extends DurableObject<Env> {
   update(id: string, patch: Partial<Omit<ShareCard, "id">>) {
     const card = this.ctx.storage.kv.get<ShareCard>(`share:${id}`);
     if (!card) return;
-    const next = { ...card, ...patch };
+    const next = { ...current(card), ...patch };
     this.ctx.storage.kv.put(`share:${id}`, next);
     this.#broadcast({ type: "share.updated", share: next });
   }
