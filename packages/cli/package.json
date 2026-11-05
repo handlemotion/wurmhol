@@ -1,0 +1,45 @@
+{
+  "name": "wurmhol",
+  "version": "0.1.0",
+  "description": "Share a local dev server at a private HTTPS URL, from inside sandboxed cloud containers",
+  "keywords": [
+    "agent",
+    "dev server",
+    "localhost",
+    "sandbox",
+    "share",
+    "tunnel"
+  ],
+  "homepage": "https://wurmhol.com",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/handlemotion/wurmhol",
+    "directory": "packages/cli"
+  },
+  "bin": {
+    "wurmhol": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "tsdown",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "https-proxy-agent": "^9.1.0",
+    "proxy-from-env": "^2.1.0",
+    "ws": "^8.22.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
+    "@wurmhol/protocol": "workspace:*",
+    "tsdown": "^0.23.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

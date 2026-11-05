@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
+    { "path": "./packages/cli" },
     { "path": "./packages/db" },
     { "path": "./packages/auth" },
     { "path": "./packages/protocol" },

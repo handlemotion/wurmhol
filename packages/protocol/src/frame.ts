@@ -101,7 +101,7 @@ export class ProtocolError extends Error {
 }
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder("utf-8", { fatal: true });
+const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
 
 function header(type: FrameType, stream: number, payloadBytes: number) {
   if (!Number.isInteger(stream) || stream < 0 || stream > MAX_STREAM_ID) {

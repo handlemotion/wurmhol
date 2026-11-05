@@ -10,4 +10,55 @@
   "keep_vars": true,
   "observability": { "enabled": true },
   "upload_source_maps": true,
+  // The web app (apps/web) is served from here, on the app's host. The Worker runs first for
+  // every request: share hosts (`*.on.<domain>`) must never fall through to the app's files.
+  "build": { "command": "pnpm --filter @wurmhol/web build", "watch_dir": "../web/src" },
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true,
+  },
+  "vars": {
+    // `test` only in the e2e suites; `development` for `wrangler dev`.
+    "ENVIRONMENT": "production",
+    // The app's public origin: the login page, the wall, the API and `/connect`.
+    "BETTER_AUTH_URL": "http://localhost:8787",
+    // Shares live at `<id>.<SHARE_DOMAIN>`, same scheme and port as BETTER_AUTH_URL.
+    "SHARE_DOMAIN": "on.localhost",
+    "AUTH_TRUSTED_ORIGINS": "http://localhost:5173",
+    "AUTH_PASSKEY_RP_ID": "",
+    "APP_NAME": "Wurmhol",
+    "GOOGLE_CLIENT_ID": "",
+    "GITHUB_CLIENT_ID": "",
+    // Billing: off unless the STRIPE_SECRET_KEY secret is set; then the monthly price is required.
+    "STRIPE_PRICE_MONTHLY": "",
+    "STRIPE_PRICE_YEARLY": "",
+    "BILLING_TRIAL_DAYS": "7",
+    // Fair-use limits per org (spec section 4). Empty means the default shown.
+    "LIMIT_ACTIVE_SHARES": "5",
+    "LIMIT_MONTHLY_BYTES": "100000000000",
+    "LIMIT_SHARE_SECONDS": "43200",
+    // Rate limits as "<count>/<seconds>", or "off".
+    "RATE_LIMIT_AUTH": "60/60",
+    "RATE_LIMIT_CONNECT": "60/60",
+    "RATE_LIMIT_MANAGE": "60/60",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wurmhol",
+      // Replace with the id from `wrangler d1 create wurmhol` (CI does, from D1_DATABASE_ID).
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../packages/db/migrations",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "SHARE", "class_name": "Share" },
+      { "name": "ORG", "class_name": "Org" },
+      { "name": "RATE_LIMITER", "class_name": "RateLimiter" },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Share", "Org", "RateLimiter"] }],
 }

@@ -1,0 +1,62 @@
+# apps/worker local config. Copy to `.dev.vars` (read by `wrangler dev`); in production set vars
+# in wrangler.jsonc or the dashboard and secrets with `wrangler secret put <NAME>`.
+# Local D1 needs no variable: `pnpm --filter @wurmhol/worker exec wrangler d1 migrations apply
+# wurmhol --local` creates it under .wrangler/state.
+
+# --- App and shares ---
+# Public origin of the app: login, the wall, the API and `/connect` (the CLI's WURMHOL_URL).
+BETTER_AUTH_URL=http://localhost:8787
+# Shares live at <id>.<SHARE_DOMAIN>, same scheme and port as BETTER_AUTH_URL. Locally
+# `on.localhost` (browsers resolve *.localhost to this machine); in production a domain on the
+# Public Suffix List, such as on.example.com, with a wildcard certificate.
+SHARE_DOMAIN=on.localhost
+# production (default), development or test. development turns on magic-link sign-in with the
+# link printed to the wrangler console ({"event":"auth.dev_link",...}): no mail sender exists yet.
+# Never set it in production: those links sign you in.
+ENVIRONMENT=development
+
+# --- Auth (Better Auth) ---
+# Secret. At least 32 random characters: openssl rand -base64 32
+BETTER_AUTH_SECRET=
+# Comma-separated extra origins allowed to call auth endpoints (Vite's dev server).
+AUTH_TRUSTED_ORIGINS=http://localhost:5173
+# Optional. WebAuthn relying party ID; defaults to the BETTER_AUTH_URL host.
+AUTH_PASSKEY_RP_ID=
+# Optional. Name shown in passkey prompts. Defaults to "Wurmhol".
+APP_NAME=Wurmhol
+# Optional. Google OAuth client ("Web application"). Set both to show "Sign in with Google".
+# Authorized redirect URI: <BETTER_AUTH_URL>/api/auth/callback/google.
+GOOGLE_CLIENT_ID=
+# Secret.
+GOOGLE_CLIENT_SECRET=
+# Optional. GitHub OAuth app. Set both to show "Sign in with GitHub".
+# Callback URL: <BETTER_AUTH_URL>/api/auth/callback/github.
+GITHUB_CLIENT_ID=
+# Secret.
+GITHUB_CLIENT_SECRET=
+
+# --- Billing (optional; docs/self-hosting.md "Billing") ---
+# Leave STRIPE_SECRET_KEY empty for no billing: shares never need a plan.
+# Secret. Stripe secret key (sk_test_... in a sandbox).
+STRIPE_SECRET_KEY=
+# Secret, required with STRIPE_SECRET_KEY. Signing secret of the webhook endpoint
+# <BETTER_AUTH_URL>/api/auth/stripe/webhook (locally: `stripe listen` prints it).
+STRIPE_WEBHOOK_SECRET=
+# Required with STRIPE_SECRET_KEY. Price id of the monthly price ($3).
+STRIPE_PRICE_MONTHLY=
+# Optional. Price id of the yearly price ($30), the one the app pushes.
+STRIPE_PRICE_YEARLY=
+# Days a new org may share before it needs a plan. Empty: 7. 0: none.
+BILLING_TRIAL_DAYS=7
+
+# --- Fair-use limits per org (spec section 4); empty means the default ---
+LIMIT_ACTIVE_SHARES=5
+# Bytes relayed per calendar month (UTC), both directions. Default 100 GB.
+LIMIT_MONTHLY_BYTES=100000000000
+# Longest a share stays open, in seconds. Default 12 hours.
+LIMIT_SHARE_SECONDS=43200
+
+# --- Rate limits as "<count>/<seconds>" or "off"; empty uses the default in wrangler.jsonc ---
+RATE_LIMIT_AUTH=
+RATE_LIMIT_CONNECT=
+RATE_LIMIT_MANAGE=
