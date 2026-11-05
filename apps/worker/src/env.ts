@@ -82,8 +82,13 @@ const configSchema = z
     LIMIT_ACTIVE_SHARES: positive(5),
     /** Bytes relayed per org per calendar month (UTC), both directions. 100 GB by default. */
     LIMIT_MONTHLY_BYTES: positive(100 * 1000 ** 3),
-    /** Longest a share stays open, in seconds. 12 hours by default. */
+    /** Longest a share stays open, in seconds; the CLI's `--ttl` may ask up to this. 12 hours. */
     LIMIT_SHARE_SECONDS: positive(12 * 3600),
+    /**
+     * How long a share stays open when the CLI asks for no lifetime, in seconds, capped at
+     * `LIMIT_SHARE_SECONDS`. 4 hours by default (ADR 0008).
+     */
+    DEFAULT_SHARE_SECONDS: positive(4 * 3600),
     /**
      * `production` by default. `test` (the e2e suites) and `development` turn on magic-link
      * sign-in with the link logged (and kept for the suites) instead of mailed: no mail sender
