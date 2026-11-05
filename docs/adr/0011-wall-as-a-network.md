@@ -20,9 +20,10 @@ command), and it gives every card the same weight whether you're looking at it o
   under reduced motion they hold still. A new pipe comes out of the anchor.
 - **Pressing a pill opens it in place.** The pill grows into a card with a `primary` border
   where it stands, away from the anchor (its corner nearest the anchor stays put), and shrinks
-  back on close; both are fast springs. No other node moves: the layout keeps reading the pill's
-  size, the card stands over its neighbours, and a camera pans the whole network until the card
-  sits in the middle of the view, then back on close. Create pipe opens the same way. The card
+  back on close; both are fast springs. Only the pills it would cover step aside, keeping 32px
+  clear of it; the rest hold still. A camera pans the whole network until the card sits in the
+  middle of the view, then back on close, and pills it pans under the floating header fade out
+  there. Create pipe opens the same way, from the centre. The card
   holds what a pipe has: its URL (`CopyField`), port, status, who started it, when, the last
   request, its viewers, plus Open and Terminate. It has no close button: a press anywhere
   outside it, or Escape, closes it, and focus goes back to the pill.
