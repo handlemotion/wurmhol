@@ -1,7 +1,7 @@
 // The share's connection: one WebSocket to `<WURMHOL_URL>/connect`, dialed like every call to the
 // server (dial.ts). Every viewer
-// request arrives on it as a stream and is forwarded to the dev server (127.0.0.1:<port> unless
-// the owner names another host).
+// request arrives on it as a stream and is forwarded to the dev server: on 127.0.0.1 or ::1,
+// whichever answers (loopback.ts), unless the owner names another host.
 import http from "node:http";
 import {
   chunk,
@@ -31,6 +31,7 @@ import {
 import WebSocket from "ws";
 import { dial } from "./dial.ts";
 import { FixError } from "./errors.ts";
+import { Loopback, refused } from "./loopback.ts";
 import type { CloseReason, PipeSource } from "./pipe.ts";
 
 export interface ShareInfo {
@@ -55,8 +56,8 @@ export interface TunnelOptions {
   server: string;
   token: string;
   port: number;
-  /** Where the dev server listens. */
-  host: string;
+  /** Where the dev server listens; 127.0.0.1 or ::1, whichever answers, when absent. */
+  host?: string;
   /** The lifetime a new share asks for, in seconds; the relay's default when absent. */
   ttl?: number;
   /** Emails of the org members who may open a new share (`--only`); empty: the whole org. */
@@ -117,6 +118,7 @@ export class Tunnel {
   #heartbeat: NodeJS.Timeout | null = null;
   #awaitingPong = false;
   #disconnectedAt: number | null = null;
+  readonly #loopback = new Loopback();
 
   constructor(options: TunnelOptions) {
     this.#options = options;
@@ -292,7 +294,7 @@ export class Tunnel {
   #openHttp(id: number, head: RequestHead) {
     const port = this.#options.port;
     const request = http.request({
-      host: this.#options.host,
+      ...this.#loopback.target(port, this.#options.host),
       port,
       method: head.method,
       path: head.path,
@@ -315,6 +317,7 @@ export class Tunnel {
       cancelled: false,
     };
     this.#streams.set(id, stream);
+    request.on("socket", (socket) => this.#loopback.watch(port, socket));
     request.on("response", (response) => {
       stream.response = response;
       stream.status = response.statusCode ?? 502;
@@ -329,9 +332,9 @@ export class Tunnel {
       if (stream.cancelled) return;
       if (stream.status === null) {
         stream.status = 502;
-        const refused = error.code === "ECONNREFUSED";
+        const waiting = refused(error);
         const body = Buffer.from(
-          refused
+          waiting
             ? waitingPage(port)
             : `The local server on port ${port} failed: ${error.code ?? error.message}\n`,
         );
@@ -341,9 +344,9 @@ export class Tunnel {
           payload: {
             status: 502,
             headers: [
-              ["content-type", refused ? "text/html; charset=utf-8" : "text/plain; charset=utf-8"],
+              ["content-type", waiting ? "text/html; charset=utf-8" : "text/plain; charset=utf-8"],
               ["cache-control", "no-store"],
-              ...(refused ? [[WAITING_HEADER, String(port)] as [string, string]] : []),
+              ...(waiting ? [[WAITING_HEADER, String(port)] as [string, string]] : []),
             ],
           },
         });
@@ -407,10 +410,12 @@ export class Tunnel {
     // A Map, not an object literal: header names come from the browser, and one named
     // `__proto__` must not write to the object's prototype.
     const headers = new Map(localSocketHeaders(open.headers ?? [], port));
+    const { host, ...target } = this.#loopback.target(port, this.#options.host);
     const socket = new WebSocket(
-      `ws://${this.#options.host.includes(":") ? `[${this.#options.host}]` : this.#options.host}:${port}${open.path ?? "/"}`,
+      `ws://${host.includes(":") ? `[${host}]` : host}:${port}${open.path ?? "/"}`,
       open.protocols ?? [],
       {
+        ...target,
         headers: Object.fromEntries(headers),
         perMessageDeflate: false,
         maxPayload: MAX_WS_MESSAGE_BYTES,
