@@ -17,7 +17,7 @@ export interface ShareCard {
   lastRequestAt: number | null;
   /** Who opened it, most recent first (the view log, ADR 0008). */
   views: { name: string; lastSeenAt: number }[];
-  /** `away`: its CLI dropped and has up to 60 s to come back. */
+  /** `away`: its CLI dropped (or went silent) and has `AWAY_GRACE_MS` to come back. */
   state: "live" | "away";
   /** Where it came from (ADR 0015): repo, branch, commit, agent session, link and note. */
   source: PipeSource | null;

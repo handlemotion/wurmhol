@@ -36,8 +36,14 @@ export const PONG_TEXT = "wurmhol:pong";
 
 /** The CLI's heartbeat interval. */
 export const HEARTBEAT_MS = 20_000;
-/** How long a share keeps its id while its CLI is away, waiting for it to reconnect. */
+/** How long the CLI keeps trying to reconnect to its share before it gives up. */
 export const RECONNECT_GRACE_MS = 60_000;
+/**
+ * How long the relay keeps an away share (its id, URL and name) for its CLI to come back: a
+ * laptop that slept, a container that paused (ADR 0024). Longer than `RECONNECT_GRACE_MS`, so the
+ * relay never ends a share its CLI is still trying to reach.
+ */
+export const AWAY_GRACE_MS = 15 * 60_000;
 /** Largest body chunk in one `data` or `ws-message` frame. */
 export const MAX_CHUNK_BYTES = 64 * 1024;
 /** Largest `ws-message` the relay carries whole (browser WebSocket messages are not chunked). */

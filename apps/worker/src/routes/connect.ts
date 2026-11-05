@@ -1,5 +1,5 @@
 // `GET /connect`: the CLI's one WebSocket (spec section 5). The token says which org; a `share`
-// query parameter brings back a share whose CLI dropped (it keeps its id for 60 s). A new share
+// query parameter brings back a share whose CLI dropped (it keeps its id for `AWAY_GRACE_MS`). A new share
 // may ask for its lifetime in seconds (`ttl`), up to `LIMIT_SHARE_SECONDS`; without one it lasts
 // `DEFAULT_SHARE_SECONDS`.
 //

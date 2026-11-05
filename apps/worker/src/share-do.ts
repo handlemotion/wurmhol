@@ -11,6 +11,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { createDb, findMember, randomSecret, recordShareEnd, sha256Hex } from "@wurmhol/db";
 import {
+  AWAY_GRACE_MS,
   chunk,
   CLOSE_CODES,
   decodeFrame,
@@ -27,7 +28,6 @@ import {
   PONG_TEXT,
   ProtocolError,
   ReceiveWindow,
-  RECONNECT_GRACE_MS,
   REPLACED_CLOSE_CODE,
   type RequestHead,
   type ResponseHead,
@@ -287,7 +287,7 @@ export class Share extends DurableObject<Env> {
 
   #armAlarm(meta: Meta) {
     const expires = meta.startedAt + meta.limits.seconds * 1000;
-    const away = meta.awaySince === null ? Infinity : meta.awaySince + RECONNECT_GRACE_MS;
+    const away = meta.awaySince === null ? Infinity : meta.awaySince + AWAY_GRACE_MS;
     const probe = meta.probe?.at ?? Infinity;
     const silent =
       meta.state === "live" ? (this.#cliSeenAt(meta) ?? Date.now()) + CLI_SILENT_MS : Infinity;
@@ -919,11 +919,7 @@ export class Share extends DurableObject<Env> {
     const now = Date.now();
     if (now >= meta.startedAt + meta.limits.seconds * 1000) {
       await this.#end("expired");
-    } else if (
-      meta.state === "away" &&
-      meta.awaySince &&
-      now >= meta.awaySince + RECONNECT_GRACE_MS
-    ) {
+    } else if (meta.state === "away" && meta.awaySince && now >= meta.awaySince + AWAY_GRACE_MS) {
       await this.#end("disconnected");
     } else {
       if (meta.state === "live") {

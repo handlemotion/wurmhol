@@ -9,6 +9,7 @@ import {
   browserSocket,
   cli,
   cliEnv,
+  connectProxy,
   createToken,
   localServer,
   type Person,
@@ -190,6 +191,52 @@ describe("fair-use limits", () => {
       await cli(["stop", String(local.port)], env);
       expect((await cli([String(local.port)], env)).code).toBe(0);
       await stopAll(env);
+      await local.close();
+    } finally {
+      await stack.stop();
+    }
+  });
+
+  it("keeps an away pipe past its CLI's 60 s of retries, counted against the limit until Terminate", async () => {
+    // A CLI that cannot get through for longer than it retries (a proxy down for minutes) gives
+    // up after RECONNECT_GRACE_MS. The relay keeps the pipe away for AWAY_GRACE_MS: still on
+    // the wall, still one of the org's active pipes, not ended at the CLI's 60 s.
+    const stack = await startStack({ LIMIT_ACTIVE_SHARES: "1" });
+    try {
+      const ada = await signIn(stack);
+      const token = (await createToken(stack, ada)).token;
+      const local = await localServer((_req, res) => res.end("ok"));
+      const proxy = await connectProxy([stack.port]);
+      const proxied = cliEnv(stack, token, { HTTPS_PROXY: proxy.url, HTTP_PROXY: proxy.url });
+      const started = await share(stack, proxied, local.port);
+      const pid = pidOf(proxied, started.id);
+      await proxy.close();
+      const stateOf = async () => {
+        const { body } = await api<{ shares: { id: string; state: string }[] }>(
+          stack,
+          ada,
+          "/api/shares",
+        );
+        return body.shares.find((s) => s.id === started.id)?.state;
+      };
+      await waitFor(async () => (await stateOf()) === "away", { what: "the pipe away" });
+      await waitFor(() => !alive(pid), {
+        timeoutMs: 90_000,
+        intervalMs: 1000,
+        what: "the CLI to give up reconnecting",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+      expect(await stateOf()).toBe("away");
+
+      const direct = cliEnv(stack, token);
+      const refused = await cli([String(local.port)], direct);
+      expect(refused.stderr).toContain("already has 1 open pipes");
+      const { status } = await api(stack, ada, `/api/shares/${started.id}/terminate`, {
+        method: "POST",
+      });
+      expect(status).toBeLessThan(300);
+      expect((await cli([String(local.port)], direct)).code).toBe(0);
+      await stopAll(direct);
       await local.close();
     } finally {
       await stack.stop();
