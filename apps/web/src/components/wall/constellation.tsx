@@ -5,22 +5,49 @@ import { ANCHOR, grow, hash, layout, type Point, type Size } from "./constellati
 /*
  * The wall's moving layer (ADR 0011): every node is absolutely placed and moved by one frame
  * loop that writes transforms straight to the DOM, so React renders only when the data changes.
- * Each frame eases a node towards its target from `layout()` and adds a few pixels of drift, and
- * the spokes from the anchor are redrawn from the same positions, so lines never lag the nodes.
+ * Each node, the camera and the network's centring are springs: they carry their velocity, so a
+ * target that changes mid-flight (another press, a resize, a pipe arriving) bends the motion
+ * instead of restarting or snapping it. Each frame adds a few pixels of drift, and the spokes
+ * from the anchor are redrawn from the same positions, so lines never lag the nodes.
  *
  * An open card opens where its pill stands, growing away from the anchor (its corner nearest the
- * anchor stays on the pill's); the pills it would cover ease aside, and a camera eases the whole
+ * anchor stays on the pill's); the network leans away from it, and a camera carries the whole
  * network until the card sits in the middle of the view.
  */
 
 /** Drift, in px: a few pixels at most, slow enough to read as floating, not as motion. */
 const DRIFT = { pipe: 2.5, anchor: 1.5, open: 0 };
-/** How fast a node closes on its target, per second (an exponential ease-out). */
-const EASE = 7;
-/** How fast the camera closes on an open card: quicker than the nodes, it follows a press. */
-const PAN = 12;
+/** The nodes' spring: a touch under critical damping, so a pushed pill settles with a little give. */
+const NODE = { stiffness: 140, damping: 21 };
+/** The camera's and the centring's spring: critically damped, so the view never overshoots. */
+const VIEW = { stiffness: 110, damping: 21 };
+/** Integration step: small enough to keep the springs stable on a slow frame. */
+const STEP = 1 / 240;
 /** Space kept above and below the network inside the canvas. */
 const PAD = 48;
+
+interface Body {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+}
+
+/** Moves `body` towards `goal` by `dt` seconds of a damped spring (semi-implicit Euler). */
+function spring(body: Body, goal: Point, dt: number, k: { stiffness: number; damping: number }) {
+  for (let left = dt; left > 0; left -= STEP) {
+    const h = Math.min(STEP, left);
+    body.vx += (k.stiffness * (goal.x - body.x) - k.damping * body.vx) * h;
+    body.vy += (k.stiffness * (goal.y - body.y) - k.damping * body.vy) * h;
+    body.x += body.vx * h;
+    body.y += body.vy * h;
+  }
+}
+
+/** Puts `body` on `goal` at rest (reduced motion, or the first frame). */
+function settle(body: Body, goal: Point) {
+  Object.assign(body, { x: goal.x, y: goal.y, vx: 0, vy: 0 });
+}
 
 function snap(px: number) {
   const dpr = devicePixelRatio || 1;
@@ -48,9 +75,11 @@ export function Constellation(props: {
   const lines = useRef(new Map<string, SVGLineElement>());
   const backdrop = useRef<HTMLDivElement>(null);
   const targets = useRef(new Map<string, Point>());
-  const sim = useRef(new Map<string, Point>());
-  const origin = useRef({ x: 0, y: 0 });
-  const camera = useRef({ x: 0, y: 0 });
+  const sim = useRef(new Map<string, Body>());
+  /** Where the network's (0, 0) sits in the canvas: its goal, and the spring that follows it. */
+  const origin = useRef<Point | null>(null);
+  const seat = useRef<Body | null>(null);
+  const camera = useRef<Body>({ x: 0, y: 0, vx: 0, vy: 0 });
 
   const relayout = useCallback(() => {
     const box = canvas.current;
@@ -66,10 +95,16 @@ export function Constellation(props: {
     };
     // The open card, once it is showing (its pill leaves first).
     const card = open ? els.current.get(open) : undefined;
-    const result = layout({
+    const input = {
       width: box.clientWidth,
       anchor: size(ANCHOR),
       pipes: nodes.map((node) => ({ id: node.id, size: size(node.id) })),
+    };
+    // The network at rest places it in the canvas; an open card only moves nodes within that
+    // frame (and the camera), so opening one never shifts the whole network at once.
+    const rest = layout(input);
+    const result = layout({
+      ...input,
       open:
         open && card?.querySelector("[data-open]")
           ? { id: open, size: { w: card.offsetWidth, h: card.offsetHeight } }
@@ -77,15 +112,18 @@ export function Constellation(props: {
     });
     // Fill the viewport below the header, or grow past it when the network (or a card) needs it.
     const room = innerHeight - box.getBoundingClientRect().top - scrollY - PAD / 2;
-    const need = result.bottom - result.top + PAD * 2;
-    const height = Math.max(room, need, card ? card.offsetHeight + PAD * 2 : 0);
-    box.style.height = `${height}px`;
+    const need = rest.bottom - rest.top + PAD * 2;
     // Centred, a touch above the true middle where it looks centred (DESIGN.md, optics).
-    const slack = Math.max(0, height - need);
-    origin.current = {
-      x: box.clientWidth / 2,
-      y: PAD + slack / 2 - Math.min(24, slack / 4) - result.top,
-    };
+    const slack = Math.max(0, room - need);
+    const y = PAD + slack / 2 - Math.min(24, slack / 4) - rest.top;
+    const height = Math.max(
+      room,
+      need,
+      y + result.bottom + PAD,
+      card ? card.offsetHeight + PAD * 2 : 0,
+    );
+    box.style.height = `${height}px`;
+    origin.current = { x: box.clientWidth / 2, y };
     targets.current = result.at;
   }, [nodes, open]);
 
@@ -105,10 +143,11 @@ export function Constellation(props: {
     let frame = 0;
     let last = performance.now();
     const tick = (now: number) => {
-      const dt = Math.min(0.05, (now - last) / 1000);
+      // A long gap (a background tab) is cut short, so nothing leaps when the page comes back.
+      const dt = Math.min(0.064, (now - last) / 1000);
       last = now;
-      const k = still ? 1 : 1 - Math.exp(-dt * EASE);
-      const kPan = still ? 1 : 1 - Math.exp(-dt * PAN);
+      const move = (body: Body, goal: Point, k: typeof NODE) =>
+        still ? settle(body, goal) : spring(body, goal, dt, k);
       const t = now / 1000;
       // Every read before any write, so the loop never forces a layout between its writes.
       const live = new Map<string, Size>();
@@ -124,11 +163,10 @@ export function Constellation(props: {
         let p = sim.current.get(id);
         if (!p) {
           const from = sim.current.get(ANCHOR) ?? hubTarget;
-          p = { ...from };
+          p = { x: from.x, y: from.y, vx: 0, vy: 0 };
           sim.current.set(id, p);
         }
-        p.x += (target.x - p.x) * k;
-        p.y += (target.y - p.y) * k;
+        move(p, target, NODE);
         const a = still ? 0 : id === open ? DRIFT.open : id === ANCHOR ? DRIFT.anchor : DRIFT.pipe;
         const phase = hash(id, 3) * Math.PI;
         const x = p.x + a * Math.sin(t * (0.55 + hash(id, 4) * 0.15) + phase);
@@ -140,10 +178,12 @@ export function Constellation(props: {
         if (!pill || !size) continue;
         const { x: dx, y: dy } = grow(id, target, hubTarget, pill, size);
         centres.set(id, { x: x + dx, y: y + dy });
-        // The card scales in from where the pill was.
-        els.current
-          .get(id)!
-          .style.setProperty("--grow-origin", `${size.w / 2 - dx}px ${size.h / 2 - dy}px`);
+        // Where the pill stands inside the card's box: the card unfolds from that rect (`Swap`).
+        const style = els.current.get(id)!.style;
+        style.setProperty("--pill-x", `${size.w / 2 - dx}px`);
+        style.setProperty("--pill-y", `${size.h / 2 - dy}px`);
+        style.setProperty("--pill-w", `${pill.w}px`);
+        style.setProperty("--pill-h", `${pill.h}px`);
       }
 
       // The camera: an open pipe's card in the middle of what is visible of the canvas, else at
@@ -151,12 +191,14 @@ export function Constellation(props: {
       // only as far as it takes to keep the card in view (a short window).
       const focus = open ? centres.get(open) : undefined;
       const goal = { x: 0, y: 0 };
+      if (!origin.current) return void (frame = requestAnimationFrame(tick));
+      if (!seat.current) seat.current = { ...origin.current, vx: 0, vy: 0 };
       if (focus && box && view) {
         const top = Math.max(0, -view.top);
         const bottom = Math.min(box.clientHeight, innerHeight - view.top);
         const card = live.get(open!)!;
-        const x = origin.current.x + focus.x;
-        const y = origin.current.y + focus.y;
+        const x = seat.current.x + focus.x;
+        const y = seat.current.y + focus.y;
         if (open === ANCHOR) {
           const room = (bottom - top - card.h) / 2;
           const clear = Math.min(PAD / 2, Math.max(0, room));
@@ -169,10 +211,10 @@ export function Constellation(props: {
         }
       }
       const cam = camera.current;
-      cam.x += (goal.x - cam.x) * kPan;
-      cam.y += (goal.y - cam.y) * kPan;
-      const ox = origin.current.x + cam.x;
-      const oy = origin.current.y + cam.y;
+      move(cam, goal, VIEW);
+      move(seat.current, origin.current, VIEW);
+      const ox = seat.current.x + cam.x;
+      const oy = seat.current.y + cam.y;
 
       for (const [id, c] of centres) {
         const el = els.current.get(id)!;
@@ -187,10 +229,10 @@ export function Constellation(props: {
       // The backdrop holds still on the anchor's resting place: it ignores the camera's pan and the
       // Create pipe card's offset, so opening the card only scales it up where it stands. Nor does
       // it follow the anchor's drift: a whole drawing swaying would read as the page moving.
-      const seat = sim.current.get(ANCHOR);
-      if (backdrop.current && seat) {
-        const x = snap(origin.current.x + seat.x);
-        const y = snap(origin.current.y + seat.y);
+      const hubAt = sim.current.get(ANCHOR);
+      if (backdrop.current && hubAt) {
+        const x = snap(seat.current.x + hubAt.x);
+        const y = snap(seat.current.y + hubAt.y);
         backdrop.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
         backdrop.current.style.visibility = "visible";
       }
