@@ -83,6 +83,9 @@ it. It holds no values: colors, sizes, and radii live in code, so they cannot dr
 - **Hover and current.** Icons are muted by default and turn `foreground` on hover. The item for
   the page you're on is _current_ (`isCurrent`, which sets `aria-current="page"`): foreground icon
   and the `accent` fill. "Selected" is for picking items in a list, not for navigation.
+- **Text in graphics.** Text on or beside a brand graphic sits inside a shape of its construction
+  (a hole, a frame), with the lines stopping at that shape's rim. Never a white box, fill or fade
+  cut out behind it (`network-create`, "Text lives in the drawing").
 - **Weight.** Text is regular weight unless the design shows otherwise.
 - **Numbers.** Counts, times and anything that lines up in a column use `tabular-nums`, so digits
   don't shift as values change.
