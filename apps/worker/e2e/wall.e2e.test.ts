@@ -158,7 +158,7 @@ describe("the wall in a browser", () => {
     await expect.poll(() => page.locator("[data-create]").isVisible()).toBe(true);
   });
 
-  it("opens a card where its pill stands and pans it to the middle, leaving the other pills in place", async () => {
+  it("opens a card where its pill stands, moves the pills it would cover, and pans it to the middle", async () => {
     await openPipe("Second pipe");
     await openPipe("Third pipe");
     const pills = page.locator("[data-pipe]");
@@ -168,17 +168,28 @@ describe("the wall in a browser", () => {
       const box = (await page.locator(`[data-pipe="${id}"]`).boundingBox())!;
       return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     };
-    const [opened, a, b] = ids as [string, string, string];
-    const before = [await centre(a), await centre(b)];
+    const opened = ids[0]!;
+    const before = await centre(ids[1]!);
 
     await page.locator(`[data-pipe="${opened}"]`).click();
     const card = page.locator("section[data-open]");
     await expect.poll(() => card.isVisible()).toBe(true);
-    const after = [await centre(a), await centre(b)];
-    // Catches: opening a card re-running the layout, so the other pills move out of its way.
-    // The camera pans the whole network, so they move together, by the same amount.
-    expect(Math.abs(after[1]!.x - after[0]!.x - (before[1]!.x - before[0]!.x))).toBeLessThan(1.5);
-    expect(Math.abs(after[1]!.y - after[0]!.y - (before[1]!.y - before[0]!.y))).toBeLessThan(1.5);
+    // Catches: the card opening over its neighbours instead of the pills it covers stepping aside.
+    await expect
+      .poll(async () => {
+        const c = (await card.boundingBox())!;
+        const others = await page
+          .locator("[data-pipe], [data-create]")
+          .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().toJSON() as DOMRect));
+        return others.filter(
+          (o) =>
+            o.x < c.x + c.width &&
+            c.x < o.x + o.width &&
+            o.y < c.y + c.height &&
+            c.y < o.y + o.height,
+        ).length;
+      })
+      .toBe(0);
 
     // Catches: the camera not panning, leaving the card where it opened (half off-screen).
     const box = (await card.boundingBox())!;
@@ -189,9 +200,12 @@ describe("the wall in a browser", () => {
 
     await page.keyboard.press("Escape");
     await expect.poll(() => card.count()).toBe(0);
-    // Catches: the camera staying panned after the card closes.
-    const back = [await centre(a), await centre(b)];
-    expect(Math.abs(back[0]!.x - before[0]!.x)).toBeLessThan(1.5);
-    expect(Math.abs(back[0]!.y - before[0]!.y)).toBeLessThan(1.5);
+    // Catches: the camera staying panned, or a pushed pill not returning, after the card closes.
+    await expect
+      .poll(async () => {
+        const back = await centre(ids[1]!);
+        return Math.hypot(back.x - before.x, back.y - before.y) < 1.5;
+      })
+      .toBe(true);
   });
 });

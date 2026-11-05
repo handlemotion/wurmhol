@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
-import { ANCHOR, hash, layout, type Point, type Size } from "./constellation-layout";
+import { ANCHOR, grow, hash, layout, type Point, type Size } from "./constellation-layout";
 
 /*
  * The wall's moving layer (ADR 0011): every node is absolutely placed and moved by one frame
@@ -7,9 +7,9 @@ import { ANCHOR, hash, layout, type Point, type Size } from "./constellation-lay
  * Each frame eases a node towards its target from `layout()` and adds a few pixels of drift, and
  * the spokes from the anchor are redrawn from the same positions, so lines never lag the nodes.
  *
- * An open card opens where its pill stands: the layout keeps reading the pill's size, so no other
- * node moves. The card grows away from the anchor (its corner nearest the anchor stays on the
- * pill's), and a camera eases the whole network until the card sits in the middle of the view.
+ * An open card opens where its pill stands, growing away from the anchor (its corner nearest the
+ * anchor stays on the pill's); the pills it would cover ease aside, and a camera eases the whole
+ * network until the card sits in the middle of the view.
  */
 
 /** Drift, in px: a few pixels at most, slow enough to read as floating, not as motion. */
@@ -24,11 +24,6 @@ const PAD = 48;
 function snap(px: number) {
   const dpr = devicePixelRatio || 1;
   return Math.round(px * dpr) / dpr;
-}
-
-/** -1, 0 or 1: which way a node sits from the anchor, past half its own closed size. */
-function side(offset: number, half: number) {
-  return Math.abs(offset) <= half ? 0 : Math.sign(offset);
 }
 
 export interface Node {
@@ -65,16 +60,21 @@ export function Constellation(props: {
       closed.current.set(id, measured);
       return measured;
     };
+    // The open card, once it is showing (its pill leaves first).
+    const card = open ? els.current.get(open) : undefined;
     const result = layout({
       width: box.clientWidth,
       anchor: size(ANCHOR),
       pipes: nodes.map((node) => ({ id: node.id, size: size(node.id) })),
+      open:
+        open && card?.querySelector("[data-open]")
+          ? { id: open, size: { w: card.offsetWidth, h: card.offsetHeight } }
+          : null,
     });
     // Fill the viewport below the header, or grow past it when the network (or a card) needs it.
     const room = innerHeight - box.getBoundingClientRect().top - scrollY - PAD / 2;
     const need = result.bottom - result.top + PAD * 2;
-    const card = open ? (els.current.get(open)?.offsetHeight ?? 0) + PAD * 2 : 0;
-    const height = Math.max(room, need, card);
+    const height = Math.max(room, need, card ? card.offsetHeight + PAD * 2 : 0);
     box.style.height = `${height}px`;
     // Centred, a touch above the true middle where it looks centred (DESIGN.md, optics).
     const slack = Math.max(0, height - need);
@@ -134,10 +134,7 @@ export function Constellation(props: {
         const pill = closed.current.get(id);
         const size = live.get(id);
         if (!pill || !size) continue;
-        const sx = id === ANCHOR ? 0 : side(target.x - hubTarget.x, pill.w / 2);
-        const sy = id === ANCHOR ? 0 : side(target.y - hubTarget.y, pill.h / 2);
-        const dx = (sx * (size.w - pill.w)) / 2;
-        const dy = (sy * (size.h - pill.h)) / 2;
+        const { x: dx, y: dy } = grow(id, target, hubTarget, pill, size);
         centres.set(id, { x: x + dx, y: y + dy });
         // The card scales in from where the pill was.
         els.current

@@ -117,6 +117,11 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
   const canBill = me.role === "owner" && me.standing?.reason !== "billing_off";
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between gap-3 p-4">
+      {/* No bar, but a fade: pills the camera pans up dissolve under the header's pills. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[calc(100%+2rem)] bg-linear-to-b from-background from-50% to-transparent"
+      />
       <MenuTrigger>
         <Button
           intent="secondary"

@@ -4,9 +4,9 @@
  *
  * The anchor (the copy-the-command field) is the hub. Pipes sit on an ellipse around it, each
  * nudged off its even slot by a jitter hashed from its id, so the ring reads as a drawn network
- * rather than a clock face and a pipe keeps its look across renders. An open card takes no part:
- * it opens where its pill stands and the camera pans to it, so nothing else moves. When the ring
- * won't fit the width (a phone), the pipes stand in a column above and below the hub instead,
+ * rather than a clock face and a pipe keeps its look across renders. An open card opens where its
+ * pill stands, growing away from the anchor (`grow`); only the pills it would cover step aside,
+ * and the frame loop's camera pans to it. When the ring won't fit the width (a phone), the pipes stand in a column above and below the hub instead,
  * arranged so no spoke passes behind another node (`column`). A last pass pushes apart anything
  * that still overlaps and keeps every node inside the width.
  */
@@ -28,6 +28,8 @@ const GAP = 16;
 /** The ring's least spread around the anchor alone, so a few pipes don't huddle on it. */
 const MIN_RX = 260;
 const MIN_RY = 150;
+/** Clear space between an open card and the pills it pushes aside. */
+const CLEAR = GAP * 2;
 
 /** A stable number in [-1, 1) from a string (FNV-1a), for per-pipe jitter. */
 export function hash(id: string, salt = 0) {
@@ -39,13 +41,34 @@ export function hash(id: string, salt = 0) {
   return ((h >>> 0) / 2 ** 32) * 2 - 1;
 }
 
+/** -1, 0 or 1: which way a node sits from the anchor, past half its own closed size. */
+function side(offset: number, half: number) {
+  return Math.abs(offset) <= half ? 0 : Math.sign(offset);
+}
+
+/**
+ * How far an open card's centre sits from its pill's: it grows away from the anchor, so the
+ * pill's corner nearest the anchor stays put. The anchor's own card grows from its centre.
+ */
+export function grow(id: string, slot: Point, hub: Point, pill: Size, card: Size): Point {
+  if (id === ANCHOR) return { x: 0, y: 0 };
+  return {
+    x: (side(slot.x - hub.x, pill.w / 2) * (card.w - pill.w)) / 2,
+    y: (side(slot.y - hub.y, pill.h / 2) * (card.h - pill.h)) / 2,
+  };
+}
+
 export function layout(input: {
   width: number;
   anchor: Size;
   /** In wall order, at their closed (pill) sizes. */
   pipes: { id: string; size: Size }[];
+  /** The node showing its card, and the card's size. The ring is laid out as if it were closed;
+   * then the pills the card would cover step aside. Its point stays the pill's (the frame loop
+   * adds `grow`). */
+  open?: { id: string; size: Size } | null;
 }): { at: Map<string, Point>; top: number; bottom: number } {
-  const { width, anchor, pipes } = input;
+  const { width, anchor, pipes, open } = input;
   const at = new Map<string, Point>([[ANCHOR, { x: 0, y: 0 }]]);
   const sizes = new Map<string, Size>([[ANCHOR, anchor]]);
   const hub = { halfW: anchor.w / 2, halfH: anchor.h / 2, y: 0 };
@@ -84,7 +107,14 @@ export function layout(input: {
     }
   }
 
-  relax(at, sizes, width);
+  // The card, where it grows from its pill, holds still with the anchor; the rest make room.
+  const slot = open ? at.get(open.id) : undefined;
+  if (open && slot) {
+    const d = grow(open.id, slot, at.get(ANCHOR)!, sizes.get(open.id)!, open.size);
+    at.set(open.id, { x: slot.x + d.x, y: slot.y + d.y });
+    sizes.set(open.id, open.size);
+  }
+  relax(at, sizes, width, open && slot ? open.id : null);
 
   let top = Infinity;
   let bottom = -Infinity;
@@ -93,6 +123,7 @@ export function layout(input: {
     top = Math.min(top, p.y - h / 2);
     bottom = Math.max(bottom, p.y + h / 2);
   }
+  if (open && slot) at.set(open.id, slot);
   return { at, top, bottom };
 }
 
@@ -209,9 +240,14 @@ function crosses(a: Point, b: Point, centre: Point, size: Size, spare = 4) {
   return lo < hi;
 }
 
-/** Push overlapping nodes apart along the shallower axis; the anchor holds still. */
-function relax(at: Map<string, Point>, sizes: Map<string, Size>, width: number) {
-  const fixed = (id: string) => id === ANCHOR;
+/** Push overlapping nodes apart along the shallower axis; the anchor and an open card hold still. */
+function relax(
+  at: Map<string, Point>,
+  sizes: Map<string, Size>,
+  width: number,
+  open: string | null,
+) {
+  const fixed = (id: string) => id === ANCHOR || id === open;
   const ids = [...at.keys()];
   const clampX = (id: string) => {
     const p = at.get(id)!;
@@ -228,8 +264,10 @@ function relax(at: Map<string, Point>, sizes: Map<string, Size>, width: number) 
         const [sa, sb] = [sizes.get(a)!, sizes.get(b)!];
         const dx = pb.x - pa.x;
         const dy = pb.y - pa.y;
-        const ox = (sa.w + sb.w) / 2 + GAP - Math.abs(dx);
-        const oy = (sa.h + sb.h) / 2 + GAP - Math.abs(dy);
+        if (fixed(a) && fixed(b)) continue;
+        const gap = a === open || b === open ? CLEAR : GAP;
+        const ox = (sa.w + sb.w) / 2 + gap - Math.abs(dx);
+        const oy = (sa.h + sb.h) / 2 + gap - Math.abs(dy);
         if (ox <= 0 || oy <= 0) continue;
         moved = true;
         // Sideways only when there is room for it: on a narrow screen, stack instead.
