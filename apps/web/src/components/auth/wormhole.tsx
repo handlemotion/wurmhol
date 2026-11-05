@@ -1,74 +1,53 @@
-import { useEffect, useRef } from "react";
+import { cn } from "cn";
 
 /**
- * The login backdrop: concentric hairline rings that crowd together toward the centre, like
- * looking down a tunnel, and fade out as they go deeper so the middle is pure dark. The rings
- * drift slowly inward, each one taking the place of the next, so the tunnel loops seamlessly.
- * The form sits in the dark throat. Drawn in the foreground's ink, so it follows the theme.
+ * The login backdrop: concentric hairline rings, each a fixed fraction of the one outside it, so
+ * they crowd toward the centre like looking down a tunnel. The whole set shrinks by that
+ * fraction once per cycle (`animate-wormhole` in styles.css), which moves every ring exactly
+ * into its inner neighbour's place, so the fall loops seamlessly. It is one transform on one
+ * layer, so the compositor runs it and nothing on top repaints. A radial mask fades the rings
+ * out toward the dark centre, where the form sits, and at the edges. Drawn in the foreground's
+ * ink, so it follows the theme.
  */
-const RINGS = 10;
-/** Larger spacing out at the edge, tighter near the centre: the tunnel's perspective. */
-const DEPTH = 2.6;
-/** The outermost ring's radius, in viewBox units; the viewBox is 2000 wide, so it overflows. */
-const RADIUS = 1400;
-const PEAK_OPACITY = 0.12;
-/** How long one ring takes to move into the next one's place. */
-const PERIOD_MS = 6000;
+/** Each ring's radius over the one outside it. Must match the `wormhole` keyframe's scale. */
+const RATIO = 0.72;
+/**
+ * Enough rings that the outermost stays past the viewport's corners at the end of a cycle. The
+ * SVG is drawn at 150% of the page, so even shrunk by `RATIO` it still covers every edge.
+ */
+const RINGS = 14;
+/** The outermost ring's radius, in viewBox units; the viewBox is 2000 wide. */
+const RADIUS = 2000;
+const OPACITY = 0.12;
 
-/** A ring at depth `t` (0 is the centre, 1 the outermost ring). */
-function ring(t: number) {
-  // Rings fade into the dark centre, and ease off at the very edge so none ends abruptly.
-  const edge = t > 0.85 ? Math.max(0, 1 - (t - 0.85) / 0.15) : 1;
-  return { r: RADIUS * t ** DEPTH, opacity: PEAK_OPACITY * t ** 1.4 * edge };
-}
-
-/** Ring `i` at `phase` (0 to 1 of the way to its inner neighbour's place). */
-const depth = (i: number, phase: number) => (i + 1 - phase) / RINGS;
+const radii = Array.from({ length: RINGS }, (_, i) => RADIUS * RATIO ** i);
 
 export function Wormhole({ className }: { className?: string }) {
-  const circles = useRef<(SVGCircleElement | null)[]>([]);
-
-  useEffect(() => {
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    let frame = 0;
-    const start = performance.now();
-    const tick = (now: number) => {
-      const phase = ((now - start) % PERIOD_MS) / PERIOD_MS;
-      circles.current.forEach((circle, i) => {
-        if (!circle) return;
-        const { r, opacity } = ring(depth(i, phase));
-        circle.setAttribute("r", String(r));
-        circle.setAttribute("stroke-opacity", String(opacity));
-      });
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, []);
-
   return (
-    <svg
+    <div
       aria-hidden
-      className={className}
-      viewBox="-1000 -1000 2000 2000"
-      preserveAspectRatio="xMidYMid slice"
-      fill="none"
+      className={cn("overflow-hidden", className)}
+      style={{
+        maskImage:
+          "radial-gradient(circle farthest-corner, transparent 10%, black 45%, black 70%, transparent 100%)",
+      }}
     >
-      {Array.from({ length: RINGS }, (_, i) => {
-        const { r, opacity } = ring(depth(i, 0));
-        return (
+      <svg
+        className="absolute -inset-1/4 size-[150%] animate-wormhole will-change-transform motion-reduce:animate-none"
+        viewBox="-1000 -1000 2000 2000"
+        preserveAspectRatio="xMidYMid slice"
+        fill="none"
+      >
+        {radii.map((r) => (
           <circle
-            key={i}
-            ref={(el) => {
-              circles.current[i] = el;
-            }}
+            key={r}
             r={r}
             stroke="currentColor"
-            strokeOpacity={opacity}
+            strokeOpacity={OPACITY}
             vectorEffect="non-scaling-stroke"
           />
-        );
-      })}
-    </svg>
+        ))}
+      </svg>
+    </div>
   );
 }
