@@ -10,9 +10,19 @@
 // host every time, held by the first org to use the name, one open pipe per name. The OAuth
 // relay's label (ADR 0010) is no pipe's name.
 //
+// `Wurmhol-Source` says where a new pipe came from (ADR 0012): URI-encoded JSON of
+// `@wurmhol/protocol`'s `PipeSource`, every field optional and bounded. It goes on the share's
+// history row and its card on the wall.
+//
 // Refusals answer with plain HTTP before the upgrade, as `{ error, fix }`: the CLI prints `fix`,
 // one line that says what to do.
-import { formatDuration, PIPE_NAME_RULE, pipeName } from "@wurmhol/protocol";
+import {
+  formatDuration,
+  parsePipeSource,
+  PIPE_NAME_RULE,
+  pipeName,
+  type SourceResult,
+} from "@wurmhol/protocol";
 import {
   findMembersByEmail,
   findShare,
@@ -29,6 +39,22 @@ import { INTERNAL_HEADERS, type ShareInit } from "../share-do.ts";
 /** The header that names a new share's viewers, comma-separated emails. */
 export const VIEWERS_HEADER = "wurmhol-viewers";
 const MAX_VIEWERS = 50;
+/** The header that says where a new share came from (ADR 0012). */
+export const SOURCE_HEADER = "wurmhol-source";
+/** Bigger than any source within `SOURCE_LIMITS`, URI-encoded. */
+const MAX_SOURCE_HEADER = 24 * 1024;
+
+function readSource(header: string | undefined): SourceResult {
+  if (!header) return { ok: true, source: null };
+  if (header.length > MAX_SOURCE_HEADER) {
+    return { ok: false, field: "note", fix: "The pipe's source is too long." };
+  }
+  try {
+    return parsePipeSource(JSON.parse(decodeURIComponent(header)));
+  } catch {
+    return { ok: false, field: "note", fix: "The pipe's source is not URI-encoded JSON." };
+  }
+}
 
 export const connect = new Hono<AppEnv>().get("/", async (c) => {
   if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
@@ -90,6 +116,8 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
   if (name && name === reservedPipeName(config)) {
     return refuse(409, "name reserved", `The pipe name ${name} is reserved. Pick another --name.`);
   }
+  const source = readSource(c.req.header(SOURCE_HEADER));
+  if (!source.ok) return refuse(400, `bad ${source.field}`, source.fix);
   let viewers: string[] | null = null;
   const named = (c.req.header(VIEWERS_HEADER) ?? "")
     .split(",")
@@ -117,6 +145,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
     startedBy: token.createdBy,
     port,
     name,
+    source: source.source,
   });
   if (!started.ok) {
     return started.reason === "taken"
@@ -142,6 +171,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
     startedBy: starter?.name || starter?.email || null,
     startedAt: started.startedAt.getTime(),
     viewers,
+    source: source.source,
     limits: { seconds, monthlyBytes: config.LIMIT_MONTHLY_BYTES },
   };
   const org = c.env.ORG.get(c.env.ORG.idFromName(token.orgId));
@@ -157,6 +187,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
       lastRequestAt: null,
       views: [],
       state: "live",
+      source: init.source,
     },
     { active: config.LIMIT_ACTIVE_SHARES, monthlyBytes: config.LIMIT_MONTHLY_BYTES },
   );

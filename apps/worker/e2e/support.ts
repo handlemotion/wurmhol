@@ -328,9 +328,14 @@ export interface CliRun {
 }
 
 /** Runs the real CLI to completion (`wurmhol <port>` returns once its daemon is ready). */
-export async function cli(args: string[], env: Record<string, string>): Promise<CliRun> {
+export async function cli(
+  args: string[],
+  env: Record<string, string>,
+  options: { cwd?: string } = {},
+): Promise<CliRun> {
   const started = Date.now();
   const child = spawn(process.execPath, [cliPath, ...args], {
+    cwd: options.cwd,
     env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });

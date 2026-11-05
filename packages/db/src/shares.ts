@@ -5,6 +5,18 @@ import type { Db } from "./client.ts";
 import { randomShareId } from "./crypto.ts";
 import { pipeNames, shares, shareViews, users } from "./schema/index.ts";
 
+/** Where a pipe came from (ADR 0012): `@wurmhol/protocol`'s `PipeSource`, already checked. */
+export interface ShareSource {
+  repoHost: string | null;
+  repo: string | null;
+  branch: string | null;
+  commit: string | null;
+  link: string | null;
+  note: string | null;
+  agent: string | null;
+  agentUrl: string | null;
+}
+
 /**
  * Records a new share under a fresh id. The primary key makes an id unique forever; on the
  * astronomically rare collision, another id is drawn.
@@ -20,11 +32,26 @@ export async function recordShareStart(
     startedBy: string | null;
     port: number;
     name?: string | null;
+    /** Where the pipe came from (ADR 0012), already checked with `parsePipeSource`. */
+    source?: ShareSource | null;
   },
 ): Promise<
   { ok: true; id: string; startedAt: Date } | { ok: false; reason: "taken" | "open"; port?: number }
 > {
   const name = input.name ?? null;
+  const { source, ...share } = input;
+  const columns = source
+    ? {
+        repoHost: source.repoHost,
+        repo: source.repo,
+        branch: source.branch,
+        commitSha: source.commit,
+        link: source.link,
+        note: source.note,
+        agent: source.agent,
+        agentUrl: source.agentUrl,
+      }
+    : {};
   if (name) {
     await db.insert(pipeNames).values({ name, orgId: input.orgId }).onConflictDoNothing();
     const [owner] = await db
@@ -37,7 +64,7 @@ export async function recordShareStart(
     const id = randomShareId();
     const inserted = await db
       .insert(shares)
-      .values({ id, ...input, name })
+      .values({ id, ...share, ...columns, name })
       .onConflictDoNothing()
       .returning({ id: shares.id, startedAt: shares.startedAt });
     if (inserted[0]) return { ok: true, ...inserted[0] };

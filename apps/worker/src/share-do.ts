@@ -26,6 +26,7 @@ import {
   forwardable,
   type HeaderList,
   HttpStreamOrder,
+  type PipeSource,
   PING_TEXT,
   PONG_TEXT,
   ProtocolError,
@@ -53,6 +54,8 @@ export interface ShareInit {
   startedAt: number;
   /** User ids that may open it (`--only`); null: every member of the org. */
   viewers: string[] | null;
+  /** Where it came from (ADR 0012), as the CLI said; null when it said nothing. */
+  source: PipeSource | null;
   limits: { seconds: number; monthlyBytes: number };
 }
 

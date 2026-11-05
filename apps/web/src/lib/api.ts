@@ -44,6 +44,20 @@ export interface Share {
   lastRequestAt: number | null;
   views: { name: string; lastSeenAt: number }[];
   state: "live" | "away";
+  /** Where it came from (ADR 0012); null when its CLI said nothing. */
+  source: PipeSource | null;
+}
+
+/** `@wurmhol/protocol`'s `PipeSource`: what the CLI said about where the pipe came from. */
+export interface PipeSource {
+  repoHost: string | null;
+  repo: string | null;
+  branch: string | null;
+  commit: string | null;
+  link: string | null;
+  note: string | null;
+  agent: string | null;
+  agentUrl: string | null;
 }
 
 export type WallEvent =

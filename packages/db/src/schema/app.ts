@@ -68,6 +68,23 @@ export const shares = sqliteTable(
     endReason: text("end_reason"),
     /** Bytes relayed both ways. Bodies themselves are never stored. */
     bytes: integer("bytes").default(0).notNull(),
+    // Where the pipe came from (ADR 0012): what the CLI that opened it said about itself, each
+    // field bounded and checked by `@wurmhol/protocol`'s `parsePipeSource`. Null when not sent.
+    /** The forge's host, like `github.com`. */
+    repoHost: text("repo_host"),
+    /** The repo's path on the forge, like `owner/name`. */
+    repo: text("repo"),
+    branch: text("branch"),
+    /** Full commit hash. */
+    commitSha: text("commit_sha"),
+    /** `--link`: an http(s) URL. */
+    link: text("link"),
+    /** `--note`: one line. */
+    note: text("note"),
+    /** The agent that opened it, like `Claude Code`. */
+    agent: text("agent"),
+    /** The agent session's page, http(s). */
+    agentUrl: text("agent_url"),
   },
   (table) => [
     index("shares_org_idx").on(table.orgId, table.endedAt),

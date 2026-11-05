@@ -35,7 +35,7 @@ import {
   useWall,
 } from "@/hooks/use-app";
 import { useClipboard } from "@/hooks/use-clipboard";
-import type { Me, Share } from "@/lib/api";
+import type { Me, PipeSource, Share } from "@/lib/api";
 import { ago } from "@/lib/time";
 import { MembersDialog } from "./members-dialog";
 import { Constellation } from "./constellation";
@@ -53,6 +53,7 @@ const SAMPLE: Share[] = [1, 2, 3].map((n) => ({
   lastRequestAt: null,
   views: [],
   state: "live",
+  source: null,
 }));
 
 // Motion's animation code (the menus' hover highlight) loads after the wall's first paint, off
@@ -398,6 +399,61 @@ function PipePill({ share, onPress }: { share: Share; onPress: () => void }) {
   );
 }
 
+/** An external link in a card's row: the value's own colour, the arrow muted until hover. */
+function RowLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group inline-flex items-center gap-0.5"
+    >
+      {children}
+      <IconArrowUpRight className="size-3 text-muted-foreground group-hover:text-foreground" />
+    </Link>
+  );
+}
+
+/**
+ * "Claude Code session ↗ · feat/checkout @ a1b2c3d": the agent (a link to its session when the
+ * environment named one), then the branch and short commit. Null when the source names neither.
+ */
+function From({ source }: { source: PipeSource }) {
+  const git = [source.branch, source.commit && `@ ${source.commit.slice(0, 7)}`]
+    .filter(Boolean)
+    .join(" ");
+  const agent = source.agent ?? (source.agentUrl ? "Agent" : null);
+  const parts = [
+    agent &&
+      (source.agentUrl ? (
+        <RowLink key="agent" href={source.agentUrl}>
+          {agent} session
+        </RowLink>
+      ) : (
+        <span key="agent">{agent}</span>
+      )),
+    git ? <span key="git">{git}</span> : source.repo && <span key="git">{source.repo}</span>,
+  ].filter(Boolean);
+  if (!parts.length) return null;
+  // The parts wrap onto a second line rather than cut off the commit; each one truncates alone.
+  return (
+    <span className="flex flex-wrap gap-x-1">
+      {parts.map((part, i) => (
+        <span key={i} className="flex max-w-full min-w-0 gap-x-1">
+          <span className="truncate">{part}</span>
+          {i < parts.length - 1 && <span className="text-muted-foreground">·</span>}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** A link's host and path, short enough for a row. */
+function shortUrl(href: string) {
+  const url = new URL(href);
+  return `${url.host}${url.pathname === "/" ? "" : url.pathname}`;
+}
+
 /** Viewers named in a card; the rest are counted. */
 const VIEWS_SHOWN = 3;
 
@@ -412,7 +468,30 @@ function PipeCard({ share }: { share: Share }) {
     ...shown.map((view) => `${view.name}, ${ago(view.lastSeenAt, now)}`),
     share.views.length > shown.length ? `+${share.views.length - shown.length}` : null,
   ].filter(Boolean);
-  const rows: [string, string][] = [
+  const { source } = share;
+  const from =
+    source && (source.agent || source.agentUrl || source.branch || source.commit || source.repo);
+  const rows: [string, React.ReactNode, string?][] = [
+    ...(from
+      ? [
+          [
+            "From",
+            <From source={source} />,
+            // The full repo, branch and commit on hover; the row shows them short.
+            [source.repo, source.branch, source.commit].filter(Boolean).join(" · "),
+          ] as [string, React.ReactNode, string],
+        ]
+      : []),
+    ...(source?.note ? [["Note", source.note, source.note] as [string, string, string]] : []),
+    ...(source?.link
+      ? [
+          ["Link", <RowLink href={source.link}>{shortUrl(source.link)}</RowLink>, source.link] as [
+            string,
+            React.ReactNode,
+            string,
+          ],
+        ]
+      : []),
     ["Port", String(share.port)],
     ["Status", share.state === "live" ? "Live" : "Reconnecting"],
     ["Started by", share.startedBy ?? "Unknown"],
@@ -437,10 +516,12 @@ function PipeCard({ share }: { share: Share }) {
       </div>
       <CopyField label="URL" value={share.url} />
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
-        {rows.map(([term, value]) => (
+        {rows.map(([term, value, title]) => (
           <Fragment key={term}>
             <dt className="text-muted-foreground">{term}</dt>
-            <dd className="min-w-0 truncate text-foreground tabular-nums">{value}</dd>
+            <dd title={title} className="min-w-0 truncate text-foreground tabular-nums">
+              {value}
+            </dd>
           </Fragment>
         ))}
       </dl>
