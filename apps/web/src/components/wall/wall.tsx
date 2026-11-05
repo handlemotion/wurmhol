@@ -6,13 +6,16 @@ import { Skeleton } from "skullet/react";
 import {
   IconChevronsUpDown,
   IconCreditCard,
+  IconDoorOpen,
   IconEllipsis,
   IconArrowUpRight,
   IconCheck,
   IconExternalLink,
   IconLaptop,
+  IconPencil,
   IconPlus,
   IconSparkles,
+  IconTrash,
   IconKey,
   IconLogOut,
   IconUsers,
@@ -49,6 +52,7 @@ import type { Me, Share } from "@/lib/api";
 import { initials } from "@/lib/initials";
 import { ago } from "@/lib/time";
 import { MembersDialog } from "./members-dialog";
+import { type OrgAction, OrgDialog } from "./org-dialogs";
 import { Constellation } from "./constellation";
 import { ANCHOR } from "./constellation-layout";
 import { TokensDialog } from "./tokens-dialog";
@@ -101,6 +105,8 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
   const billing = useOpenBilling();
   const prefetchDialogs = usePrefetchDialogs();
   const active = me.orgs.find((org) => org.id === me.activeOrgId);
+  const [orgAction, setOrgAction] = useState<OrgAction | null>(null);
+  const owner = me.role === "owner";
   // Owners manage billing; with billing off (self-hosted) there is nothing to open.
   const canBill = me.role === "owner" && me.standing?.reason !== "billing_off";
   return (
@@ -120,7 +126,11 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
           placement="bottom start"
           selectionMode="single"
           selectedKeys={me.activeOrgId ? [me.activeOrgId] : []}
-          onAction={(key) => switchOrg.mutate(String(key))}
+          onAction={(key) => {
+            const action = ORG_ACTIONS.find((a) => a.id === key);
+            if (action) setOrgAction(action.id);
+            else switchOrg.mutate(String(key));
+          }}
           popover={{ className: "max-w-72" }}
         >
           <MenuSection aria-label="Signed in as">
@@ -152,8 +162,24 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
               </MenuItem>
             )}
           </MenuSection>
+          {active && <MenuSeparator />}
+          {active && (
+            <MenuSection aria-label={active.name}>
+              {ORG_ACTIONS.filter((a) => owner || !a.owner).map(({ id, label, Icon, danger }) => (
+                <MenuItem key={id} id={id} intent={danger ? "danger" : undefined}>
+                  <Icon />
+                  <MenuLabel>{label}</MenuLabel>
+                </MenuItem>
+              ))}
+            </MenuSection>
+          )}
         </Menu>
       </MenuTrigger>
+      <OrgDialog
+        action={orgAction}
+        orgName={active?.name ?? ""}
+        onClose={() => setOrgAction(null)}
+      />
       <nav
         aria-label="Org"
         className="absolute start-1/2 hidden -translate-x-1/2 gap-2 sm:flex"
@@ -212,6 +238,13 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
     </header>
   );
 }
+
+/** What the switcher offers for the active org; owners rename and delete. */
+const ORG_ACTIONS = [
+  { id: "rename", label: "Rename org", Icon: IconPencil, owner: true, danger: false },
+  { id: "leave", label: "Leave org", Icon: IconDoorOpen, owner: false, danger: false },
+  { id: "delete", label: "Delete org", Icon: IconTrash, owner: true, danger: true },
+] as const;
 
 const COMMAND = "npx wurmhol <port>";
 const PROMPT =

@@ -96,6 +96,13 @@ export const app = new Hono<AppEnv>()
   .on(["GET", "POST"], ["/api/auth/device", "/api/auth/device/*"], (c) =>
     c.json({ error: "use /api/device" }, 404),
   )
+  // Orgs are changed through /api (routes/org.ts), which allows only our two roles, keeps
+  // everyone in an org and ends a deleted org's pipes. Switching the active org stays here.
+  .post("/api/auth/organization/:action", async (c, next) =>
+    c.req.param("action") === "set-active"
+      ? next()
+      : c.json({ error: "use /api/org and /api/members" }, 404),
+  )
   // Development sends no mail: the link comes back in the response, for the login page to show.
   .post("/api/auth/sign-in/magic-link", limitAuth, async (c) => {
     const response = await c.var.auth.handler(c.req.raw);
