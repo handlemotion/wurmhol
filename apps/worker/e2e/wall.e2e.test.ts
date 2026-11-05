@@ -225,8 +225,9 @@ describe("the wall in a browser", () => {
     const run = card.getByRole("button", {
       name: /^Copy run: npx wurmhol@latest host --code \S+$/,
     });
-    // Catches: the steps opening without the command to run, or in a card of another size.
-    await expect.poll(() => run.count()).toBe(1);
+    // Catches: the steps opening without the command to run, or in a card of another size. The
+    // command waits on the card's setup-code request, as the pills wait on the wall's feed.
+    await expect.poll(() => run.count(), { timeout: 5000 }).toBe(1);
     expect((await card.boundingBox())!.width).toBe((await card.boundingBox())!.height);
     // Catches: a card still asking to approve a link in the terminal.
     expect(await card.textContent()).not.toContain("Approve");
