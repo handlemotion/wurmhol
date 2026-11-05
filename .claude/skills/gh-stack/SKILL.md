@@ -16,8 +16,17 @@ metadata:
 
 The upstream guidance below is generic; where it conflicts with `AGENTS.md`, the repo rules win:
 
-- **Setup lines are off-limits.** Do not run `git config ...`. Install the extension once with
+- **Setup lines are off-limits.** Do not run `git config ...`. Cloud environments get the
+  extension from `kickoff.sh`; elsewhere, install it once with
   `gh extension install github/gh-stack` if `gh stack` is missing.
+- **Claude Code cloud sessions block GitHub GraphQL**, so `submit`, `checkout <pr>`, `merge` and
+  anything else that looks up PRs fails there with a 403. Local commands (`init`, `add`, `up`,
+  `down`, `rebase`, `view --json`) work. To link a stack from a cloud session: build the layers
+  with `gh stack init`/`add`, push each branch with `git push -u origin <branch>`, open each PR
+  with the GitHub MCP tools (base = the layer below), then link them bottom-first through the
+  REST stacks API (at least two PRs, each based on the one below):
+  `gh api -X POST repos/{owner}/{repo}/stacks --input - <<<'{"pull_requests":[<bottom>,...,<top>]}'`.
+  `gh api 'repos/{owner}/{repo}/stacks?pull_request=<n>'` reads a PR's stack.
 - **Merge only when the user (or the coordinating session the user put in charge) asks for that
   PR.** A stack merges through `gh stack merge <target> --yes --squash` (the `main` ruleset
   requires squash merges and the `Checks` status); never enable auto-merge. Stacks merge
