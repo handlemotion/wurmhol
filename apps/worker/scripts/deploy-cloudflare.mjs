@@ -6,7 +6,7 @@
 //
 //   D1_DATABASE_ID      replaces the placeholder D1 id (required)
 //   WORKER_DOMAIN       custom domains for the app, comma-separated (e.g. wurmhol.com)
-//   WORKER_ROUTE        routes, comma-separated, for the share wildcard (e.g. *.on.wurmhol.com/*):
+//   WORKER_ROUTE        routes, comma-separated, for the share wildcard (e.g. *.pipe.wurmhol.com/*):
 //                       custom domains cannot be wildcards
 //   WORKER_VAR_<NAME>   the Worker var <NAME>; `--var` wins over wrangler.jsonc's value
 //

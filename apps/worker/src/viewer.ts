@@ -1,4 +1,4 @@
-// Requests to a share host, `<id>.on.wurmhol.com` (spec section 6). Every one needs the viewer's
+// Requests to a share host, `<id>.pipe.wurmhol.com` (spec section 6). Every one needs the viewer's
 // `__Host-wurmhol` cookie for this share; without it a page navigation goes to the app to sign
 // in (`/open`), and comes back with a one-time code that this swaps for the cookie. The cookie
 // is stripped before anything reaches the dev server.
@@ -35,11 +35,11 @@ function isNavigation(request: Request) {
 
 export async function handleShareHost(request: Request, env: Env, shareId: string) {
   const config = loadConfig(env);
-  if (!shareId) return errorPage(404, "This share has ended.");
+  if (!shareId) return errorPage(404, "This pipe has ended.");
   const stub = env.SHARE.get(env.SHARE.idFromName(shareId));
   const status = await stub.status();
   if (status.state === "unknown" || status.state === "ended") {
-    return errorPage(410, "This share has ended.");
+    return errorPage(410, "This pipe has ended.");
   }
   const url = new URL(request.url);
 
@@ -47,8 +47,7 @@ export async function handleShareHost(request: Request, env: Env, shareId: strin
   if (url.pathname === `${RESERVED_PREFIX}auth`) {
     const code = url.searchParams.get("code");
     const userId = code ? await stub.redeemCode(code) : null;
-    if (!userId)
-      return errorPage(400, "This sign-in link has expired. Open the share's URL again.");
+    if (!userId) return errorPage(400, "This sign-in link has expired. Open the pipe's URL again.");
     const cookie = await signShareCookie(config.auth.secret, {
       shareId,
       userId,
@@ -92,7 +91,7 @@ export async function handleShareHost(request: Request, env: Env, shareId: strin
 /** Step 1: an unknown viewer goes to the app's `/open`; anything else that is not a page, 401. */
 function signIn(request: Request, appURL: string, shareId: string) {
   if (!isNavigation(request)) {
-    return new Response("sign in to view this share", {
+    return new Response("sign in to view this pipe", {
       status: 401,
       headers: { "content-type": "text/plain", "cache-control": "no-store" },
     });

@@ -7,11 +7,11 @@
 # Public origin of the app: login, the wall, the API and `/connect` (the CLI's WURMHOL_URL).
 BETTER_AUTH_URL=http://localhost:8787
 # Shares live at <id>.<SHARE_DOMAIN>, same scheme and port as BETTER_AUTH_URL. Locally
-# `on.localhost` (browsers resolve *.localhost to this machine); in production a domain on the
-# Public Suffix List, such as on.example.com, with a wildcard certificate.
-SHARE_DOMAIN=on.localhost
+# `pipe.localhost` (browsers resolve *.localhost to this machine); in production a domain on the
+# Public Suffix List, such as pipe.example.com, with a wildcard certificate.
+SHARE_DOMAIN=pipe.localhost
 # production (default), development or test. development turns on magic-link sign-in with the
-# link printed to the wrangler console ({"event":"auth.dev_link",...}): no mail sender exists yet.
+# link printed to the wrangler console ({"event":"auth.dev_link",...}), with or without MAIL_FROM.
 # Never set it in production: those links sign you in.
 ENVIRONMENT=development
 
@@ -22,8 +22,12 @@ BETTER_AUTH_SECRET=
 AUTH_TRUSTED_ORIGINS=http://localhost:5173
 # Optional. WebAuthn relying party ID; defaults to the BETTER_AUTH_URL host.
 AUTH_PASSKEY_RP_ID=
-# Optional. Name shown in passkey prompts. Defaults to "Wurmhol".
+# Optional. Name shown in passkey prompts and sign-in mail. Defaults to "Wurmhol".
 APP_NAME=Wurmhol
+# Optional. Sender of magic-link mail through Cloudflare Email Service (ADR 0005), on a domain
+# onboarded under Email Service -> Email Sending; the `EMAIL` binding in wrangler.jsonc sends it.
+# Empty: no magic links in production. wrangler dev simulates the binding and logs each email.
+MAIL_FROM=
 # Optional. Google OAuth client ("Web application"). Set both to show "Sign in with Google".
 # Authorized redirect URI: <BETTER_AUTH_URL>/api/auth/callback/google.
 GOOGLE_CLIENT_ID=
@@ -36,18 +40,17 @@ GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
 
 # --- Billing (optional; docs/self-hosting.md "Billing") ---
-# Leave STRIPE_SECRET_KEY empty for no billing: shares never need a plan.
+# Leave STRIPE_SECRET_KEY empty for no billing: pipes never need a plan.
 # Secret. Stripe secret key (sk_test_... in a sandbox).
 STRIPE_SECRET_KEY=
 # Secret, required with STRIPE_SECRET_KEY. Signing secret of the webhook endpoint
 # <BETTER_AUTH_URL>/api/auth/stripe/webhook (locally: `stripe listen` prints it).
 STRIPE_WEBHOOK_SECRET=
-# Required with STRIPE_SECRET_KEY. Price id of the monthly price ($3).
-STRIPE_PRICE_MONTHLY=
-# Optional. Price id of the yearly price ($30), the one the app pushes.
+# Required with STRIPE_SECRET_KEY (ADR 0004). Price id of the yearly plan ($12/year).
 STRIPE_PRICE_YEARLY=
-# Days a new org may share before it needs a plan. Empty: 7. 0: none.
-BILLING_TRIAL_DAYS=7
+# Optional. Price id of a monthly price. Empty offers yearly only. There is no trial: an org buys
+# the plan before its first pipe.
+STRIPE_PRICE_MONTHLY=
 
 # --- Fair-use limits per org (spec section 4); empty means the default ---
 LIMIT_ACTIVE_SHARES=5
@@ -58,5 +61,6 @@ LIMIT_SHARE_SECONDS=43200
 
 # --- Rate limits as "<count>/<seconds>" or "off"; empty uses the default in wrangler.jsonc ---
 RATE_LIMIT_AUTH=
+RATE_LIMIT_MAGIC_LINK=
 RATE_LIMIT_CONNECT=
 RATE_LIMIT_MANAGE=

@@ -11,7 +11,7 @@
   "observability": { "enabled": true },
   "upload_source_maps": true,
   // The web app (apps/web) is served from here, on the app's host. The Worker runs first for
-  // every request: share hosts (`*.on.<domain>`) must never fall through to the app's files.
+  // every request: share hosts (`*.pipe.<domain>`) must never fall through to the app's files.
   "build": { "command": "pnpm --filter @wurmhol/web build", "watch_dir": "../web/src" },
   "assets": {
     "directory": "../web/dist",
@@ -25,25 +25,33 @@
     // The app's public origin: the login page, the wall, the API and `/connect`.
     "BETTER_AUTH_URL": "http://localhost:8787",
     // Shares live at `<id>.<SHARE_DOMAIN>`, same scheme and port as BETTER_AUTH_URL.
-    "SHARE_DOMAIN": "on.localhost",
+    "SHARE_DOMAIN": "pipe.localhost",
     "AUTH_TRUSTED_ORIGINS": "http://localhost:5173",
     "AUTH_PASSKEY_RP_ID": "",
     "APP_NAME": "Wurmhol",
+    // Sender of magic-link mail (ADR 0005), on a domain onboarded to Email Service. Empty: no
+    // magic links in production (development and test log the link instead).
+    "MAIL_FROM": "",
     "GOOGLE_CLIENT_ID": "",
     "GITHUB_CLIENT_ID": "",
-    // Billing: off unless the STRIPE_SECRET_KEY secret is set; then the monthly price is required.
-    "STRIPE_PRICE_MONTHLY": "",
+    // Billing (ADR 0004): off unless the STRIPE_SECRET_KEY secret is set; then a price is required.
+    // Yearly is the plan; a monthly price is optional. No trial: orgs buy before the first pipe.
     "STRIPE_PRICE_YEARLY": "",
-    "BILLING_TRIAL_DAYS": "7",
+    "STRIPE_PRICE_MONTHLY": "",
     // Fair-use limits per org (spec section 4). Empty means the default shown.
     "LIMIT_ACTIVE_SHARES": "5",
     "LIMIT_MONTHLY_BYTES": "100000000000",
     "LIMIT_SHARE_SECONDS": "43200",
     // Rate limits as "<count>/<seconds>", or "off".
     "RATE_LIMIT_AUTH": "60/60",
+    // Per email address: magic links, each of which sends mail.
+    "RATE_LIMIT_MAGIC_LINK": "5/900",
     "RATE_LIMIT_CONNECT": "60/60",
     "RATE_LIMIT_MANAGE": "60/60",
   },
+  // Sign-in mail (ADR 0005): Cloudflare Email Service. Onboard the domain of MAIL_FROM under
+  // Email Service → Email Sending. `wrangler dev` simulates the binding and logs each email.
+  "send_email": [{ "name": "EMAIL" }],
   "d1_databases": [
     {
       "binding": "DB",

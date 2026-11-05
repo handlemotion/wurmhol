@@ -11,9 +11,9 @@ import { RESERVED_PREFIX, safePath } from "../viewer.ts";
 export const open = new Hono<AppEnv>().get("/", async (c) => {
   const shareId = c.req.query("share") ?? "";
   const next = safePath(c.req.query("next"));
-  if (!SHARE_ID.test(shareId)) return errorPage(404, "This share has ended.");
+  if (!SHARE_ID.test(shareId)) return errorPage(404, "This pipe has ended.");
   const share = await findShare(c.var.db, shareId);
-  if (!share || share.endedAt) return errorPage(410, "This share has ended.");
+  if (!share || share.endedAt) return errorPage(410, "This pipe has ended.");
 
   const here = `/open?${new URLSearchParams({ share: shareId, next })}`;
   const login = (reason?: string) => {

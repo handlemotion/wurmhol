@@ -16,3 +16,4 @@ wrangler.deploy.jsonc
 *.pem
 .context/
 .firecrawl/
+.claude/worktrees/

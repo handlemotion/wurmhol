@@ -29,7 +29,7 @@ export interface Me {
   orgs: { id: string; name: string; role: string }[];
   activeOrgId: string | null;
   role: "owner" | "member" | null;
-  standing: { ok: boolean; reason: string; trialEndsAt: string | null } | null;
+  standing: { ok: boolean; reason: "billing_off" | "subscribed" | "no_subscription" } | null;
 }
 
 /** One card on the wall (apps/worker/src/org-do.ts `ShareCard`). */

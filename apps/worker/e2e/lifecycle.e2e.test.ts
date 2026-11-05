@@ -92,7 +92,7 @@ describe("the wall and Terminate", () => {
     expect(Date.now() - terminatedAt).toBeLessThan(5000);
     const ended = await browserFetch(`${started.url}/`, { cookie });
     expect(ended.status).toBe(410);
-    expect(await ended.text()).toContain("This share has ended.");
+    expect(await ended.text()).toContain("This pipe has ended.");
     // The history records how it ended.
     const db = stack.db();
     expect(db.prepare("select end_reason from shares where id = ?").get(started.id)).toEqual({
@@ -148,7 +148,7 @@ describe("fair-use limits", () => {
       const results = await Promise.all([0, 1, 2].map(() => cli([String(local.port)], env)));
       expect(results.filter((r) => r.code === 0)).toHaveLength(2);
       const refused = results.find((r) => r.code !== 0)!;
-      expect(refused.stderr).toContain("already has 2 open shares");
+      expect(refused.stderr).toContain("already has 2 open pipes");
       await cli(["stop", String(local.port)], env);
       expect((await cli([String(local.port)], env)).code).toBe(0);
       await stopAll(env);
