@@ -13,9 +13,9 @@ import { createMcpHandler, McpServer, requireScopes } from "@modelcontextprotoco
 import { z } from "zod";
 import { checkToken } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
+import { SHARE_ID, type ShareCard } from "@wurmhol/protocol";
 import { endShare } from "../ending.ts";
-import { SHARE_ID } from "../env.ts";
-import { orgStub, type ShareCard } from "../org-do.ts";
+import { orgStub } from "../org-do.ts";
 import { checkRateLimit } from "../rate-limiter.ts";
 
 type Vars = AppEnv["Variables"];

@@ -2,7 +2,7 @@
 // share of a revoked token, whose machines disconnect too.
 import { type Db, findShare, openSharesOfToken, revokeTokensOf } from "@wurmhol/db";
 import type { AppEnv } from "./context.ts";
-import { SHARE_ID } from "./env.ts";
+import { SHARE_ID } from "@wurmhol/protocol";
 import { orgStub } from "./org-do.ts";
 import { shareStub } from "./share-do.ts";
 

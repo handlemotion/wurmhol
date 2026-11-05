@@ -4,7 +4,8 @@
 // Wurmhol needs around them: only our two roles, nobody left without an org, no deleting an org
 // that is still paying, its open pipes and machines ended, and a leaving member's tokens revoked.
 import { zValidator } from "@hono/zod-validator";
-import { APIError, ROLES } from "@wurmhol/auth";
+import { APIError } from "@wurmhol/auth";
+import { ROLES } from "@wurmhol/protocol";
 import { listOrgsForUser, orgSubscription } from "@wurmhol/db";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";

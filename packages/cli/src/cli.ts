@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
   formatDuration,
+  isPort,
   parseDuration,
   PIPE_NAME_RULE,
   pipeName,
@@ -81,7 +82,7 @@ function fail(error: unknown): never {
 
 function parsePort(value: string | undefined) {
   const port = Number(value);
-  if (!value || !/^\d+$/.test(value) || port < 1 || port > 65535) return null;
+  if (!value || !/^\d+$/.test(value) || !isPort(port)) return null;
   return port;
 }
 
