@@ -107,6 +107,13 @@ export interface Stack {
   port: number;
   shareUrl(id: string): string;
   db(): DatabaseSync;
+  /**
+   * Stops wrangler dev and starts it again on the same port and persisted state, as a deploy
+   * replaces the Worker. `whileStopped` runs in between, with no process holding the state.
+   */
+  restart(whileStopped?: () => void | Promise<void>): Promise<void>;
+  /** The SQLite file of every Durable Object of `className` (e.g. `Org`). */
+  durableObjects(className: string): string[];
   stop(): Promise<void>;
 }
 
@@ -146,32 +153,49 @@ export async function startStack(vars: Record<string, string> = {}): Promise<Sta
     "--persist-to",
     persist,
     "--show-interactive-dev-session=false",
-    "--inspector-port",
-    String(await freePort()),
   ];
   for (const [key, value] of Object.entries(allVars)) args.push("--var", `${key}:${value}`);
-  const child = spawn(wrangler, args, {
-    cwd: workerRoot,
-    env: { ...process.env, CI: "1", NO_COLOR: "1" },
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: true,
-  });
   let output = "";
-  child.stdout.on("data", (d: Buffer) => (output += d.toString()));
-  child.stderr.on("data", (d: Buffer) => (output += d.toString()));
-  try {
-    await waitFor(
-      async () => {
-        if (child.exitCode !== null) throw new Error(`wrangler dev exited:\n${output}`);
-        const response = await fetch(`${url}/health`).catch(() => null);
-        return response?.ok;
-      },
-      { timeoutMs: 60_000, intervalMs: 200, what: "wrangler dev" },
-    );
-  } catch (error) {
-    process.kill(-child.pid!, "SIGKILL");
-    throw error;
-  }
+  const launch = async () => {
+    const inspector = ["--inspector-port", String(await freePort())];
+    const child = spawn(wrangler, [...args, ...inspector], {
+      cwd: workerRoot,
+      env: { ...process.env, CI: "1", NO_COLOR: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+    });
+    child.stdout.on("data", (d: Buffer) => (output += d.toString()));
+    child.stderr.on("data", (d: Buffer) => (output += d.toString()));
+    try {
+      await waitFor(
+        async () => {
+          if (child.exitCode !== null) throw new Error(`wrangler dev exited:\n${output}`);
+          const response = await fetch(`${url}/health`).catch(() => null);
+          return response?.ok;
+        },
+        { timeoutMs: 60_000, intervalMs: 200, what: "wrangler dev" },
+      );
+    } catch (error) {
+      process.kill(-child.pid!, "SIGKILL");
+      throw error;
+    }
+    return child;
+  };
+  const kill = async (child: ChildProcess) => {
+    const exited = new Promise((resolve) => child.once("exit", resolve));
+    try {
+      process.kill(-child.pid!, "SIGTERM");
+    } catch {
+      // Already gone.
+    }
+    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 2000))]);
+    try {
+      process.kill(-child.pid!, "SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  };
+  let child = await launch();
   const dbFile = () => {
     const dir = join(persist, "v3/d1/miniflare-D1DatabaseObject");
     const file = readdirSync(dir).find((f) => f.endsWith(".sqlite") && f !== "metadata.sqlite");
@@ -184,18 +208,21 @@ export async function startStack(vars: Record<string, string> = {}): Promise<Sta
     output: () => output,
     shareUrl: (id) => `http://${id}.pipe.localhost:${port}`,
     db: () => new DatabaseSync(dbFile(), { readOnly: true }),
+    restart: async (whileStopped) => {
+      await kill(child);
+      await whileStopped?.();
+      child = await launch();
+    },
+    durableObjects: (className) => {
+      const dir = join(persist, "v3/do", `wurmhol-${className}`);
+      return existsSync(dir)
+        ? readdirSync(dir)
+            .filter((f) => f.endsWith(".sqlite") && f !== "metadata.sqlite")
+            .map((f) => join(dir, f))
+        : [];
+    },
     stop: async () => {
-      try {
-        process.kill(-child.pid!, "SIGTERM");
-      } catch {
-        // Already gone.
-      }
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      try {
-        process.kill(-child.pid!, "SIGKILL");
-      } catch {
-        // Already gone.
-      }
+      await kill(child);
       rmSync(persist, { recursive: true, force: true });
     },
   };
