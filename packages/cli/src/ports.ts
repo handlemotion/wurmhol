@@ -60,11 +60,12 @@ function titleOf(html: string) {
   const raw = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1]?.trim();
   if (!raw) return null;
   const text = raw
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    // Last, so `&amp;lt;` reads as `&lt;`, not `<`.
+    .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ");
   return text.slice(0, 200) || null;
 }
