@@ -172,6 +172,12 @@ you pick a variant instead of guessing. `--tsx Name` writes a React component of
   from outside, and their inner tangents cross at the internal centre of similitude, the grant,
   the accent. A half square on the left circumscribes the hole, so the plate balances.
 
+- **Link preview** (`og`): the marketing site's `og:image`, 1200x630. Common tangents on the
+  right (`container` small, `browser` large), the pivot tagged with a pipe host as the accent;
+  the wordmark and headline sit in a void on the left (`TEXT`). `apps/site/scripts/og.mjs` adds
+  the text in Inter and writes `apps/site/public/og.png`; check its composite SVG, not the bare
+  plate, since the text is part of the balance.
+
 - **Ended** (`ended`): the Worker's own pages on a share host (ended, reconnecting, refused). A
   square duct in one-point perspective, frames growing by √φ from a closed end wall; the message
   sits on that wall, and every line stops at it.
