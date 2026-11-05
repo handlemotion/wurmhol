@@ -188,6 +188,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
       views: [],
       state: "live",
       source: init.source,
+      preview: null,
     },
     { active: config.LIMIT_ACTIVE_SHARES, monthlyBytes: config.LIMIT_MONTHLY_BYTES },
   );

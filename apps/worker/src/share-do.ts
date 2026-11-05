@@ -40,6 +40,8 @@ import {
   type WsClosePayload,
   type WsOpenPayload,
 } from "@wurmhol/protocol";
+import { loadConfig } from "./env.ts";
+import { type Preview, postPreview, retirePreview } from "./github.ts";
 import { createLogger } from "./log.ts";
 import { errorPage } from "./pages.ts";
 
@@ -67,6 +69,8 @@ interface Meta extends ShareInit {
   favicon: boolean;
   lastRequestAt: number | null;
   bytes: number;
+  /** Deployments on the pipe's pull request (ADR 0016); absent in pipes from before it. */
+  previews?: Preview[];
 }
 
 /** One viewer's line in the view log, with their name for the wall once looked up. */
@@ -212,6 +216,7 @@ export class Share extends DurableObject<Env> {
   #pendingUsage = 0;
   #lastUsageFlush = 0;
   #lastRequestPush = 0;
+  #previewing: Promise<void> | null = null;
   #log = createLogger({ component: "share" });
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -307,6 +312,39 @@ export class Share extends DurableObject<Env> {
     await this.#end(reason);
   }
 
+  /**
+   * Posts the pipe to the open pull request of its branch, once (ADR 0016): when it starts, and
+   * again when GitHub says a pull request for its branch opened. Calls at once share one attempt.
+   */
+  preview() {
+    this.#previewing ??= this.#preview().finally(() => (this.#previewing = null));
+    return this.#previewing;
+  }
+
+  async #preview() {
+    const meta = this.#meta();
+    const config = loadConfig(this.env);
+    if (!meta?.source || !config.github || meta.previews?.length) return;
+    try {
+      const preview = await postPreview(config.github, createDb(this.env.DB), meta);
+      if (!preview) return;
+      const current = this.#meta();
+      if (!current) {
+        // The pipe ended while the deployment was being made: retire it now.
+        await retirePreview(config.github, preview);
+        return;
+      }
+      current.previews = [preview];
+      this.#save(current);
+      await this.#org(current.orgId).update(current.id, {
+        preview: { pullRequest: preview.pullRequest, url: preview.pullRequestUrl },
+      });
+      this.#log.info("share.preview_posted", { shareId: meta.id, orgId: meta.orgId });
+    } catch (error) {
+      this.#log.warn("share.preview_failed", { shareId: meta.id, orgId: meta.orgId, error });
+    }
+  }
+
   /** The dev server's favicon, as last fetched through the CLI, or null. */
   favicon(): { type: string; body: ArrayBuffer } | null {
     return this.ctx.storage.kv.get<{ type: string; body: ArrayBuffer }>("favicon") ?? null;
@@ -328,6 +366,7 @@ export class Share extends DurableObject<Env> {
     }
     let meta = stored;
     const init = request.headers.get(INTERNAL_HEADERS.init);
+    const isNew = !meta;
     if (!meta) {
       if (!init) return Response.json({ error: "share not found" }, { status: 404 });
       const parsed = JSON.parse(init) as ShareInit;
@@ -358,6 +397,7 @@ export class Share extends DurableObject<Env> {
     this.#save(meta);
     this.#armAlarm(meta);
     if (wasAway) this.ctx.waitUntil(this.#org(meta.orgId).update(meta.id, { state: "live" }));
+    if (isNew && meta.source) this.ctx.waitUntil(this.preview());
     return new Response(null, {
       status: 101,
       webSocket: client,
@@ -936,6 +976,19 @@ export class Share extends DurableObject<Env> {
     if (usage.over) await this.#end("limit");
   }
 
+  /** Marks the pipe's deployments inactive; a failure is logged, never fatal to the end. */
+  async #retirePreviews(meta: Meta) {
+    const github = loadConfig(this.env).github;
+    if (!github) return;
+    for (const preview of meta.previews ?? []) {
+      try {
+        await retirePreview(github, preview);
+      } catch (error) {
+        this.#log.warn("share.preview_retire_failed", { shareId: meta.id, error });
+      }
+    }
+  }
+
   async #end(reason: EndReason) {
     const meta = this.#meta();
     if (!meta) return;
@@ -968,6 +1021,7 @@ export class Share extends DurableObject<Env> {
       this.ctx.storage.kv.delete(key);
     }
     await org.remove(meta.id);
+    await this.#retirePreviews(meta);
     await recordShareEnd(createDb(this.env.DB), { id: meta.id, reason, bytes: meta.bytes });
     this.#log.info("share.ended", {
       shareId: meta.id,

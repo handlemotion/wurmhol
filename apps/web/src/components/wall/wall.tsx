@@ -49,6 +49,7 @@ import {
   useWall,
 } from "@/hooks/use-app";
 import { useClipboard } from "@/hooks/use-clipboard";
+import { useGithub } from "@/hooks/use-github";
 import type { Me, PipeSource, Share } from "@/lib/api";
 import { initials } from "@/lib/initials";
 import { ago } from "@/lib/time";
@@ -70,6 +71,7 @@ const SAMPLE: Share[] = [1, 2, 3].map((n) => ({
   views: [],
   state: "live",
   source: null,
+  preview: null,
 }));
 
 // Motion's animation code (the menus' hover highlight) loads after the wall's first paint, off
@@ -519,6 +521,23 @@ function From({ source }: { source: PipeSource }) {
   );
 }
 
+/**
+ * The pull request the pipe is posted to (ADR 0016). Before it is, an owner of an org with no
+ * GitHub account linked for the pipe's repo gets the way to link one. Null: no row.
+ */
+function usePullRequest(share: Share): React.ReactNode {
+  const me = useMe();
+  const onGithub = share.source?.repoHost === "github.com" && Boolean(share.source.repo);
+  const github = useGithub(me.data?.role === "owner" && onGithub && !share.preview);
+  if (share.preview) {
+    return <RowLink href={share.preview.url}>#{share.preview.pullRequest}</RowLink>;
+  }
+  const account = share.source?.repo?.split("/")[0]?.toLowerCase();
+  const linked = github.data?.installations.some((i) => i.account.toLowerCase() === account);
+  if (!github.data?.available || linked) return null;
+  return <RowLink href="/api/github/install">Connect GitHub</RowLink>;
+}
+
 /** A link's host and path, short enough for a row. */
 function shortUrl(href: string) {
   const url = new URL(href);
@@ -540,6 +559,7 @@ function PipeCard({ share }: { share: Share }) {
     share.views.length > shown.length ? `+${share.views.length - shown.length}` : null,
   ].filter(Boolean);
   const { source } = share;
+  const pullRequest = usePullRequest(share);
   const from =
     source && (source.agent || source.agentUrl || source.branch || source.commit || source.repo);
   const rows: [string, React.ReactNode, string?][] = [
@@ -563,6 +583,7 @@ function PipeCard({ share }: { share: Share }) {
           ],
         ]
       : []),
+    ...(pullRequest ? [["Pull request", pullRequest] as [string, React.ReactNode]] : []),
     ["Port", String(share.port)],
     ["Status", share.state === "live" ? "Live" : "Reconnecting"],
     ["Started by", share.startedBy ?? "Unknown"],

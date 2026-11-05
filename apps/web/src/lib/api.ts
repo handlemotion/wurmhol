@@ -46,6 +46,8 @@ export interface Share {
   state: "live" | "away";
   /** Where it came from (ADR 0015); null when its CLI said nothing. */
   source: PipeSource | null;
+  /** The pull request it is posted to as a GitHub deployment (ADR 0016). */
+  preview: { pullRequest: number; url: string } | null;
 }
 
 /** `@wurmhol/protocol`'s `PipeSource`: what the CLI said about where the pipe came from. */
