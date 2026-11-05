@@ -4,7 +4,6 @@ import {
   acceptInvite,
   createInvite,
   createToken,
-  findShare,
   listMembers,
   listOrgsForUser,
   listTokens,
@@ -24,10 +23,9 @@ import {
   requireOwner,
   resolveSession,
 } from "../context.ts";
-import { SHARE_ID } from "../env.ts";
+import { endShare, endTokens, revokeTokensOfLeaver, shareOfOrg } from "../ending.ts";
 import { orgStub, toOrg } from "../org-do.ts";
 import { limitPerMember } from "../rate-limiter.ts";
-import { endTokens, revokeTokensOfLeaver } from "../revoke.ts";
 import { shareStub } from "../share-do.ts";
 import { billing } from "./billing.ts";
 import { machines } from "./machines.ts";
@@ -38,8 +36,8 @@ const CLI_DEFAULT_SERVER = "https://api.wurmhol.com";
 
 /** A share of the member's org, or 404: another org's shares do not exist here. */
 async function ownShare(c: { var: AppEnv["Variables"] }, id: string) {
-  const share = SHARE_ID.test(id) ? await findShare(c.var.db, id) : null;
-  if (!share || share.orgId !== c.var.member.orgId) {
+  const share = await shareOfOrg(c.var.db, c.var.member.orgId, id);
+  if (!share) {
     throw new HTTPException(404, { message: "no such share" });
   }
   return share;
@@ -51,7 +49,6 @@ export const account = new Hono<AppEnv>()
   .get("/me", async (c) => {
     const session = await resolveSession(c);
     if (!session) throw new HTTPException(401, { message: "sign in first" });
-    // Independent reads: one round trip to D1 instead of two.
     const [orgs, standing] = await Promise.all([
       listOrgsForUser(c.var.db, session.user.id),
       session.member
@@ -82,7 +79,6 @@ export const account = new Hono<AppEnv>()
     if (result.status === "invalid") {
       throw new HTTPException(404, { message: "this invite link has expired or was used" });
     }
-    // Land in the org just joined.
     await c.var.auth.api.setActiveOrganization({
       headers: c.req.raw.headers,
       body: { organizationId: result.orgId },
@@ -112,8 +108,7 @@ export const api = new Hono<AppEnv>()
   /** Terminate: ends the share at once and closes its CLI's socket. Any member may. */
   .post("/shares/:id/terminate", limitPerMember("manage"), async (c) => {
     const share = await ownShare(c, c.req.param("id"));
-    await shareStub(c.env, share.id).terminate("terminated");
-    c.var.log.info("share.terminated", { shareId: share.id, orgId: share.orgId });
+    await endShare(c, share, "terminated", "wall");
     return c.json({ ok: true });
   })
   /** The dev server's favicon, for the wall (the share host itself needs its own cookie). */
@@ -154,7 +149,7 @@ export const api = new Hono<AppEnv>()
     if (!(await revokeToken(c.var.db, c.var.member.orgId, tokenId))) {
       throw new HTTPException(404, { message: "no such token" });
     }
-    await endTokens(c.env, c.var.db, c.var.member.orgId, [tokenId]);
+    await endTokens(c, c.var.member.orgId, [tokenId]);
     return c.json({ ok: true });
   })
   .get("/members", async (c) =>
@@ -170,7 +165,7 @@ export const api = new Hono<AppEnv>()
     if (result === "last_owner") {
       throw new HTTPException(409, { message: "an org needs at least one owner" });
     }
-    if (target) await revokeTokensOfLeaver(c.env, c.var.db, orgId, target.userId);
+    if (target) await revokeTokensOfLeaver(c, orgId, target.userId);
     return c.json({ ok: true });
   })
   /** A single-use invite link (spec section 3, Members). */

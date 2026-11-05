@@ -7,15 +7,16 @@
 // header. Every call reads the person's memberships afresh, so removing someone from an org takes
 // effect on their next call, not when their token expires.
 import { MCP_SCOPES, verifyMcpAccessToken } from "@wurmhol/auth";
-import { findOpenShareByName, findShare, listOrgsForUser, schema, useToken } from "@wurmhol/db";
+import { findOpenShareByName, findShare, listOrgsForUser, schema, TOKEN_PREFIX } from "@wurmhol/db";
 import { eq } from "drizzle-orm";
 import { createMcpHandler, McpServer, requireScopes } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import { checkToken } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
+import { endShare } from "../ending.ts";
 import { SHARE_ID } from "../env.ts";
 import { orgStub, type ShareCard } from "../org-do.ts";
 import { checkRateLimit } from "../rate-limiter.ts";
-import { shareStub } from "../share-do.ts";
 
 type Vars = AppEnv["Variables"];
 
@@ -74,19 +75,12 @@ async function authenticate(
 ): Promise<Caller | Response> {
   const presented = /^Bearer (\S+)$/i.exec(request.headers.get("authorization") ?? "")?.[1];
   if (!presented) return challenge(resource);
-  const tokensPage = `${vars.config.auth.baseURL} (menu → Tokens)`;
-  if (presented.startsWith("wh_")) {
-    const token = await useToken(vars.db, presented);
+  if (presented.startsWith(TOKEN_PREFIX)) {
+    const token = await checkToken(vars.db, vars.config, presented, { org: true });
     if (!token.ok) {
-      return challenge(resource, {
-        code: "invalid_token",
-        description: `This Wurmhol token is ${token.reason === "expired" ? "expired" : "revoked or unknown"}. Create one at ${tokensPage}.`,
-      });
-    }
-    if (token.scope !== "org") {
-      return forbidden(
-        `This token can only open pipes. Create one that can list and close every pipe in the org at ${tokensPage}.`,
-      );
+      return token.status === 403
+        ? forbidden(token.fix)
+        : challenge(resource, { code: "invalid_token", description: token.fix });
     }
     const [org] = await vars.db
       .select({ name: schema.organizations.name })
@@ -227,12 +221,12 @@ function buildServer(env: Env, vars: Vars, caller: Caller, waitSeconds: number) 
       if (waitSeconds) return tooMany();
       const found = await findPipe(pipe);
       if (!found) return notFound(pipe);
-      await shareStub(env, found.card.id).terminate("terminated");
-      vars.log.info("share.terminated", {
-        shareId: found.card.id,
-        orgId: found.org.id,
-        via: "mcp",
-      });
+      await endShare(
+        { env, var: vars },
+        { id: found.card.id, orgId: found.org.id },
+        "terminated",
+        "mcp",
+      );
       return result({ stopped: { id: found.card.id, url: found.card.url } });
     },
   );

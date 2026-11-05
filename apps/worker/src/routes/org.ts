@@ -10,10 +10,9 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { type AppEnv, requireOwner } from "../context.ts";
+import { endShare, revokeTokensOfLeaver } from "../ending.ts";
 import { orgStub } from "../org-do.ts";
 import { limitPerMember } from "../rate-limiter.ts";
-import { revokeTokensOfLeaver } from "../revoke.ts";
-import { shareStub } from "../share-do.ts";
 
 /** Runs a plugin call, turning its refusals into ours: its 400s (a rule it holds) are 409s. */
 async function plugin<T>(call: Promise<T>): Promise<T> {
@@ -118,7 +117,7 @@ export const org = new Hono<AppEnv>()
         body: { organizationId: orgId },
       }),
     );
-    await revokeTokensOfLeaver(c.env, c.var.db, orgId, c.var.user.id);
+    await revokeTokensOfLeaver(c, orgId, c.var.user.id);
     return c.json({ ok: true });
   })
   /**
@@ -134,9 +133,8 @@ export const org = new Hono<AppEnv>()
       });
     }
     const orgObject = orgStub(c.env, orgId);
-    const open = await orgObject.list();
-    for (const share of open) {
-      await shareStub(c.env, share.id).terminate("terminated");
+    for (const share of await orgObject.list()) {
+      await endShare(c, { id: share.id, orgId }, "terminated", "org deleted");
     }
     await plugin(
       c.var.auth.api.deleteOrganization({
