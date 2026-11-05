@@ -64,6 +64,10 @@
     "RATE_LIMIT_MAGIC_LINK": "5/900",
     "RATE_LIMIT_CONNECT": "60/60",
     "RATE_LIMIT_MANAGE": "60/60",
+    // Per person or org token: calls to the hosted MCP server (ADR 0014).
+    "RATE_LIMIT_MCP": "120/60",
+    // The hosted MCP server at /mcp on the CLI's host (ADR 0014); "false" turns it off.
+    "MCP_ENABLED": "true",
   },
   // Sign-in mail (ADR 0005): Cloudflare Email Service. Onboard the domain of MAIL_FROM under
   // Email Service → Email Sending. `wrangler dev` simulates the binding and logs each email.

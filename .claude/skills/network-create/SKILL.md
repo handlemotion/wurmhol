@@ -167,6 +167,11 @@ you pick a variant instead of guessing. `--tsx Name` writes a React component of
   tagged `container` and `browser`; the innermost ellipse is the hole the open Create pipe card
   fits in, and the hyperbolas start at its rim.
 
+- **Consent** (`consent`): the hosted MCP server's consent page. The form sits in a 300px hole
+  (the person's orgs); a small circle out to the right (the assistant) touches the hole's φ bezel
+  from outside, and their inner tangents cross at the internal centre of similitude, the grant,
+  the accent. A half square on the left circumscribes the hole, so the plate balances.
+
 - **Ended** (`ended`): the Worker's own pages on a share host (ended, reconnecting, refused). A
   square duct in one-point perspective, frames growing by √φ from a closed end wall; the message
   sits on that wall, and every line stops at it.

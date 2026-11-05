@@ -10,13 +10,16 @@ import {
   ChevronsUpDown,
   CircleAlert,
   CircleCheck,
+  CircleStop,
   CircleX,
   Copy,
+  CornerDownLeft,
   CreditCard,
   Crown,
   DoorOpen,
   Ellipsis,
   ExternalLink,
+  Eye,
   Info,
   KeyRound,
   Laptop,
@@ -50,12 +53,15 @@ export const IconChevronsUpDown = thin(ChevronsUpDown, "IconChevronsUpDown");
 export const IconCircleAlert = thin(CircleAlert, "IconCircleAlert");
 export const IconCircleCheck = thin(CircleCheck, "IconCircleCheck");
 export const IconCircleX = thin(CircleX, "IconCircleX");
+export const IconCircleStop = thin(CircleStop, "IconCircleStop");
 export const IconCopy = thin(Copy, "IconCopy");
+export const IconCornerDownLeft = thin(CornerDownLeft, "IconCornerDownLeft");
 export const IconCreditCard = thin(CreditCard, "IconCreditCard");
 export const IconCrown = thin(Crown, "IconCrown");
 export const IconDoorOpen = thin(DoorOpen, "IconDoorOpen");
 export const IconEllipsis = thin(Ellipsis, "IconEllipsis");
 export const IconExternalLink = thin(ExternalLink, "IconExternalLink");
+export const IconEye = thin(Eye, "IconEye");
 export const IconInfo = thin(Info, "IconInfo");
 export const IconKey = thin(KeyRound, "IconKey");
 export const IconLaptop = thin(Laptop, "IconLaptop");

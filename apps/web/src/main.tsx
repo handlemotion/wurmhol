@@ -19,13 +19,14 @@ addEventListener("vite:preloadError", (event) => {
 const path = location.pathname;
 const join = /^\/join\/([^/]+)$/.exec(path);
 // The wall's data starts loading now, alongside its code, not after it.
-if (path !== "/login" && path !== "/device" && !join) {
+if (path !== "/login" && path !== "/device" && path !== "/oauth/consent" && !join) {
   prefetchMe(queryClient);
   preconnectWall();
 }
 
 /**
- * Four pages: login, an invite link, a `wurmhol login` approval, and the wall. The server sends
+ * Five pages: login, an invite link, a `wurmhol login` approval, an assistant's request to reach
+ * the org's pipes (the hosted MCP server's consent), and the wall. The server sends
  * every other path here too. Each is its own chunk, so the login page never downloads the wall
  * and the wall never downloads the sign-in client. The page's chunk loads before the first render rather than behind
  * `lazy()`: React holds a Suspense reveal back up to 300 ms after its fallback, which would
@@ -36,11 +37,13 @@ const page = (
     ? import("./components/auth/login").then(({ Login }) => <Login />)
     : path === "/device"
       ? import("./components/auth/device").then(({ Device }) => <Device />)
-      : join
-        ? import("./components/auth/join").then(({ Join }) => (
-            <Join code={decodeURIComponent(join[1]!)} />
-          ))
-        : import("./components/wall/wall").then(({ WallPage }) => <WallPage />)
+      : path === "/oauth/consent"
+        ? import("./components/auth/consent").then(({ Consent }) => <Consent />)
+        : join
+          ? import("./components/auth/join").then(({ Join }) => (
+              <Join code={decodeURIComponent(join[1]!)} />
+            ))
+          : import("./components/wall/wall").then(({ WallPage }) => <WallPage />)
 ) satisfies Promise<React.ReactNode>;
 
 const root = document.getElementById("root");

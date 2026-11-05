@@ -2,7 +2,7 @@ import { createAuth, type Auth } from "@wurmhol/auth";
 import { createDb, findMember, type Db, type Membership } from "@wurmhol/db";
 import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
-import { loadConfig, type Config } from "./env.ts";
+import { loadConfig, mcpResource, type Config } from "./env.ts";
 import type { Logger } from "./log.ts";
 
 export interface AppEnv {
@@ -44,17 +44,21 @@ export function linkOnCallbackOrigin(url: string) {
 
 /**
  * Builds Better Auth for one request scope. In development, `onDevLink` receives each magic
- * link, since no mail is sent there.
+ * link, since no mail is sent there. `mcp` adds the hosted MCP server's OAuth provider (ADR
+ * 0014), for its routes only: the provider reads D1 each time an instance starts.
  */
 export function authFor(
   env: Env,
   config: Config,
   db: Db,
   onDevLink: (url: string) => void = () => {},
+  options: { mcp?: boolean } = {},
 ): Auth {
+  const resource = options.mcp ? mcpResource(config) : null;
   return createAuth({
     db,
     ...config.auth,
+    mcp: resource ? { resource } : undefined,
     sendMagicLink: magicLinksOn(config)
       ? async ({ email, url: built }) => {
           const url = linkOnCallbackOrigin(built);
@@ -94,6 +98,19 @@ export const requestScope = createMiddleware<AppEnv>(async (c, next) => {
     "auth",
     authFor(c.env, config, db, (url) => c.set("devLink", url)),
   );
+  await next();
+});
+
+/**
+ * The same scope, with the hosted MCP server's OAuth provider loaded: `/mcp`, its metadata, and
+ * the OAuth routes under `/api/auth`.
+ */
+export const mcpScope = createMiddleware<AppEnv>(async (c, next) => {
+  const config = loadConfig(c.env);
+  const db = createDb(c.env.DB);
+  c.set("config", config);
+  c.set("db", db);
+  c.set("auth", authFor(c.env, config, db, undefined, { mcp: true }));
   await next();
 });
 

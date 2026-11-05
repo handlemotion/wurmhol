@@ -195,6 +195,18 @@ const configSchema = z
     RATE_LIMIT_CONNECT: rateLimit("60/60"),
     /** Per member: creating tokens and invite links, terminating shares. */
     RATE_LIMIT_MANAGE: rateLimit("60/60"),
+    /** Per person (OAuth) or token (`wh_`): calls to the hosted MCP server (ADR 0014). */
+    RATE_LIMIT_MCP: rateLimit("120/60"),
+    /**
+     * The hosted MCP server at `/mcp` on the CLI's host (ADR 0014). On by default; `false` turns
+     * it off, and `/mcp` and its OAuth routes answer 404.
+     */
+    MCP_ENABLED: z
+      .string()
+      .optional()
+      .transform((value) => value?.trim().toLowerCase() || "true")
+      .pipe(z.enum(["true", "false"], 'use "true" or "false"'))
+      .transform((value) => value === "true"),
   })
   .and(z.object({ auth: authEnvSchema, github: githubSchema }))
   .superRefine((config, ctx) => {
@@ -227,6 +239,25 @@ const configSchema = z
   });
 
 export type Config = z.output<typeof configSchema>;
+
+/** Whether `hostname` is a loopback host, where OAuth allows plain `http`. */
+function isLoopback(hostname: string) {
+  return hostname === "localhost" || hostname === "[::1]" || /^127(\.\d{1,3}){3}$/.test(hostname);
+}
+
+/**
+ * The hosted MCP server's URL (ADR 0014), the audience of its access tokens: `/mcp` on the CLI's
+ * host, on the app's scheme and port; on the app's own host when there is no CLI host. Null when
+ * it is off: by `MCP_ENABLED=false`, or because OAuth needs HTTPS and this stack serves plain
+ * HTTP on a host that is not loopback (`api.localhost` in development).
+ */
+export function mcpResource(config: Config): string | null {
+  if (!config.MCP_ENABLED) return null;
+  const app = new URL(config.auth.baseURL);
+  const hostname = config.CONNECT_HOST ?? app.hostname;
+  if (app.protocol !== "https:" && !isLoopback(hostname)) return null;
+  return `${app.protocol}//${hostname}${app.port ? `:${app.port}` : ""}/mcp`;
+}
 
 const cache = new WeakMap<object, Config>();
 

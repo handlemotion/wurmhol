@@ -31,6 +31,12 @@ DOCS_URL=
 # Never set it in production: those links sign you in.
 ENVIRONMENT=development
 
+# --- Hosted MCP server (ADR 0014) ---
+# Optional. `/mcp` on the CLI's host (CONNECT_HOST, else BETTER_AUTH_URL's host), for assistants
+# that sign in with OAuth. On by default; `false` turns it off. It needs HTTPS, or plain http on
+# localhost or 127.0.0.1: a stack on http://api.localhost has it off.
+MCP_ENABLED=
+
 # --- Auth (Better Auth) ---
 # Secret. At least 32 random characters: openssl rand -base64 32
 BETTER_AUTH_SECRET=
@@ -109,3 +115,5 @@ RATE_LIMIT_AUTH=
 RATE_LIMIT_MAGIC_LINK=
 RATE_LIMIT_CONNECT=
 RATE_LIMIT_MANAGE=
+# Per person (or per org token): calls to the hosted MCP server.
+RATE_LIMIT_MCP=

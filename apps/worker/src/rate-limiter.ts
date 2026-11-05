@@ -13,6 +13,7 @@ const RULES = {
   magicLink: "RATE_LIMIT_MAGIC_LINK",
   connect: "RATE_LIMIT_CONNECT",
   manage: "RATE_LIMIT_MANAGE",
+  mcp: "RATE_LIMIT_MCP",
 } as const satisfies Record<string, keyof Config>;
 
 export type RateLimitRule = keyof typeof RULES;
