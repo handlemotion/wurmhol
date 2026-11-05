@@ -1,5 +1,5 @@
 /*
- * Where each node of the wall's constellation sits (ADR 0009). Pure: sizes in, centres out, so
+ * Where each node of the wall's constellation sits (ADR 0011). Pure: sizes in, centres out, so
  * the frame loop in `constellation.tsx` only eases towards what this returns.
  *
  * The anchor (the copy-the-command field) is the hub. Pipes sit on an ellipse around it, each

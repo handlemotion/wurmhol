@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { ANCHOR, hash, layout, type Point, type Size } from "./constellation-layout";
 
 /*
- * The wall's moving layer (ADR 0009): every node is absolutely placed and moved by one frame
+ * The wall's moving layer (ADR 0011): every node is absolutely placed and moved by one frame
  * loop that writes transforms straight to the DOM, so React renders only when the data changes.
  * Each frame eases a node towards its target from `layout()` and adds a few pixels of drift, and
  * the spokes from the anchor are redrawn from the same positions, so lines never lag the nodes.

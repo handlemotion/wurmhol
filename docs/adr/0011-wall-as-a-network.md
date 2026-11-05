@@ -1,4 +1,4 @@
-# 0009: The wall is a network of pipes, under a floating header
+# 0011: The wall is a network of pipes, under a floating header
 
 Status: accepted. Departs from spec v1, section 3 ("Main page: the shares wall" and "Header
 menu").

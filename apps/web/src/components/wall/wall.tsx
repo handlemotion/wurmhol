@@ -59,7 +59,7 @@ const SAMPLE: Share[] = [1, 2, 3].map((n) => ({
 // the startup path, and long before anyone opens a menu.
 const motionFeatures = () => import("@/lib/motion-features").then((m) => m.default);
 
-/** The main page: every open pipe of the active org, live, as one network (ADR 0009). */
+/** The main page: every open pipe of the active org, live, as one network (ADR 0011). */
 export function Wall({ me }: { me: Me }) {
   const shares = useWall(me.activeOrgId);
   const [dialog, setDialog] = useState<"members" | "tokens" | null>(null);
