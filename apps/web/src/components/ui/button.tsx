@@ -7,113 +7,82 @@ import { Children, isValidElement } from "react";
 import { cx } from "@/lib/primitive";
 import { Loader } from "./loader";
 
+/**
+ * React Aria's Button, for press, pending and the triggers that wrap it (MenuTrigger,
+ * DialogTrigger), styled from tokens. Hover is React Aria's `data-hovered` (see styles.css), and
+ * the fill, edge, label and icon all change on one 150ms ease-out, so they move together.
+ */
 export const buttonStyles = tv({
   base: [
-    "[--btn-border:var(--color-foreground)]/15 [--btn-icon-active:var(--btn-foreground)] [--btn-outline:var(--btn-bg)] [--btn-radius:calc(var(--radius-lg)-1px)] [--btn-ring:var(--btn-bg)]/20",
-    "bg-(--btn-bg) text-(--btn-foreground) outline-(--btn-outline) ring-(--btn-ring) hover:bg-(--btn-overlay) pressed:bg-(--btn-overlay)",
-    "relative isolate inline-flex items-center justify-center border border-(--btn-border) hover:no-underline",
-    // Hover is one state (React Aria's, see styles.css) on one clock: the fill and the icon both
-    // ease over 150ms, so the icon never lights before the fill does.
-    // Tactile press: a short squeeze a quick second press retargets. Driven by native `:active`
-    // (shadcn's press), not React Aria's `pressed`, so it never waits on a React render. Off on
-    // menu triggers (a squeezed trigger looks narrower than its open menu), when disabled or
-    // pending, and under reduced motion.
-    "transition-[scale,background-color,border-color,color] duration-150 ease-out motion-safe:[&:active]:not-aria-[haspopup]:scale-97 disabled:[&:active]:scale-100 pending:[&:active]:scale-100",
-    "focus:outline-0 focus-visible:outline focus-visible:outline-offset-2 focus-visible:ring-2 focus-visible:ring-offset-3 focus-visible:ring-offset-background",
-    "forced-colors:[--btn-icon:ButtonText] forced-colors:hover:[--btn-icon:ButtonText] *:[svg]:shrink-0 *:[svg]:self-center *:[svg]:text-(--btn-icon) *:[svg]:transition-colors *:[svg]:duration-150 *:[svg]:ease-out hover:*:[svg]:text-(--btn-icon-active) pressed:*:[svg]:text-(--btn-icon-active) focus-visible:*:[svg]:text-(--btn-icon-active)/80",
-    "*:data-[slot=loader]:-mx-0.5 *:data-[slot=loader]:shrink-0 *:data-[slot=loader]:self-center *:data-[slot=loader]:text-(--btn-icon)",
-    "pending:opacity-50 disabled:opacity-50 disabled:forced-colors:text-[GrayText]",
-    "*:data-[slot=color-swatch]:-mx-0.5 *:data-[slot=color-swatch]:shrink-0 *:data-[slot=color-swatch]:self-center *:data-[slot=color-swatch]:[--size:--spacing(5)]",
+    "inline-flex items-center justify-center border",
+    "transition-[scale,background-color,border-color,color] duration-150 ease-out",
+    "*:[svg]:shrink-0 *:[svg]:transition-colors *:[svg]:duration-150 *:[svg]:ease-out",
+    // Tactile press (DESIGN.md): a short squeeze on native `:active`, which never waits on a
+    // React render. Not on menu triggers (a squeezed trigger looks narrower than its menu), when
+    // disabled or pending, or under reduced motion.
+    "motion-safe:[&:active]:not-aria-[haspopup]:scale-97 disabled:[&:active]:scale-100 pending:[&:active]:scale-100",
+    "outline-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+    "disabled:opacity-50 pending:opacity-50",
   ],
   variants: {
+    // Flat, with an edge a step darker than the fill: depth doesn't sit well on sharp corners.
     intent: {
-      // Every button shares the danger button's build: flat, with an edge a step darker than its
-      // fill. No highlight or drop: depth doesn't sit well on sharp corners.
-      primary:
-        "[--btn-bg:var(--color-primary-button)] [--btn-border:color-mix(in_oklab,var(--color-primary-button)_85%,black)] [--btn-foreground:var(--color-primary-foreground)] [--btn-icon-active:var(--primary-foreground)]/80 [--btn-icon:var(--primary-foreground)]/60 [--btn-overlay:color-mix(in_oklab,var(--color-primary-foreground)_10%,var(--color-primary-button)_90%)]",
-      secondary:
-        "[--btn-border:color-mix(in_oklab,var(--color-secondary)_88%,black)] [--btn-bg:var(--color-secondary)] [--btn-foreground:var(--color-secondary-foreground)] [--btn-icon:var(--color-muted-foreground)] [--btn-outline:var(--color-secondary-foreground)] [--btn-overlay:color-mix(in_oklab,var(--color-secondary-foreground)_4%,var(--color-secondary))] [--btn-ring:var(--color-muted-foreground)]/20",
-      warning:
-        "[--btn-border:color-mix(in_oklab,var(--color-warning)_80%,black)] [--btn-bg:var(--color-warning)] [--btn-foreground:var(--color-warning-foreground)] [--btn-icon:var(--color-warning-foreground)]/60 [--btn-overlay:color-mix(in_oklab,var(--color-white)_10%,var(--color-warning)_90%)]",
-      // Filled red with a 1px darker edge and a faint top highlight (onboarding reference).
-      danger:
-        "[--btn-bg:var(--color-danger)] [--btn-border:color-mix(in_oklab,var(--color-danger)_80%,black)] [--btn-foreground:var(--color-danger-foreground)] [--btn-icon:var(--color-danger-foreground)] [--btn-overlay:color-mix(in_oklab,var(--color-white)_10%,var(--color-danger)_90%)]",
-      success:
-        "[--btn-border:color-mix(in_oklab,var(--color-success)_80%,black)] [--btn-bg:var(--color-success)] [--btn-foreground:var(--color-success-foreground)] [--btn-icon:color-mix(in_oklab,var(--color-success-foreground)_60%,var(--success)_40%)] [--btn-overlay:color-mix(in_oklab,var(--color-white)_10%,var(--color-success)_90%)]",
-      // Raised: a crisp 1px drop under the border, so it reads as something to press. Hover and
-      // press are a quiet 4% wash of the foreground (as on secondary), not a grey fill.
-      outline:
-        "border-border [--btn-bg:var(--color-background)] [--btn-foreground:var(--color-foreground)] [--btn-icon:var(--color-muted-foreground)] [--btn-outline:var(--color-ring)] [--btn-overlay:var(--color-outline-hover)] [--btn-ring:var(--color-ring)]/20",
-      plain:
-        "border-0 [--btn-bg:transparent] [--btn-foreground:var(--color-foreground)] [--btn-icon:var(--color-muted-foreground)] [--btn-outline:var(--color-ring)] [--btn-overlay:transparent] [--btn-ring:var(--color-ring)]/20",
+      primary: [
+        "border-primary-button-border bg-primary-button text-primary-foreground",
+        "hover:bg-primary-button-hover pressed:bg-primary-button-hover",
+        "*:[svg]:text-primary-foreground/60 hover:*:[svg]:text-primary-foreground/80 pressed:*:[svg]:text-primary-foreground/80",
+      ],
+      secondary: [
+        "border-secondary-border bg-secondary text-secondary-foreground",
+        "hover:bg-secondary-hover pressed:bg-secondary-hover",
+        "*:[svg]:text-muted-foreground hover:*:[svg]:text-secondary-foreground pressed:*:[svg]:text-secondary-foreground",
+      ],
+      outline: [
+        "border-border bg-background text-foreground",
+        "hover:bg-outline-hover pressed:bg-outline-hover",
+        "*:[svg]:text-muted-foreground hover:*:[svg]:text-foreground pressed:*:[svg]:text-foreground",
+      ],
+      // No fill and no edge: only the icon answers the pointer.
+      plain: [
+        "border-0 bg-transparent text-foreground",
+        "*:[svg]:text-muted-foreground hover:*:[svg]:text-foreground pressed:*:[svg]:text-foreground",
+      ],
+      danger: [
+        "border-danger-border bg-danger text-danger-foreground *:[svg]:text-danger-foreground",
+        "hover:bg-danger-hover pressed:bg-danger-hover",
+      ],
     },
-    // Icons grow with the button, so a glyph's ink balances the 13px label beside it: 14px at
-    // xs (28px), 16px at md (32px), 17px at lg (36px).
+    // Icons grow with the button, so a glyph's ink balances the 13px label beside it.
     size: {
-      xs: ["h-7 gap-x-2.5 px-2 text-sm", "*:[svg]:size-3.5", "*:data-[slot=loader]:size-3.5"],
+      xs: "h-7 gap-x-2.5 px-2 text-sm *:[svg]:size-3.5 *:data-[slot=loader]:size-3.5",
       sm: [
         "min-h-9 gap-x-1.5 px-3 py-[calc(--spacing(2)-1px)] sm:min-h-8 sm:px-[calc(--spacing(3)-1px)] sm:py-[calc(--spacing(1.5)-1px)] sm:text-sm/5",
-        "*:[svg]:size-4.5 sm:*:[svg]:size-4",
-        "*:data-[slot=loader]:size-4.5 sm:*:data-[slot=loader]:size-4",
+        "*:[svg]:size-4.5 *:data-[slot=loader]:size-4.5 sm:*:[svg]:size-4 sm:*:data-[slot=loader]:size-4",
       ],
-      md: ["h-8 gap-x-2.5 px-2 text-sm", "*:[svg]:size-4", "*:data-[slot=loader]:size-4"],
-      lg: ["h-9 gap-x-2.5 px-2.5 text-sm", "*:[svg]:size-4.25", "*:data-[slot=loader]:size-4.25"],
-      "sq-xs": [
-        "touch-target size-6.5 shrink-0",
-        "*:[svg]:size-icon",
-        "*:data-[slot=loader]:size-icon",
-      ],
-      "sq-sm": [
-        "touch-target size-10 shrink-0 sm:size-8",
-        "*:[svg]:size-4.5 sm:*:[svg]:size-4",
-        "*:data-[slot=loader]:size-4.5 sm:*:data-[slot=loader]:size-4",
-      ],
-      "sq-md": [
-        "touch-target size-11 shrink-0 sm:size-9",
-        "*:[svg]:size-5 sm:*:[svg]:size-4.5",
-        "*:data-[slot=loader]:size-5 sm:*:data-[slot=loader]:size-4.5",
-      ],
-      "sq-lg": [
-        "touch-target size-12 shrink-0 sm:size-10",
-        "*:[svg]:size-6 sm:*:[svg]:size-5",
-        "*:data-[slot=loader]:size-6 sm:*:data-[slot=loader]:size-5",
-      ],
+      md: "h-8 gap-x-2.5 px-2 text-sm *:[svg]:size-4 *:data-[slot=loader]:size-4",
+      lg: "h-9 gap-x-2.5 px-2.5 text-sm *:[svg]:size-4.25 *:data-[slot=loader]:size-4.25",
+      // Square icon buttons. The box is the hit area: nothing reaches past it.
+      "sq-xs": "size-6.5 shrink-0 *:[svg]:size-icon *:data-[slot=loader]:size-icon",
+      "sq-sm":
+        "size-10 shrink-0 sm:size-8 *:[svg]:size-4.5 sm:*:[svg]:size-4 *:data-[slot=loader]:size-4",
       // An action tucked inside a field, e.g. the submit arrow at the end of an input.
       inset: "size-4.5 shrink-0 border-0",
     },
-
-    isCircle: {
-      true: "rounded-none",
-      false: "rounded-lg",
-    },
   },
-  compoundVariants: [{ size: "inset", isCircle: false, class: "rounded-sm" }],
-  defaultVariants: {
-    intent: "primary",
-    size: "md",
-    isCircle: false,
-  },
+  defaultVariants: { intent: "primary", size: "md" },
 });
 
 export interface ButtonProps extends ButtonPrimitiveProps, VariantProps<typeof buttonStyles> {
   ref?: React.Ref<HTMLButtonElement>;
 }
 
-export function Button({
-  className,
-  intent,
-  size,
-  isCircle,
-  ref,
-  children,
-  ...props
-}: ButtonProps) {
+export function Button({ className, intent, size, ref, children, ...props }: ButtonProps) {
   return (
     <ButtonPrimitive
       ref={ref}
       data-inset={size === "inset" || undefined}
       {...props}
-      className={cx(buttonStyles({ intent, size, isCircle }), className)}
+      className={cx(buttonStyles({ intent, size }), className)}
     >
       {(values) => {
         const content = typeof children === "function" ? children(values) : children;
