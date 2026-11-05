@@ -53,9 +53,11 @@ export const dropdownItemStyles = tv({
     // text
     "text-sm tracking-[-0.01em] text-foreground forced-colors:text-[CanvasText]",
     // avatar
-    // A two-line row (label and description) keeps the 20px avatar on every screen: it spans both
-    // lines, centred on them; a 16px one would sit beside the pair like a speck.
+    // A two-line row (label and description) is a pivot row, an org or a person: clearly taller
+    // than an action row. Its 40px avatar spans both lines, centred on them, 12px before the
+    // text, and sits 8px from the row's top, bottom and left alike (a 56px row; measured).
     "*:data-[slot=avatar]:*:me-(--me-icon) *:data-[slot=avatar]:me-(--me-icon) has-[[slot=description]]:*:data-[slot=avatar]:row-span-2 has-[[slot=description]]:*:data-[slot=avatar]:self-center *:data-[slot=avatar]:[--avatar-size:--spacing(5)] sm:not-has-[[slot=description]]:*:data-[slot=avatar]:[--avatar-size:--spacing(4)]",
+    "has-[[slot=description]]:*:data-[slot=avatar]:[--avatar-size:--spacing(10)] has-[[slot=description]]:*:data-[slot=avatar]:me-3 has-[[slot=description]]:has-data-[slot=avatar]:py-2 has-[[slot=description]]:has-data-[slot=avatar]:ps-2",
     // icon
     "[&_svg:not([class*='text-'])]:text-muted-foreground *:[svg:not([data-slot='check-indicator'])]:col-start-1 *:[svg:not([data-slot='check-indicator'])]:row-start-1 *:[svg:not([data-slot='check-indicator'])]:-ms-0.5 *:[svg:not([data-slot='check-indicator'])]:me-(--me-icon) *:[svg]:shrink-0",
     "not-has-[[slot=description]]:*:[svg]:size-5 sm:not-has-[[slot=description]]:*:[svg]:size-3.5",

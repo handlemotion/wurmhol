@@ -151,8 +151,12 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
           >
             {(org) => (
               <MenuItem id={org.id} textValue={org.name}>
-                {/* One letter: two would be specks at 20px. */}
-                <Avatar initials={initials(org.name).slice(0, 1)} alt="" />
+                {/* Your own personal org wears your picture; any other org, its initials. */}
+                <Avatar
+                  src={org.personal && org.role === "owner" ? me.user.image : null}
+                  initials={initials(org.name)}
+                  alt=""
+                />
                 <MenuLabel>{org.name}</MenuLabel>
                 <MenuDescription>{org.role === "owner" ? "Owner" : "Member"}</MenuDescription>
               </MenuItem>
