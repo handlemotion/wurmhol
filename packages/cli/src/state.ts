@@ -10,6 +10,7 @@ export interface ShareState {
   port: number;
   pid: number;
   startedAt: string;
+  endsAt: string;
 }
 
 /** `WURMHOL_HOME`, or `~/.wurmhol`. */

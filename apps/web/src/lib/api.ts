@@ -79,3 +79,11 @@ export interface SignInMethods {
   github: boolean;
   magicLink: boolean;
 }
+
+/** A `wurmhol login` waiting for approval (apps/worker/src/routes/device.ts). */
+export interface DeviceLogin {
+  code: string;
+  name: string | null;
+  status: "pending" | "approved" | "denied";
+  org: { id: string; name: string | null };
+}

@@ -1,36 +1,63 @@
 #!/usr/bin/env node
 // wurmhol: share a local dev server at a private HTTPS URL (spec section 7).
 //
-//   npx wurmhol <port> [--json]   start a share; prints its URL first, then returns
+//   npx wurmhol <port> [--ttl 8h] [--json]   start a share; prints its URL first, then returns
 //   wurmhol ls [--json]           open shares on this machine
 //   wurmhol stop <port|id>        end one; `--all` ends every one
-//   wurmhol init                  tell the repo's agents how to share
+//   wurmhol init [--skill]        tell the repo's agents how to share
 import { spawn } from "node:child_process";
-import { appendFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { formatDuration, parseDuration } from "@wurmhol/protocol";
 import pkg from "../package.json" with { type: "json" };
+import skill from "../../../plugins/wurmhol/skills/wurmhol/SKILL.md";
+import {
+  credentialsFile,
+  readCredentials,
+  removeCredentials,
+  writeCredentials,
+} from "./credentials.ts";
 import { FixError } from "./errors.ts";
+import { login as deviceLogin } from "./login.ts";
 import { DEFAULT_CONSOLE, DEFAULT_SERVER, openPipe, type Pipe } from "./pipe.ts";
 import { alive, listStates, logFile, removeState, writeState } from "./state.ts";
-const INIT_LINE = "Share a local server with `npx wurmhol <port>` and send the user the URL.";
+
+/** The line `init` writes, with the repo's dev port (spec section 7). */
+const initLine = (port: number) =>
+  `Share the dev server with \`npx wurmhol ${port}\` (or the port it prints) and send the user the URL; end it with \`npx wurmhol stop ${port}\`.`;
+
+/** Dev servers' default ports, first match wins; anything else is a Worker on 8787. */
+const DEV_PORTS: [name: string, port: number][] = [
+  ["next", 3000],
+  ["astro", 4321],
+  ["vite", 5173],
+];
 
 const HELP = `wurmhol ${pkg.version}: a private HTTPS URL for a local dev server
 
 Usage:
   npx wurmhol <port> [--json]   Open a pipe to a port; prints the URL, then returns
+    --ttl <duration>            How long it lasts, like 90m or 8h (default 4h, at most 12h)
   wurmhol ls [--json]           List open pipes
   wurmhol stop <port|id>        End a pipe (--all ends every one)
-  wurmhol init                  Add a line about wurmhol to AGENTS.md or CLAUDE.md
+  wurmhol init [--skill]        Tell this repo's agents how to share (AGENTS.md or
+                                CLAUDE.md); --skill also writes .claude/skills/wurmhol
+  wurmhol login                 Approve this computer in the browser; stores a token
+  wurmhol logout                Delete the stored token
 
 Environment:
-  WURMHOL_TOKEN   A token from your org (${DEFAULT_CONSOLE}, menu → Tokens)
+  WURMHOL_TOKEN   A token from your org (${DEFAULT_CONSOLE}, menu → Tokens); wins over login
+  WURMHOL_HOME    Where wurmhol keeps its state (default ~/.wurmhol)
   WURMHOL_URL     A self-hosted install (default ${DEFAULT_SERVER})
   HTTPS_PROXY     Dial out through this proxy; NODE_EXTRA_CA_CERTS adds its CA
 `;
 
-type ReadyMessage = { type: "ready"; id: string; url: string } | { type: "error"; message: string };
+type ReadyMessage =
+  | { type: "ready"; id: string; url: string; endsAt: string }
+  | { type: "error"; message: string };
 
 function fail(message: string): never {
   process.stderr.write(`wurmhol: ${message}\n`);
@@ -57,17 +84,53 @@ function server() {
   }
 }
 
+/** WURMHOL_TOKEN when set, else the token `wurmhol login` stored for this server. */
 function token() {
   const value = process.env.WURMHOL_TOKEN?.trim();
-  if (!value) fail(`Set WURMHOL_TOKEN to a token from ${consoleUrl()} (menu → Tokens).`);
-  return value;
+  if (value) return value;
+  const stored = readCredentials();
+  if (stored && stored.server === server()) return stored.token;
+  fail(`Run wurmhol login, or set WURMHOL_TOKEN to a token from ${consoleUrl()} (menu → Tokens).`);
+}
+
+async function login() {
+  try {
+    const granted = await deviceLogin({
+      server: server(),
+      name: hostname(),
+      version: pkg.version,
+      prompt: (code) =>
+        process.stdout.write(`Open ${code.verification_uri} and enter ${code.user_code}\n`),
+    });
+    writeCredentials({
+      server: server(),
+      token: granted.token,
+      org: granted.org.name,
+      name: granted.name,
+    });
+    const org = granted.org.name ? ` to ${granted.org.name}` : "";
+    process.stdout.write(
+      `Logged in${org} as ${granted.name}. Token saved in ${credentialsFile()}\n`,
+    );
+    if (process.env.WURMHOL_TOKEN?.trim()) {
+      process.stdout.write("WURMHOL_TOKEN is set and wins over the saved token.\n");
+    }
+  } catch (error) {
+    fail(error instanceof FixError ? error.message : String(error));
+  }
+}
+
+function logout() {
+  const removed = removeCredentials();
+  process.stdout.write(removed ? `Deleted ${credentialsFile()}\n` : "Not logged in.\n");
 }
 
 /** Starts the detached daemon and waits for it to report the URL (or the reason it could not). */
-async function share(port: number, json: boolean) {
+async function share(port: number, ttl: number | undefined, json: boolean) {
   token();
   const entry = fileURLToPath(import.meta.url);
-  const child = spawn(process.execPath, [entry, "__daemon", String(port)], {
+  const args = [entry, "__daemon", String(port), ...(ttl === undefined ? [] : [String(ttl)])];
+  const child = spawn(process.execPath, args, {
     detached: true,
     stdio: ["ignore", "ignore", "ignore", "ipc"],
     env: process.env,
@@ -85,12 +148,13 @@ async function share(port: number, json: boolean) {
   if (message.type === "error") fail(message.message);
   child.disconnect();
   child.unref();
-  const out = json ? JSON.stringify({ url: message.url, port, id: message.id }) : message.url;
+  const { url, id, endsAt } = message;
+  const out = json ? JSON.stringify({ url, port, id, endsAt }) : url;
   process.stdout.write(`${out}\n`);
 }
 
 /** The daemon: holds the share's pipe until it ends. Reports readiness over IPC. */
-async function daemon(port: number) {
+async function daemon(port: number, ttl: number | undefined) {
   const report = (message: ReadyMessage) => process.send?.(message);
   const log = (shareId: string | null, event: string, fields: Record<string, unknown>) => {
     try {
@@ -104,7 +168,7 @@ async function daemon(port: number) {
   };
   let pipe: Pipe;
   try {
-    pipe = await openPipe({ server: server(), token: token(), port }, { log });
+    pipe = await openPipe({ server: server(), token: token(), port, ttl }, { log });
   } catch (error) {
     report({ type: "error", message: error instanceof FixError ? error.message : String(error) });
     process.exit(1);
@@ -119,12 +183,13 @@ async function daemon(port: number) {
     port,
     pid: process.pid,
     startedAt: new Date().toISOString(),
+    endsAt: pipe.endsAt.toISOString(),
   });
   const stop = () => void pipe.close();
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
   process.on("SIGHUP", () => {}); // The terminal that started it may close.
-  report({ type: "ready", id: pipe.id, url: pipe.url });
+  report({ type: "ready", id: pipe.id, url: pipe.url, endsAt: pipe.endsAt.toISOString() });
   process.disconnect?.();
 }
 
@@ -132,7 +197,7 @@ function ls(json: boolean) {
   const states = listStates();
   if (json) {
     process.stdout.write(
-      `${JSON.stringify(states.map(({ id, url, port, startedAt }) => ({ id, url, port, startedAt })))}\n`,
+      `${JSON.stringify(states.map(({ id, url, port, startedAt, endsAt }) => ({ id, url, port, startedAt, endsAt })))}\n`,
     );
     return;
   }
@@ -140,7 +205,11 @@ function ls(json: boolean) {
     process.stdout.write("No open pipes. Start one with: npx wurmhol <port>\n");
     return;
   }
-  for (const s of states) process.stdout.write(`${s.port}\t${s.url}\t${s.id}\n`);
+  for (const s of states) {
+    const left = Math.max(0, Math.round((Date.parse(s.endsAt) - Date.now()) / 60_000)) * 60;
+    const ends = left ? `ends in ${formatDuration(left)}` : "ends in under a minute";
+    process.stdout.write(`${s.port}\t${s.url}\t${s.id}\t${ends}\n`);
+  }
 }
 
 async function stop(target: string | undefined, all: boolean) {
@@ -180,8 +249,28 @@ function readIfExists(path: string): string | null {
   }
 }
 
-function init() {
+/** The dev server's port, from package.json's dependencies and scripts. */
+function devPort(cwd: string): number {
+  let manifest: { dependencies?: object; devDependencies?: object; scripts?: object } = {};
+  try {
+    manifest = JSON.parse(readIfExists(join(cwd, "package.json")) ?? "{}");
+  } catch {
+    // Not JSON: no hints.
+  }
+  const deps = new Set([
+    ...Object.keys(manifest.dependencies ?? {}),
+    ...Object.keys(manifest.devDependencies ?? {}),
+  ]);
+  const scripts = Object.values(manifest.scripts ?? {}).join("\n");
+  for (const [name, port] of DEV_PORTS) {
+    if (deps.has(name) || new RegExp(`(^|[\\s;&|(])${name}(\\s|$)`, "m").test(scripts)) return port;
+  }
+  return 8787;
+}
+
+function init(writeSkill: boolean) {
   const cwd = process.cwd();
+  const port = devPort(cwd);
   // Read instead of checking existence first, then append: no window where the file can change
   // between a check and the write.
   let target = join(cwd, "AGENTS.md");
@@ -193,13 +282,34 @@ function init() {
     current = text;
     break;
   }
+  const say = (line: string) => process.stdout.write(`${line}\n`);
   if (current.includes("npx wurmhol")) {
-    process.stdout.write(`${target} already mentions wurmhol\n`);
-    return;
+    say(`${relative(cwd, target)} already mentions wurmhol`);
+  } else {
+    const separator = current && !current.endsWith("\n") ? "\n\n" : current ? "\n" : "";
+    appendFileSync(target, `${separator}${initLine(port)}\n`);
+    say(`Added a line to ${relative(cwd, target)} (port ${port}, from package.json)`);
   }
-  const separator = current && !current.endsWith("\n") ? "\n\n" : current ? "\n" : "";
-  appendFileSync(target, `${separator}${INIT_LINE}\n`);
-  process.stdout.write(`added a line to ${target}\n`);
+  if (writeSkill) {
+    const dir = join(cwd, ".claude/skills/wurmhol");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), skill);
+    say(`Wrote ${relative(cwd, join(dir, "SKILL.md"))}`);
+  }
+  const stored = readCredentials();
+  if (process.env.WURMHOL_TOKEN?.trim()) {
+    say("WURMHOL_TOKEN is set.");
+  } else if (stored && stored.server === server()) {
+    say(`Logged in: wurmhol uses the token in ${credentialsFile()}.`);
+  } else {
+    const host = new URL(server()).hostname;
+    say(
+      `No token. On this computer, run wurmhol login. Where the agent runs, set WURMHOL_TOKEN to a token from ${consoleUrl()} (menu → Tokens).`,
+    );
+    say(
+      `In a Claude Code cloud environment: WURMHOL_TOKEN under Environment variables, ${host} under Allowed domains.`,
+    );
+  }
 }
 
 async function main() {
@@ -208,6 +318,8 @@ async function main() {
     options: {
       json: { type: "boolean", default: false },
       all: { type: "boolean", default: false },
+      skill: { type: "boolean", default: false },
+      ttl: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", short: "v", default: false },
     },
@@ -215,13 +327,24 @@ async function main() {
   const [command, argument] = positionals;
   if (values.version) return void process.stdout.write(`${pkg.version}\n`);
   if (values.help || !command) return void process.stdout.write(HELP);
-  if (command === "__daemon") return daemon(parsePort(argument) ?? fail("bad port"));
+  if (command === "__daemon") {
+    const ttl = positionals[2] === undefined ? undefined : Number(positionals[2]);
+    return daemon(parsePort(argument) ?? fail("bad port"), ttl);
+  }
   if (command === "ls") return ls(values.json);
   if (command === "stop") return stop(argument, values.all);
-  if (command === "init") return init();
+  if (command === "init") return init(values.skill);
+  if (command === "login") return login();
+  if (command === "logout") return logout();
   const port = parsePort(command);
   if (port === null) fail(`Not a port or a command: ${command}. See: wurmhol --help`);
-  return share(port, values.json);
+  let ttl: number | undefined;
+  if (values.ttl !== undefined) {
+    ttl =
+      parseDuration(values.ttl) ??
+      fail(`Not a lifetime: ${values.ttl}. Use --ttl 90m or --ttl 8h.`);
+  }
+  return share(port, ttl, values.json);
 }
 
 await main();

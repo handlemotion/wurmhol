@@ -16,6 +16,12 @@ needs one outbound WebSocket on 443 to `api.wurmhol.com` and works through an HT
 - `wurmhol ls`, `wurmhol stop <port|id>`, `wurmhol stop --all`, `wurmhol init`
 - `WURMHOL_TOKEN`: a token from your org at https://dirt.wurmhol.com (menu → Tokens). `WURMHOL_URL`: a self-hosted install.
 
+In Claude Code, the `wurmhol` plugin teaches the agent when and how to share:
+
+```text
+/plugin install wurmhol --marketplace handlemotion/wurmhol
+```
+
 The relay can read the traffic it carries; it never logs or stores request or response bodies.
 It keeps only each page's `<title>` and favicon, for the wall.
 
