@@ -3,7 +3,7 @@
  * looking down a tunnel, and fade out as they go deeper so the middle is pure dark. The form sits
  * in that dark throat. Drawn in the foreground's ink, so it follows the theme.
  */
-const RINGS = 24;
+const RINGS = 10;
 /** Larger spacing out at the edge, tighter near the centre: the tunnel's perspective. */
 const DEPTH = 2.6;
 /** The outermost ring's radius, in viewBox units; the viewBox is 2000 wide, so it overflows. */
