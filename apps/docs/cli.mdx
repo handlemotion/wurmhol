@@ -50,7 +50,8 @@ and remove the old one, run `wurmhol host --install` again.
 the token, `HTTPS_PROXY` and `NODE_EXTRA_CA_CERTS`, whether the network lets the CLI reach its host
 (`api.wurmhol.com`) and the pipe domain (`*.wurmhol.dev`), and whether the port answers HTTP on
 `127.0.0.1` or `::1`. It exits 1 when any check fails; `--json` prints
-`{checks: [{name, ok, detail, fix}]}`. `wurmhol init` and `wurmhol login` name the hosts to
+`{checks: [{name, ok, detail, fix}]}`. A blocked pipe domain is a `warn`, not a failure: pipes
+work without it, and you need it only to open pipe URLs from the sandbox itself. `wurmhol init` and `wurmhol login` name the hosts to
 allowlist first, for a sandbox with Limited network access.
 
 ## Logs

@@ -14,11 +14,20 @@ export interface Check {
   name: string;
   ok: boolean;
   detail: string;
-  /** One line that says what to do; null when the check passed. */
+  /**
+   * One line that says what to do; null when the check passed. A passing check with a fix is a
+   * warning: something worth doing that a pipe does not need.
+   */
   fix: string | null;
 }
 
 const pass = (name: string, detail: string): Check => ({ name, ok: true, detail, fix: null });
+const warned = (name: string, detail: string, fix: string): Check => ({
+  name,
+  ok: true,
+  detail,
+  fix,
+});
 const failed = (name: string, detail: string, fix: string): Check => ({
   name,
   ok: false,
@@ -105,6 +114,11 @@ function pipeOrigin(): { url: URL; domain: string } | null {
   return domain ? { url: new URL(`https://wurmhol-doctor.${domain}/`), domain } : null;
 }
 
+/**
+ * Whether pipe URLs open from here. A warning, never a failure: the CLI dials only the API host
+ * and people open pipes from their own devices (ADR 0006), so a sandbox that allows only the API
+ * host shares fine; only opening its own pipe URLs, as an agent checking one does, needs this.
+ */
 async function pipeCheck(version: string): Promise<Check> {
   const target = pipeOrigin();
   if (!target) {
@@ -113,11 +127,11 @@ async function pipeCheck(version: string): Promise<Check> {
   const wildcard = `*.${target.domain}`;
   const reached = await call(target.url, { server: target.url.origin, version });
   if (reached instanceof FixError) {
-    return failed("pipe-domain", `${wildcard} unreachable`, reached.message);
+    return warned("pipe-domain", `${wildcard} unreachable`, reached.message);
   }
   const refused = proxyRefusal(reached);
   if (refused !== null) {
-    return failed(
+    return warned(
       "pipe-domain",
       `the proxy refused ${target.url.hostname} (HTTP ${refused})`,
       `Allowlist ${wildcard} in the sandbox's network settings, to open pipe URLs from the sandbox.`,
@@ -204,7 +218,8 @@ export async function doctor(options: { port?: number; version: string }): Promi
   return checks;
 }
 
-/** One line a check: `ok` and what passed, or `fix` and what to do. */
+/** One line a check: `ok` and what passed, or `warn` or `fix` and what to do. */
 export function formatCheck(check: Check) {
-  return check.ok ? `ok   ${check.name}: ${check.detail}` : `fix  ${check.name}: ${check.fix}`;
+  if (!check.fix) return `ok   ${check.name}: ${check.detail}`;
+  return `${check.ok ? "warn" : "fix "} ${check.name}: ${check.fix}`;
 }

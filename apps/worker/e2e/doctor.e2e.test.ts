@@ -1,5 +1,7 @@
 // `wurmhol doctor` against the real stack: the built CLI checks its token on the CLI's host, the
 // hosts through a real CONNECT proxy like a sandbox's, and a real local port.
+import { createServer } from "node:http";
+import { type AddressInfo, connect, type Socket } from "node:net";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import {
   api,
@@ -105,6 +107,62 @@ it("a proxy that refuses the API host names the host to allowlist", async () => 
   const text = await cli(["doctor"], env);
   expect(text.stdout).toContain(`fix  api-host: ${allowlist}\n`);
   await refusing.close();
+});
+
+/**
+ * A sandbox proxy that allowlists hosts, not ports: it tunnels to `allow` and answers 403 for
+ * every other host (`connectProxy` tells only ports apart, and the API host and pipes share one).
+ */
+async function hostProxy(allow: string) {
+  const sockets = new Set<Socket>();
+  const proxyServer = createServer((_req, res) => res.writeHead(405).end());
+  proxyServer.on("connect", (req, client: Socket, head) => {
+    const [host, port] = (req.url ?? "").split(":");
+    if (host !== allow)
+      return void client.end("HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n");
+    const upstream = connect(Number(port), "127.0.0.1", () => {
+      client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      upstream.write(head);
+      upstream.pipe(client);
+      client.pipe(upstream);
+    });
+    for (const socket of [client, upstream]) {
+      sockets.add(socket);
+      socket.on("error", () => socket.destroy());
+      socket.on("close", () => sockets.delete(socket));
+    }
+  });
+  await new Promise<void>((resolve) => proxyServer.listen(0, "127.0.0.1", resolve));
+  return {
+    url: `http://127.0.0.1:${(proxyServer.address() as AddressInfo).port}`,
+    close: () => {
+      for (const socket of sockets) socket.destroy();
+      return new Promise<void>((resolve) => proxyServer.close(() => resolve()));
+    },
+  };
+}
+
+// Catches doctor failing a sandbox that shares fine: one that allowlists only the CLI's host, as
+// ADR 0006 says is enough. The pipe domain is advice there, a warning that leaves the exit at 0.
+it("a proxy that refuses only the pipe domain warns and still exits 0", async () => {
+  const local = await localServer((_req, res) => res.end("ok"));
+  const { token } = await createToken(stack, ada, "doctor-pipes-refused");
+  const env = sandbox(token);
+  await share(stack, env, local.port);
+  const apiOnly = await hostProxy("api.localhost");
+  const refused = { ...env, HTTPS_PROXY: apiOnly.url, HTTP_PROXY: apiOnly.url };
+  const { code, checks } = await doctor(refused);
+  expect(code).toBe(0);
+  const advice =
+    "Allowlist *.pipe.localhost in the sandbox's network settings, to open pipe URLs from the sandbox.";
+  expect(checks["pipe-domain"]).toMatchObject({ ok: true, fix: advice });
+  expect(checks["api-host"]).toMatchObject({ ok: true, fix: null });
+  const text = await cli(["doctor"], refused);
+  expect(text.code).toBe(0);
+  expect(text.stdout).toContain(`warn pipe-domain: ${advice}\n`);
+  await stopAll(env);
+  await apiOnly.close();
+  await local.close();
 });
 
 // Catches a dead port reported as fine (or crashing the CLI where ::1 cannot exist), and a live
