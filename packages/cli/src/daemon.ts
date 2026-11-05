@@ -3,8 +3,8 @@
 // itself with `DAEMON_COMMAND` and the share's options, and the daemon reports over IPC once it
 // has the URL or knows why it cannot.
 import { spawn } from "node:child_process";
-import { appendFileSync } from "node:fs";
 import { FixError } from "./errors.ts";
+import { appendLog, appendRequest } from "./logs.ts";
 import { openPipe, type Pipe } from "./pipe.ts";
 import { detectSource } from "./source.ts";
 import { pipeName } from "@wurmhol/protocol";
@@ -80,16 +80,8 @@ export async function runDaemon(argument: string, connection: { server: string; 
   const options = JSON.parse(argument) as ShareOptions;
   const { port, ttl, only, name, link, note } = options;
   const report = (message: ReadyMessage) => process.send?.(message);
-  const log = (shareId: string | null, event: string, fields: Record<string, unknown>) => {
-    try {
-      appendFileSync(
-        logFile(shareId ?? `port-${port}`),
-        `${JSON.stringify({ time: new Date().toISOString(), event, port, ...fields })}\n`,
-      );
-    } catch {
-      // Logging must never take the share down.
-    }
-  };
+  const log = (shareId: string | null, event: string, fields: Record<string, unknown>) =>
+    appendLog(shareId ?? `port-${port}`, event, { port, ...fields });
   let pipe: Pipe;
   try {
     const viewers = only
@@ -102,6 +94,7 @@ export async function runDaemon(argument: string, connection: { server: string; 
     report({ type: "error", message: error instanceof FixError ? error.message : String(error) });
     process.exit(1);
   }
+  pipe.on("request", (request) => appendRequest(pipe.id, request, { port }));
   pipe.once("close", () => {
     removeState(pipe.id);
     process.exit(0);

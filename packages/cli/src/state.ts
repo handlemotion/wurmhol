@@ -77,3 +77,14 @@ export function listStates(): ShareState[] {
   }
   return states.toSorted((a, b) => a.startedAt.localeCompare(b.startedAt));
 }
+
+/** Whether `state` is the pipe `target` names: its port, its id, or a named pipe's name. */
+export function matches(state: ShareState, target: string) {
+  const wanted = target.trim().toLowerCase();
+  return (
+    state.id === target ||
+    (/^\d+$/.test(wanted) && state.port === Number(wanted)) ||
+    // A named pipe, by the first label of its host.
+    new URL(state.url).hostname.split(".")[0] === wanted
+  );
+}

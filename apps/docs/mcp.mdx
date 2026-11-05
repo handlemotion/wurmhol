@@ -59,7 +59,7 @@ A token reaches only its own org. Tokens for opening pipes, which is what `wurmh
 
 ## Local server
 
-`wurmhol mcp` is an MCP server on stdio, run where the code runs. It gives an agent three tools that do what `npx wurmhol <port>`, `wurmhol ls` and `wurmhol stop` do, with structured results.
+`wurmhol mcp` is an MCP server on stdio, run where the code runs. It gives an agent tools that do what `npx wurmhol <port>`, `wurmhol ls`, `wurmhol logs` and `wurmhol stop` do, with structured results.
 
 ### Add it to Claude Code
 
@@ -94,11 +94,16 @@ The next call picks the token up; there is nothing to restart. Never put a token
 
 ### Tools
 
-| Tool         | Takes                                                                       | Returns                                      |
-| ------------ | --------------------------------------------------------------------------- | -------------------------------------------- |
-| `open_pipe`  | `port`; optional `ttl` (`"90m"`, `"8h"`), `name`, `only` (a list of emails) | `{ id, url, port, name, startedAt, endsAt }` |
-| `list_pipes` | nothing                                                                     | `{ pipes: [...] }`                           |
-| `stop_pipe`  | `target` (a port, id or name), or `all: true`                               | `{ stopped: [{ id, url }] }`                 |
+| Tool              | Takes                                                                       | Returns                                                               |
+| ----------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `open_pipe`       | `port`; optional `ttl` (`"90m"`, `"8h"`), `name`, `only` (a list of emails) | `{ id, url, port, name, startedAt, endsAt }`                          |
+| `list_pipes`      | nothing                                                                     | `{ pipes: [...] }`                                                    |
+| `recent_requests` | `target` (a port, id or name); optional `limit` (default 20, at most 200)   | `{ id, url, requests: [{ time, method, path, status, durationMs }] }` |
+| `stop_pipe`       | `target` (a port, id or name), or `all: true`                               | `{ stopped: [{ id, url }] }`                                          |
+
+`recent_requests` reads the request log on this machine, for this server's pipes and for those
+`npx wurmhol` opened, so an agent can see the 500 its human just hit. Paths come without their
+query values, and there are no bodies or headers ([CLI logs](/cli#logs)).
 
 `ttl`, `name` and `only` work like the CLI's `--ttl`, `--name` and `--only`: a pipe lasts 4 hours
 unless you ask for another lifetime, up to 12 hours on wurmhol.com.
