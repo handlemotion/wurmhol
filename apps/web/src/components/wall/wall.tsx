@@ -1,4 +1,4 @@
-import { LazyMotion } from "motion/react";
+import { AnimatePresence, LazyMotion, m, useReducedMotion } from "motion/react";
 import { NPM } from "@ridemountainpig/svgl-react";
 import { cn } from "cn";
 import { Fragment, useEffect, useRef, useState } from "react";
@@ -85,6 +85,8 @@ export function Wall({ me }: { me: Me }) {
   const [dialog, setDialog] = useState<"members" | "tokens" | null>(null);
 
   return (
+    // Clipped at the page's edges, not the canvas's: a network the camera pans runs on under the
+    // floating header and off the sides of the window, never against an invisible box.
     <div className="min-h-dvh overflow-clip bg-background">
       <Header me={me} onOpen={setDialog} />
       <main className="w-full px-4 sm:px-8">
@@ -116,6 +118,11 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
   const canBill = me.role === "owner" && me.standing?.reason !== "billing_off";
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between gap-3 p-4">
+      {/* No bar, but a fade: pills the camera pans up dissolve under the header's pills. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[calc(100%+2rem)] bg-linear-to-b from-background from-50% to-transparent"
+      />
       <MenuTrigger>
         <Button
           intent="secondary"
@@ -258,20 +265,26 @@ const PROMPT =
 /**
  * Every pipe as a pill on a spoke from the anchor, the Create pipe button. Pressing a pill opens
  * it into a card with its details; pressing Create pipe opens the ways to start one. One is open
- * at a time, and the other pills make room around it.
+ * at a time; it opens where its pill stands, and the view pans to it while every other pill
+ * holds its place.
  */
 function Network({ shares }: { shares: Share[] }) {
   const [open, setOpen] = useState<string | null>(null);
   const current = open === ANCHOR || shares.some((share) => share.id === open) ? open : null;
+  // The pill to focus once its card has gone.
+  const restore = useRef<string | null>(null);
 
-  // Closing returns focus to the pill the card came from.
+  // Closing returns focus to the pill the card came from, once the card's exit lets it back.
   const close = () => {
-    const id = current;
+    restore.current = current;
     setOpen(null);
-    if (id) {
-      const selector = id === ANCHOR ? "[data-create]" : `[data-pipe="${CSS.escape(id)}"]`;
-      requestAnimationFrame(() => document.querySelector<HTMLElement>(selector)?.focus());
-    }
+  };
+  const onClosed = () => {
+    const id = restore.current;
+    restore.current = null;
+    if (!id) return;
+    const selector = id === ANCHOR ? "[data-create]" : `[data-pipe="${CSS.escape(id)}"]`;
+    document.querySelector<HTMLElement>(selector)?.focus();
   };
 
   // Escape, or a press anywhere outside the open card, closes it. A press on another pill opens
@@ -307,31 +320,77 @@ function Network({ shares }: { shares: Share[] }) {
         <div className="relative">
           {/* The backdrop says it to the eye; this says it to a screen reader. */}
           {shares.length === 0 && <span className="sr-only">No open pipes yet.</span>}
-          {current === ANCHOR ? (
-            <CreateCard />
-          ) : (
-            <Button
-              intent="secondary"
-              data-create
-              aria-expanded={false}
-              onPress={() => setOpen(ANCHOR)}
-            >
-              <IconPlus />
-              Create pipe
-            </Button>
-          )}
+          <Swap
+            open={current === ANCHOR}
+            onClosed={onClosed}
+            card={<CreateCard />}
+            pill={
+              <Button
+                intent="secondary"
+                data-create
+                aria-expanded={false}
+                onPress={() => setOpen(ANCHOR)}
+              >
+                <IconPlus />
+                Create pipe
+              </Button>
+            }
+          />
         </div>
       }
       nodes={shares.map((share) => ({
         id: share.id,
-        render:
-          share.id === current ? (
-            <PipeCard share={share} />
-          ) : (
-            <PipePill share={share} onPress={() => setOpen(share.id)} />
-          ),
+        render: (
+          <Swap
+            open={share.id === current}
+            onClosed={onClosed}
+            card={<PipeCard share={share} />}
+            pill={<PipePill share={share} onPress={() => setOpen(share.id)} />}
+          />
+        ),
       }))}
     />
+  );
+}
+
+/**
+ * A node's pill or its card. The card grows out of the spot its pill stood on (`--grow-origin`,
+ * which the constellation sets) and shrinks back into it on close, both fast; the pill steps
+ * aside at once and returns once the card has gone.
+ */
+function Swap(props: {
+  open: boolean;
+  pill: React.ReactNode;
+  card: React.ReactNode;
+  onClosed: () => void;
+}) {
+  // Reduced motion keeps the fades and drops the scale.
+  const scale = useReducedMotion() ? 1 : undefined;
+  return (
+    <AnimatePresence mode="wait" initial={false} onExitComplete={props.onClosed}>
+      {props.open ? (
+        <m.div
+          key="card"
+          className="origin-(--grow-origin)"
+          initial={{ opacity: 0, scale: scale ?? 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: scale ?? 0.94, transition: { duration: 0.1, ease: "easeIn" } }}
+          transition={{ type: "spring", duration: 0.22, bounce: 0, opacity: { duration: 0.12 } }}
+        >
+          {props.card}
+        </m.div>
+      ) : (
+        <m.div
+          key="pill"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0, transition: { duration: 0 } }}
+          transition={{ duration: 0.12, ease: "easeOut" }}
+        >
+          {props.pill}
+        </m.div>
+      )}
+    </AnimatePresence>
   );
 }
 
@@ -387,7 +446,7 @@ function CreateCard() {
     <section
       data-open
       aria-label="Create pipe"
-      className="flex size-72 animate-in flex-col gap-0.5 border border-border bg-background p-2 duration-200 ease-out fade-in zoom-in-95 motion-reduce:animate-none"
+      className="flex size-72 flex-col gap-0.5 border border-border bg-background p-2"
     >
       <span aria-hidden className="flex h-8 items-center px-2 text-xs text-subtle-foreground">
         Create pipe
@@ -602,7 +661,7 @@ function PipeCard({ share }: { share: Share }) {
       tabIndex={-1}
       data-open
       aria-label={name(share)}
-      className="flex w-[min(22rem,calc(100vw-2rem))] animate-in outline-0 flex-col gap-4 border border-primary bg-background p-4 duration-200 ease-out fade-in zoom-in-95 motion-reduce:animate-none"
+      className="flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-4 border border-primary bg-background p-4 outline-0"
     >
       <div className="flex items-start gap-3">
         <span className="flex h-4 shrink-0 items-center">

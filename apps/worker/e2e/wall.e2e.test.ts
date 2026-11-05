@@ -129,4 +129,83 @@ describe("the wall in a browser", () => {
     expect(await pill.count()).toBe(0);
     expect(await page.locator("[data-pipe]").count()).toBe(1);
   });
+
+  it("lights one fill, on the row under the pointer, as it moves between Create pipe's rows", async () => {
+    await page.locator("[data-create]").click();
+    const rows = page.getByRole("menuitem");
+    const fill = page.locator("[data-slot=fluid-hover-highlight]");
+    for (const label of ["Copy agent prompt", "Copy npx command", "Copy agent prompt"]) {
+      const row = page.getByRole("menuitem", { name: label });
+      const box = (await row.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      // Catches: the fill handed back to the row hovered before (the flicker), or two fills.
+      await expect
+        .poll(
+          async () => {
+            const lit = await fill.boundingBox();
+            return (await fill.count()) === 1 && lit !== null && Math.abs(lit.y - box.y) < 1;
+          },
+          { message: label },
+        )
+        .toBe(true);
+    }
+    // Catches: a row painting a fill of its own beside the moving one.
+    const fills = await rows.evaluateAll((els) =>
+      els.map((el) => getComputedStyle(el).backgroundColor),
+    );
+    expect(fills.every((fill) => fill === "rgba(0, 0, 0, 0)")).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect.poll(() => page.locator("[data-create]").isVisible()).toBe(true);
+  });
+
+  it("opens a card where its pill stands, moves the pills it would cover, and pans it to the middle", async () => {
+    await openPipe("Second pipe");
+    await openPipe("Third pipe");
+    const pills = page.locator("[data-pipe]");
+    await expect.poll(() => pills.count(), { timeout: 5000 }).toBe(3);
+    const ids = await pills.evaluateAll((els) => els.map((el) => el.getAttribute("data-pipe")!));
+    const centre = async (id: string) => {
+      const box = (await page.locator(`[data-pipe="${id}"]`).boundingBox())!;
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    };
+    const opened = ids[0]!;
+    const before = await centre(ids[1]!);
+
+    await page.locator(`[data-pipe="${opened}"]`).click();
+    const card = page.locator("section[data-open]");
+    await expect.poll(() => card.isVisible()).toBe(true);
+    // Catches: the card opening over its neighbours instead of the pills it covers stepping aside.
+    await expect
+      .poll(async () => {
+        const c = (await card.boundingBox())!;
+        const others = await page
+          .locator("[data-pipe], [data-create]")
+          .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().toJSON() as DOMRect));
+        return others.filter(
+          (o) =>
+            o.x < c.x + c.width &&
+            c.x < o.x + o.width &&
+            o.y < c.y + c.height &&
+            c.y < o.y + o.height,
+        ).length;
+      })
+      .toBe(0);
+
+    // Catches: the camera not panning, leaving the card where it opened (half off-screen).
+    const box = (await card.boundingBox())!;
+    const view = page.viewportSize()!;
+    expect(Math.abs(box.x + box.width / 2 - view.width / 2)).toBeLessThan(2);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(view.height);
+
+    await page.keyboard.press("Escape");
+    await expect.poll(() => card.count()).toBe(0);
+    // Catches: the camera staying panned, or a pushed pill not returning, after the card closes.
+    await expect
+      .poll(async () => {
+        const back = await centre(ids[1]!);
+        return Math.hypot(back.x - before.x, back.y - before.y) < 1.5;
+      })
+      .toBe(true);
+  });
 });

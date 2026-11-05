@@ -4,9 +4,9 @@
  *
  * The anchor (the copy-the-command field) is the hub. Pipes sit on an ellipse around it, each
  * nudged off its even slot by a jitter hashed from its id, so the ring reads as a drawn network
- * rather than a clock face and a pipe keeps its look across renders. An open pipe's card takes
- * the middle with the anchor just above it, and the ring grows around the pair. When the ring
- * won't fit the width (a phone), the pipes stand in a column above and below the hub instead,
+ * rather than a clock face and a pipe keeps its look across renders. An open card opens where its
+ * pill stands, growing away from the anchor (`grow`); only the pills it would cover step aside,
+ * and the frame loop's camera pans to it. When the ring won't fit the width (a phone), the pipes stand in a column above and below the hub instead,
  * arranged so no spoke passes behind another node (`column`). A last pass pushes apart anything
  * that still overlaps and keeps every node inside the width.
  */
@@ -28,9 +28,8 @@ const GAP = 16;
 /** The ring's least spread around the anchor alone, so a few pipes don't huddle on it. */
 const MIN_RX = 260;
 const MIN_RY = 150;
-/** Clear space around an open card (a pipe's, or Create pipe's): it grew, so the pipes around
- * it stand further off than they do from one another. */
-const CLEAR = 72;
+/** Clear space between an open card and the pills it pushes aside. */
+const CLEAR = GAP * 2;
 
 /** A stable number in [-1, 1) from a string (FNV-1a), for per-pipe jitter. */
 export function hash(id: string, salt = 0) {
@@ -42,49 +41,45 @@ export function hash(id: string, salt = 0) {
   return ((h >>> 0) / 2 ** 32) * 2 - 1;
 }
 
+/** -1, 0 or 1: which way a node sits from the anchor, past half its own closed size. */
+function side(offset: number, half: number) {
+  return Math.abs(offset) <= half ? 0 : Math.sign(offset);
+}
+
+/**
+ * How far an open card's centre sits from its pill's: it grows away from the anchor, so the
+ * pill's corner nearest the anchor stays put. The anchor's own card grows from its centre.
+ */
+export function grow(id: string, slot: Point, hub: Point, pill: Size, card: Size): Point {
+  if (id === ANCHOR) return { x: 0, y: 0 };
+  return {
+    x: (side(slot.x - hub.x, pill.w / 2) * (card.w - pill.w)) / 2,
+    y: (side(slot.y - hub.y, pill.h / 2) * (card.h - pill.h)) / 2,
+  };
+}
+
 export function layout(input: {
   width: number;
   anchor: Size;
-  /** In wall order. */
+  /** In wall order, at their closed (pill) sizes. */
   pipes: { id: string; size: Size }[];
-  /** The pipe whose card is open, if any. Its size is the card's. */
-  open: { id: string; size: Size } | null;
-  /** The anchor is open as the Create pipe card; its size is the card's. */
-  anchorOpen?: boolean;
+  /** The node showing its card, and the card's size. The ring is laid out as if it were closed;
+   * then the pills the card would cover step aside. Its point stays the pill's (the frame loop
+   * adds `grow`). */
+  open?: { id: string; size: Size } | null;
 }): { at: Map<string, Point>; top: number; bottom: number } {
   const { width, anchor, pipes, open } = input;
-  const at = new Map<string, Point>();
-  const fixed = new Set<string>([ANCHOR]);
-  const roomy = new Set<string>(input.anchorOpen ? [ANCHOR] : []);
+  const at = new Map<string, Point>([[ANCHOR, { x: 0, y: 0 }]]);
   const sizes = new Map<string, Size>([[ANCHOR, anchor]]);
-
-  // The hub: the anchor alone, or the open card with the anchor above it.
-  let hub = { halfW: anchor.w / 2, halfH: anchor.h / 2, y: 0 };
-  at.set(ANCHOR, { x: 0, y: 0 });
-  if (open) {
-    const card = open.size;
-    const anchorY = -(card.h / 2 + GAP + anchor.h / 2);
-    at.set(ANCHOR, { x: 0, y: anchorY });
-    at.set(open.id, { x: 0, y: 0 });
-    sizes.set(open.id, card);
-    fixed.add(open.id);
-    roomy.add(open.id);
-    const top = anchorY - anchor.h / 2;
-    const bottom = card.h / 2;
-    hub = {
-      halfW: Math.max(card.w, anchor.w) / 2,
-      halfH: (bottom - top) / 2,
-      y: (top + bottom) / 2,
-    };
-  }
+  const hub = { halfW: anchor.w / 2, halfH: anchor.h / 2, y: 0 };
 
   const n = pipes.length;
   if (n > 0) {
     const widest = Math.max(...pipes.map((p) => p.size.w));
     const tallest = Math.max(...pipes.map((p) => p.size.h));
-    const clear = roomy.size > 0 ? CLEAR : GAP * 3;
-    let rx = Math.max(open ? 0 : MIN_RX, hub.halfW + clear + widest / 2);
-    let ry = Math.max(open ? 0 : MIN_RY, hub.halfH + clear + tallest / 2);
+    const clear = GAP * 3;
+    let rx = Math.max(MIN_RX, hub.halfW + clear + widest / 2);
+    let ry = Math.max(MIN_RY, hub.halfH + clear + tallest / 2);
     // Room on the ring for every pipe: grow both radii until its length holds them.
     const need = n * (widest * 0.55 + tallest + GAP * 2);
     const ring = () => 2 * Math.PI * Math.sqrt((rx * rx + ry * ry) / 2);
@@ -95,16 +90,14 @@ export function layout(input: {
     }
     // Too wide for the container (a phone): a column instead of a ring.
     if (rx > Math.max(0, width / 2 - GAP - widest / 2)) {
-      for (const [id, p] of column({ width, hub, clear, pipes, at, sizes })) at.set(id, p);
+      for (const [id, p] of column({ width, hub, clear, pipes, at })) at.set(id, p);
       for (const pipe of pipes) sizes.set(pipe.id, pipe.size);
     } else {
       const step = (Math.PI * 2) / n;
       pipes.forEach((pipe, i) => {
         // Start at the top and go clockwise; the jitter stays inside a quarter of a slot.
         const angle = -Math.PI / 2 + (i + 0.5) * step + hash(pipe.id, 1) * step * 0.25;
-        // Around an open card the jitter only reaches outwards, never into its clear space.
-        const jitter = hash(pipe.id, 2) * 0.14;
-        const reach = 1 + (roomy.size > 0 ? Math.abs(jitter) : jitter);
+        const reach = 1 + hash(pipe.id, 2) * 0.14;
         at.set(pipe.id, {
           x: Math.cos(angle) * rx * reach,
           y: hub.y + Math.sin(angle) * ry * reach,
@@ -114,7 +107,14 @@ export function layout(input: {
     }
   }
 
-  relax(at, sizes, fixed, roomy, width);
+  // The card, where it grows from its pill, holds still with the anchor; the rest make room.
+  const slot = open ? at.get(open.id) : undefined;
+  if (open && slot) {
+    const d = grow(open.id, slot, at.get(ANCHOR)!, sizes.get(open.id)!, open.size);
+    at.set(open.id, { x: slot.x + d.x, y: slot.y + d.y });
+    sizes.set(open.id, open.size);
+  }
+  relax(at, sizes, width, open && slot ? open.id : null);
 
   let top = Infinity;
   let bottom = -Infinity;
@@ -123,6 +123,7 @@ export function layout(input: {
     top = Math.min(top, p.y - h / 2);
     bottom = Math.max(bottom, p.y + h / 2);
   }
+  if (open && slot) at.set(open.id, slot);
   return { at, top, bottom };
 }
 
@@ -142,13 +143,10 @@ function column(input: {
   clear: number;
   pipes: { id: string; size: Size }[];
   at: Map<string, Point>;
-  sizes: Map<string, Size>;
 }): Map<string, Point> {
   const { width, hub, clear, pipes } = input;
   const n = pipes.length;
   const anchor = input.at.get(ANCHOR)!;
-  // Whatever already stands in the middle (an open card) blocks spokes too.
-  const fixed = [...input.at].filter(([id]) => id !== ANCHOR);
   const byWidth = pipes.toSorted((a, b) => a.size.w - b.size.w);
   const orders = [pipes, byWidth, byWidth.toReversed()];
   let best: { score: number[]; at: Map<string, Point> } | null = null;
@@ -177,10 +175,11 @@ function column(input: {
           };
           up.forEach((pipe, i) => place(pipe, upSlots[i]!, -1, i === 0));
           down.forEach((pipe, i) => place(pipe, downSlots[i]!, 1, i === 0));
-          const nodes: [string, Point, Size][] = [
-            ...fixed.map(([id, p]): [string, Point, Size] => [id, p, input.sizes.get(id)!]),
-            ...pipes.map((pipe): [string, Point, Size] => [pipe.id, at.get(pipe.id)!, pipe.size]),
-          ];
+          const nodes = pipes.map((pipe): [string, Point, Size] => [
+            pipe.id,
+            at.get(pipe.id)!,
+            pipe.size,
+          ]);
           let crossings = 0;
           for (const pipe of pipes) {
             const end = at.get(pipe.id)!;
@@ -241,14 +240,14 @@ function crosses(a: Point, b: Point, centre: Point, size: Size, spare = 4) {
   return lo < hi;
 }
 
-/** Push overlapping nodes apart along the shallower axis; fixed nodes hold still. */
+/** Push overlapping nodes apart along the shallower axis; the anchor and an open card hold still. */
 function relax(
   at: Map<string, Point>,
   sizes: Map<string, Size>,
-  fixed: Set<string>,
-  roomy: Set<string>,
   width: number,
+  open: string | null,
 ) {
+  const fixed = (id: string) => id === ANCHOR || id === open;
   const ids = [...at.keys()];
   const clampX = (id: string) => {
     const p = at.get(id)!;
@@ -261,19 +260,19 @@ function relax(
       for (let j = i + 1; j < ids.length; j++) {
         const a = ids[i] as string;
         const b = ids[j] as string;
-        if (fixed.has(a) && fixed.has(b)) continue;
         const [pa, pb] = [at.get(a)!, at.get(b)!];
         const [sa, sb] = [sizes.get(a)!, sizes.get(b)!];
         const dx = pb.x - pa.x;
         const dy = pb.y - pa.y;
-        const gap = roomy.has(a) || roomy.has(b) ? CLEAR : GAP;
+        if (fixed(a) && fixed(b)) continue;
+        const gap = a === open || b === open ? CLEAR : GAP;
         const ox = (sa.w + sb.w) / 2 + gap - Math.abs(dx);
         const oy = (sa.h + sb.h) / 2 + gap - Math.abs(dy);
         if (ox <= 0 || oy <= 0) continue;
         moved = true;
         // Sideways only when there is room for it: on a narrow screen, stack instead.
         const sideways = ox < oy && width / 2 - GAP > Math.max(sa.w, sb.w);
-        const [ma, mb] = fixed.has(a) ? [0, 1] : fixed.has(b) ? [1, 0] : [0.5, 0.5];
+        const [ma, mb] = fixed(a) ? [0, 1] : fixed(b) ? [1, 0] : [0.5, 0.5];
         if (sideways) {
           const d = ox * (dx < 0 ? -1 : 1);
           pa.x -= d * ma;
@@ -285,7 +284,7 @@ function relax(
         }
       }
     }
-    for (const id of ids) if (!fixed.has(id)) clampX(id);
+    for (const id of ids) if (!fixed(id)) clampX(id);
     if (!moved) break;
   }
 }

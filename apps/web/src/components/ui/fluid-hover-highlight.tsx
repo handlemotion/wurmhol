@@ -1,10 +1,10 @@
 // The one hover highlight a fluid hover list renders, ported from transitive
 // (`packages/ui/src/components/ui/fluid-hover-highlight.tsx`): an absolutely positioned fill that
-// springs between the rects `useFluidHoverList` measures. The container must be `relative`; rows
+// springs between the rows `useMagneticHover` lights. The container must be `relative`; rows
 // sit over it and carry no hover fill of their own.
 import { AnimatePresence, m, useReducedMotion, type Transition } from "motion/react";
 import { cn } from "cn";
-import type { ItemRect } from "@/hooks/use-fluid-hover-list";
+import type { ItemRect } from "@/hooks/use-magnetic-hover";
 
 // Critically damped and short: the highlight lands exactly on the row, no overshoot.
 const spring = { type: "spring" as const, duration: 0.08, bounce: 0 };

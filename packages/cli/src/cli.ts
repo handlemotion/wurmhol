@@ -369,22 +369,58 @@ function init(writeSkill: boolean) {
   }
 }
 
+const SEE_FLAGS = "Run `npx wurmhol@latest --help` to see the flags.";
+
+/** parseArgs' own errors, as one line that names the flag; anything else is a bug and rethrows. */
+function explainArgsError(error: unknown, args: string[]): string {
+  const { code, message } = error as { code?: string; message?: string };
+  // `-h=1` reads as the short flags -h, -= and -1, so parseArgs blames '-='. Name the real flag.
+  const shortWithValue = args.find((arg) => /^-[^-]=/.test(arg));
+  if (code === "ERR_PARSE_ARGS_UNKNOWN_OPTION" && message?.includes("'-='") && shortWithValue) {
+    return `${shortWithValue.slice(0, 2)} takes no value. ${SEE_FLAGS}`;
+  }
+  // parseArgs quotes the offending token: '--bogus', '-x', or '-h, --help' for a known flag.
+  const quoted = /'([^']*)'/.exec(message ?? "")?.[1] ?? "";
+  const flag = quoted.match(/-{1,2}[\w-]+/g)?.at(-1) ?? quoted;
+  switch (code) {
+    case "ERR_PARSE_ARGS_UNKNOWN_OPTION":
+      return `Unknown flag ${flag}. ${SEE_FLAGS}`;
+    case "ERR_PARSE_ARGS_INVALID_OPTION_VALUE":
+      return message?.includes("argument missing")
+        ? `${flag} needs a value. ${SEE_FLAGS}`
+        : `${flag} takes no value. ${SEE_FLAGS}`;
+    case "ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL":
+      return `Unexpected argument ${quoted}. ${SEE_FLAGS}`;
+    default:
+      throw error;
+  }
+}
+
+function parseCommandLine(args = process.argv.slice(2)) {
+  try {
+    return parseArgs({
+      args,
+      allowPositionals: true,
+      options: {
+        json: { type: "boolean", default: false },
+        only: { type: "string" },
+        name: { type: "string" },
+        link: { type: "string" },
+        note: { type: "string" },
+        all: { type: "boolean", default: false },
+        skill: { type: "boolean", default: false },
+        ttl: { type: "string" },
+        help: { type: "boolean", short: "h", default: false },
+        version: { type: "boolean", short: "v", default: false },
+      },
+    });
+  } catch (error) {
+    fail(explainArgsError(error, args));
+  }
+}
+
 async function main() {
-  const { values, positionals } = parseArgs({
-    allowPositionals: true,
-    options: {
-      json: { type: "boolean", default: false },
-      only: { type: "string" },
-      name: { type: "string" },
-      link: { type: "string" },
-      note: { type: "string" },
-      all: { type: "boolean", default: false },
-      skill: { type: "boolean", default: false },
-      ttl: { type: "string" },
-      help: { type: "boolean", short: "h", default: false },
-      version: { type: "boolean", short: "v", default: false },
-    },
-  });
+  const { values, positionals } = parseCommandLine();
   const [command, argument] = positionals;
   if (values.version) return void process.stdout.write(`${pkg.version}\n`);
   if (values.help || !command) return void process.stdout.write(HELP);
