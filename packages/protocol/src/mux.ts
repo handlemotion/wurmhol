@@ -5,7 +5,7 @@
 // flight on a stream. The receiver grants more with `window` frames as it hands bytes on (to the
 // viewer, or to the local server). Without it a fast local server and a slow phone would pile a
 // whole download into the Durable Object's memory.
-import { ProtocolError, type Frame } from "./frame.ts";
+import { MAX_STREAM_ID, ProtocolError, type Frame } from "./frame.ts";
 
 /** Bytes a sender may send on a new stream before its first `window` grant. */
 export const INITIAL_WINDOW = 1024 * 1024;
@@ -14,7 +14,7 @@ export const INITIAL_WINDOW = 1024 * 1024;
 export class StreamIds {
   #next = 1;
   next(): number {
-    if (this.#next > 0xffff_ffff) throw new ProtocolError("stream ids exhausted");
+    if (this.#next > MAX_STREAM_ID) throw new ProtocolError("stream ids exhausted");
     return this.#next++;
   }
 }

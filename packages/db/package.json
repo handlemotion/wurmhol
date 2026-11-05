@@ -11,6 +11,7 @@
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@wurmhol/protocol": "workspace:*",
     "drizzle-orm": "^0.45.4",
     "uuidv7": "^1.2.1"
   },

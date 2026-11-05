@@ -441,6 +441,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@wurmhol/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@cloudflare/workers-types@5.20261104.1)(kysely@0.29.8)

@@ -56,7 +56,6 @@ export async function findMember(
   return member ?? null;
 }
 
-/** The orgs `userId` belongs to, oldest membership first: the org switcher. */
 /**
  * `userId`'s orgs, oldest membership first. `personal` marks an org made at sign-up
  * (`createPersonalOrg`), which the switcher shows with its owner's picture.
@@ -127,19 +126,26 @@ export async function createInvite(db: Db, input: { orgId: string; createdBy: st
   return { code, expiresAt };
 }
 
+/** The invite link with this code's hash, while it is unused and unexpired. */
+function liveInvite(hash: string) {
+  return and(
+    eq(inviteLinks.hash, hash),
+    isNull(inviteLinks.usedAt),
+    gt(inviteLinks.expiresAt, new Date()),
+  );
+}
+
 /** The org an unused, unexpired invite code is for (with its name), or null. Does not use it. */
 export async function peekInvite(db: Db, code: string) {
+  return findLiveInvite(db, await sha256Hex(code));
+}
+
+async function findLiveInvite(db: Db, hash: string) {
   const [invite] = await db
     .select({ orgId: inviteLinks.orgId, orgName: organizations.name })
     .from(inviteLinks)
     .innerJoin(organizations, eq(organizations.id, inviteLinks.orgId))
-    .where(
-      and(
-        eq(inviteLinks.hash, await sha256Hex(code)),
-        isNull(inviteLinks.usedAt),
-        gt(inviteLinks.expiresAt, new Date()),
-      ),
-    )
+    .where(liveInvite(hash))
     .limit(1);
   return invite ?? null;
 }
@@ -150,7 +156,8 @@ export async function peekInvite(db: Db, code: string) {
  * member. Someone already in the org keeps their role, and the link stays unused.
  */
 export async function acceptInvite(db: Db, code: string, userId: string) {
-  const invite = await peekInvite(db, code);
+  const hash = await sha256Hex(code);
+  const invite = await findLiveInvite(db, hash);
   if (!invite) return { status: "invalid" as const };
   if (await findMember(db, userId, invite.orgId)) {
     return { status: "already_member" as const, orgId: invite.orgId };
@@ -158,13 +165,7 @@ export async function acceptInvite(db: Db, code: string, userId: string) {
   const claimed = await db
     .update(inviteLinks)
     .set({ usedAt: new Date(), usedBy: userId })
-    .where(
-      and(
-        eq(inviteLinks.hash, await sha256Hex(code)),
-        isNull(inviteLinks.usedAt),
-        gt(inviteLinks.expiresAt, new Date()),
-      ),
-    )
+    .where(liveInvite(hash))
     .returning({ orgId: inviteLinks.orgId });
   if (!claimed.length) return { status: "invalid" as const };
   await db.insert(members).values({

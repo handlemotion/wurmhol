@@ -1,21 +1,10 @@
 // Share history. The live state of an open share is its Durable Object; these rows record that
 // a share existed (ids are never reused) and how it ended.
+import type { PipeSource } from "@wurmhol/protocol";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { Db } from "./client.ts";
 import { randomShareId } from "./crypto.ts";
 import { pipeNames, shares, shareViews, users } from "./schema/index.ts";
-
-/** Where a pipe came from (ADR 0015): `@wurmhol/protocol`'s `PipeSource`, already checked. */
-export interface ShareSource {
-  repoHost: string | null;
-  repo: string | null;
-  branch: string | null;
-  commit: string | null;
-  link: string | null;
-  note: string | null;
-  agent: string | null;
-  agentUrl: string | null;
-}
 
 /**
  * Records a new share under a fresh id. The primary key makes an id unique forever; on the
@@ -33,7 +22,7 @@ export async function recordShareStart(
     port: number;
     name?: string | null;
     /** Where the pipe came from (ADR 0015), already checked with `parsePipeSource`. */
-    source?: ShareSource | null;
+    source?: PipeSource | null;
   },
 ): Promise<
   { ok: true; id: string; startedAt: Date } | { ok: false; reason: "taken" | "open"; port?: number }
