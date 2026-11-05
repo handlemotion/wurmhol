@@ -3,12 +3,12 @@
 Project `wurmhol` (from Omni's `docs/operations/doppler.md`). Branch configs inherit from their
 environment's root config.
 
-| Config       | Consumer                             | Holds                                                                                                                                   |
-| ------------ | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `dev`        | every local command (root)           | local D1 settings, non-secret dev config                                                                                                |
-| `dev_worker` | `wrangler dev` (mounted `.dev.vars`) | `BETTER_AUTH_SECRET`, `ENVIRONMENT=development`, OAuth client secrets, Stripe sandbox keys (`STRIPE_*`)                                 |
-| `prd_worker` | Worker secrets                       | `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`                      |
-| `prd_github` | `production.yml`, records            | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `D1_DATABASE_ID`, `WORKER_DOMAIN`, `NPM_TOKEN`; records `WORKER_ROUTE`, `WORKER_VAR_*` |
+| Config       | Consumer                             | Holds                                                                                                                                                                        |
+| ------------ | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dev`        | every local command (root)           | local D1 settings, non-secret dev config                                                                                                                                     |
+| `dev_worker` | `wrangler dev` (mounted `.dev.vars`) | `BETTER_AUTH_SECRET`, `ENVIRONMENT=development`, OAuth client secrets, Stripe sandbox keys (`STRIPE_*`)                                                                      |
+| `prd_worker` | Worker secrets                       | `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`                                                           |
+| `prd_github` | `production.yml`, records            | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `D1_DATABASE_ID`, `WORKER_DOMAIN`, `DOPPLER_TOKEN_WORKER` (read-only, `prd_worker`); records `WORKER_ROUTE`, `WORKER_VAR_*` |
 
 Rules:
 
@@ -35,6 +35,22 @@ Cloudflare Workers Builds deploys `main` (build `pnpm --filter @wurmhol/web buil
    `prd_worker` (read with `DOPPLER_TOKEN_WORKER`) becomes a Worker secret via
    `wrangler secret bulk`. Removing a key here does not delete the secret: use
    `wrangler secret delete`.
-3. **Publish the CLI** when `packages/cli/package.json`'s version is not on npm, with provenance.
+3. **Publish the CLI** when `packages/cli/package.json`'s version is not on npm, through npm
+   trusted publishing: npm trusts this workflow's OIDC token, so no npm token exists anywhere.
+
+## The CLI on npm
+
+npm can only trust a workflow for a package that already exists, so the first version is
+published once by hand, by an owner with 2FA:
+
+```bash
+pnpm install && pnpm --filter wurmhol build
+cd packages/cli && npm login && npm publish --access public
+```
+
+Then on npmjs.com, package `wurmhol` → Settings → Trusted Publisher → GitHub Actions:
+organization `handlemotion`, repository `wurmhol`, workflow `production.yml`, environment
+`production`. Set "Publishing access" to require 2FA and disallow tokens. Every later version
+ships from `main` when its version changes.
 
 Never deploy from a laptop.
