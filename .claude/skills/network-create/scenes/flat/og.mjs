@@ -1,13 +1,17 @@
-// The link preview (og:image) for the marketing site, 1200x630. The wordmark and headline sit in
-// a void on the left; the drawing is the common-tangents construction on the right: a small
-// circle (the container) and a large one (the browser), whose inner tangents cross at the
-// internal centre of similitude, the pivot, tagged with a pipe host. The outer tangents run left
-// to the external centre and past the text, so the plate fills its frame around the void.
-// apps/site/scripts/og.mjs renders it with the text to apps/site/public/og.png.
+// The link preview (og:image) for the marketing site, 1200x630. Common tangents between two
+// places: a large circle on the left (the browser), which is a hole holding the wordmark and
+// headline, and a small one on the right (the container). Their inner tangents cross at the
+// internal centre of similitude, the pivot, tagged with a pipe host; the outer pair meets at the
+// external centre on the right. Every tangent only touches the browser's rim, so the copy sits
+// in the drawing with nothing crossing it. apps/site/scripts/og.mjs rasterizes it with Inter.
 import { best, meet, PHI, plate } from "../../scripts/flat.mjs";
 
-// The text column, in plate coordinates: apps/site/scripts/og.mjs places the text inside it.
-export const TEXT = { x: 72, y: 222, w: 360, h: 186 };
+// The copy inside the browser circle.
+const COPY = [
+  { text: "Wurmhol", size: 64, weight: 600 },
+  { text: "A private URL for your", size: 30 },
+  { text: "agent's dev server.", size: 30 },
+];
 
 export default (o) =>
   best(
@@ -21,42 +25,42 @@ export default (o) =>
       });
       const u = Math.min(W, H) / 24;
       const y = H / 2;
-      const r2 = H * (0.27 + rnd() * 0.05);
-      const r1 = r2 / PHI ** 2;
-      const c2 = [W - r2 * (0.95 + rnd() * 0.2), y];
-      const c1 = [c2[0] - r2 * (1.55 + rnd() * 0.25), y];
-      p.void(TEXT.x - u, TEXT.y - u, TEXT.w + 2 * u, TEXT.h + 2 * u);
+      const R = H * 0.375;
+      const r = R / PHI ** 2;
+      const big = [R + u * (2.2 + rnd() * 1.2), y];
+      const small = [big[0] + R * (1.85 + rnd() * 0.35), y];
+
+      p.hole({ c: big, r: R });
+      p.text(big, COPY, { pad: u * 0.5, gap: 0.5 });
 
       p.ray([0, y], [W, y]);
-      p.circle(c1, r1);
-      p.circle(c2, r2);
-      p.circle(c2, r2 / PHI);
-      p.circle(c1, r1 * PHI, { dashed: true });
-      p.circle(c2, r2 * PHI, { dashed: true });
-      p.circle(c2, r2 * PHI ** 2, { dashed: true });
+      p.circle(small, r);
+      p.circle(small, r * PHI, { dashed: true });
+      p.circle(big, R * PHI, { dashed: true });
+      p.circle(small, r * PHI ** 2, { dashed: true });
 
-      const I = [(r2 * c1[0] + r1 * c2[0]) / (r1 + r2), y];
-      const E = [(r1 * c2[0] - r2 * c1[0]) / (r1 - r2), y];
+      const I = [(R * small[0] + r * big[0]) / (R + r), y];
+      const E = [(R * small[0] - r * big[0]) / (R - r), y];
       for (const [centre, inner] of [
         [I, true],
         [E, false],
       ]) {
-        for (const t of meet.tangents(centre, c2, r2)) {
+        for (const t of meet.tangents(centre, big, R)) {
           p.ray(centre, t, { dashed: !inner });
           p.node(t, { size: u * 0.4 });
         }
-        for (const t of meet.tangents(centre, c1, r1)) p.node(t, { size: u * 0.3 });
+        for (const t of meet.tangents(centre, small, r)) p.node(t, { size: u * 0.3 });
       }
       p.line([I[0], 0], [I[0], H], { dashed: true });
-      // Where the browser's φ ring crosses the axis, on the container's side.
-      p.node([c2[0] - r2 * PHI, y], { size: u * 0.35 });
-      p.node(c1, { size: u * 0.5 });
-      p.node(c2, { size: u * 0.9 });
+      // The axis meets the browser's rim on both sides.
+      p.node([big[0] - R, y], { size: u * 0.35 });
+      p.node([big[0] + R, y], { size: u * 0.35 });
+      p.node(small, { size: u * 0.6 });
       if (E[0] > 0 && E[0] < W) p.node(E, { size: u * 0.5 });
       p.node(I, { shape: "dot", size: u * 0.55, accent: true });
-      p.label([c1[0] - r1 * PHI, y + r1 * PHI + u * 1.4], "container", { tag: true });
-      p.label([c2[0] - u * 0.5, y - r2 - u * 0.9], "browser", { tag: true });
-      p.label([I[0] + u * 0.6, y + u * 1.6], "k3x9p2m7qa.wurmhol.dev", {
+      p.label([big[0] + R * 0.55, y - R - u * 0.9], "browser", { tag: true });
+      p.label([small[0] - r, y + r * PHI + u * 1.4], "container", { tag: true });
+      p.label([I[0] + u * 0.6, y - u * 1.6], "k3x9p2m7qa.wurmhol.dev", {
         tag: true,
         accent: true,
       });
