@@ -50,7 +50,8 @@ export default (o) => {
   p.line([outer.c[0], -1000], [outer.c[0], 1000], { dashed: true });
 
   p.circle(outer.c, outer.r);
-  p.ticks(outer.c, outer.r, { count: 240, length: 7, every: 12 });
+  // The bezel turns in the app, so it is part of the live layer `--set chain=off` leaves out.
+  if (o.set?.chain !== "off") p.ticks(outer.c, outer.r, { count: 240, length: 7, every: 12 });
   p.circle(outer.c, outer.r * 1.08, { dashed: true });
   p.circle(outer.c, outer.r * PHI, { dashed: true });
   p.circle(hole.c, hole.r);
@@ -58,7 +59,7 @@ export default (o) => {
   p.node([outer.c[0] + outer.r, 0], { size: 8 });
 
   // The chain. The app draws it live and rolls it around the hole (Steiner's porism: any
-  // starting phase closes), so `--set chain=off` leaves it out of the static export.
+  // starting phase closes), so `--set chain=off` leaves it, and the bezel, out of the static export.
   if (o.set?.chain === "off") return p;
   for (const C of chain) p.circle(C.c, C.r);
 
