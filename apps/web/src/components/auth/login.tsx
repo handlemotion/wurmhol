@@ -5,8 +5,10 @@ import { IconKey, IconMail } from "@/components/icons/lucide";
 import { Button } from "@/components/ui/button";
 import { Heading } from "@/components/ui/heading";
 import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
+import { Wormhole } from "@/components/auth/wormhole";
 import { useSignInMethods } from "@/hooks/use-app";
 import { safeNext, signInMagicLink, signInPasskey, signInSocial } from "@/lib/auth";
 
@@ -57,8 +59,9 @@ export function Login() {
   const failure = passkey.error ?? social.error ?? magicLink.error;
 
   return (
-    <main className="min-h-dvh bg-background px-4 py-5 sm:p-9">
-      {/* The form sits raw on the canvas, pinned to the top left; the rest of the screen stays empty. */}
+    <main className="relative isolate flex min-h-dvh items-center justify-center overflow-hidden bg-background px-4 py-12">
+      <Wormhole className="pointer-events-none absolute inset-0 -z-10 size-full text-foreground" />
+      {/* The form sits raw on the canvas at the wormhole's centre, where the rings have faded out. */}
       <div className="flex w-full max-w-88 flex-col gap-6">
         <div className="flex flex-col gap-2">
           <Heading>Welcome to the Wurmhol</Heading>
@@ -105,6 +108,7 @@ export function Login() {
             </Button>
           )}
         </div>
+        {methods.data?.magicLink && <Separator label="or" />}
         {methods.data?.magicLink && (
           <form
             className="flex flex-col gap-2"
