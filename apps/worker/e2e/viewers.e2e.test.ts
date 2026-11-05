@@ -2,6 +2,7 @@
 // token's org, and the relay records who opened it (first and last seen, a count), never what
 // they opened.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { FixError, openPipe } from "wurmhol/sdk";
 import {
   api,
   browserFetch,
@@ -24,6 +25,7 @@ let ada: Person;
 let bo: Person;
 let cleo: Person;
 let env: Record<string, string>;
+let token: string;
 let local: Awaited<ReturnType<typeof localServer>>;
 let hits: string[];
 
@@ -49,7 +51,8 @@ beforeAll(async () => {
   cleo = await signIn(stack);
   await join(ada, bo);
   await join(ada, cleo);
-  env = cliEnv(stack, (await createToken(stack, ada)).token);
+  token = (await createToken(stack, ada)).token;
+  env = cliEnv(stack, token);
   hits = [];
   local = await localServer((req, res) => {
     hits.push(req.url ?? "");
@@ -99,6 +102,38 @@ describe("a pipe opened with --only", () => {
     expect(result.stderr).not.toContain(bo.email);
     const after = (await api<{ shares: unknown[] }>(stack, ada, "/api/shares")).body.shares;
     expect(after).toHaveLength(before.length);
+  });
+});
+
+describe("openPipe({ viewers })", () => {
+  it("narrows the pipe to the listed members, and rejects a name outside the org", async () => {
+    const outsider = await signIn(stack);
+    const refused = await openPipe({
+      port: local.port,
+      token,
+      server: stack.url,
+      viewers: [outsider.email],
+    }).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(FixError);
+    expect((refused as FixError).message).toContain(`${outsider.email} is not a member`);
+
+    const pipe = await openPipe({
+      port: local.port,
+      token,
+      server: stack.url,
+      viewers: [bo.email],
+    });
+    try {
+      const cookie = await viewerCookie(stack, bo, pipe.url);
+      expect((await browserFetch(`${pipe.url}/`, { cookie, headers: page })).status).toBe(200);
+      const first = await browserFetch(`${pipe.url}/`, { headers: page });
+      const open = await browserFetch(first.headers.get("location")!, { cookie: cleo.cookie });
+      expect(new URL(open.headers.get("location")!, stack.url).searchParams.get("reason")).toBe(
+        "not-listed",
+      );
+    } finally {
+      await pipe.close();
+    }
   });
 });
 
