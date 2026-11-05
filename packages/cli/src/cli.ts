@@ -2,7 +2,7 @@
 // wurmhol: share a local dev server at a private HTTPS URL (spec section 7).
 //
 //   npx wurmhol <port> [--ttl 8h] [--json] [--only <emails>] [--name <name>]
-//                      [--link <url>] [--note <text>]
+//                      [--link <url>] [--note <text>] [--path </page>]
 //                                 start a share; prints its URL first, then returns
 //   wurmhol ls [--json]           open shares on this machine
 //   wurmhol stop <port|id|name>   end one; `--all` ends every one
@@ -39,7 +39,7 @@ import { init } from "./init.ts";
 import { login as deviceLogin, redeem } from "./login.ts";
 import { followLog, isRequest, type LogRecord, readLog, toRequest } from "./logs.ts";
 import { checkService, installService, stableEntry, uninstallService } from "./service.ts";
-import { DEFAULT_CONSOLE, DEFAULT_SERVER } from "./pipe.ts";
+import { DEFAULT_CONSOLE, DEFAULT_SERVER, pagePath, pageUrl } from "./pipe.ts";
 import { alive, listStates, logFile, matches, removeState, type ShareState } from "./state.ts";
 
 /** This file: the daemon and the login service run it again. */
@@ -58,6 +58,8 @@ Usage:
                                 e.g. for an OAuth redirect URI
     --link <url>                A link to show with the pipe on the wall, like the issue
     --note <text>               One line to show with the pipe on the wall
+    --path </page>              Print the URL opened at this page, like /checkout?step=2
+                                (also pageUrl in --json); the same pipe either way
   wurmhol ls [--json]           List open pipes
   wurmhol stop <port|id|name>   End a pipe (--all ends every one)
   wurmhol logs <port|id|name>   A pipe's recent requests (method, path, status, time) and
@@ -155,14 +157,27 @@ function reusable(options: ShareOptions): ShareState | undefined {
   );
 }
 
-async function share(options: ShareOptions, json: boolean) {
+/** What `wurmhol <port>` prints: the URL (at `--path`, when given), or the JSON for `--json`. */
+function printPipe(
+  pipe: { url: string; port: number; id: string; endsAt: string },
+  path: string | undefined,
+  json: boolean,
+) {
+  const { url, port, id, endsAt } = pipe;
+  const page = path === undefined ? undefined : pageUrl(url, path);
+  const out = json
+    ? JSON.stringify({ url, port, id, endsAt, ...(page ? { pageUrl: page } : {}) })
+    : (page ?? url);
+  process.stdout.write(`${out}\n`);
+}
+
+async function share(options: ShareOptions, json: boolean, path: string | undefined) {
   token();
   const { port } = options;
   // Agents re-run commands: the same command again prints the same pipe, not a second one.
   const open = reusable(options);
   if (open) {
-    const { url, id, endsAt } = open;
-    process.stdout.write(`${json ? JSON.stringify({ url, port, id, endsAt }) : url}\n`);
+    printPipe(open, path, json);
     if (!json) {
       process.stderr.write(
         `Already open. For a new URL: wurmhol stop ${port}, then run this again.\n`,
@@ -172,9 +187,7 @@ async function share(options: ShareOptions, json: boolean) {
   }
   const message = await startDaemon(entry, options);
   if (message.type === "error") fail(message.message);
-  const { url, id, endsAt } = message;
-  const out = json ? JSON.stringify({ url, port, id, endsAt }) : url;
-  process.stdout.write(`${out}\n`);
+  printPipe({ ...message, port }, path, json);
 }
 
 /**
@@ -367,6 +380,7 @@ function parseCommandLine(args = process.argv.slice(2)) {
         name: { type: "string" },
         link: { type: "string" },
         note: { type: "string" },
+        path: { type: "string" },
         all: { type: "boolean", default: false },
         follow: { type: "boolean", short: "f", default: false },
         skill: { type: "boolean", default: false },
@@ -416,8 +430,16 @@ async function main() {
     const value = values[field];
     if (value !== undefined && sourceField(field, value) === null) fail(SOURCE_FIXES[field]);
   }
+  let path: string | undefined;
+  if (values.path !== undefined) {
+    try {
+      path = pagePath(values.path);
+    } catch (error) {
+      fail(error);
+    }
+  }
   const { only, name, link, note } = values;
-  return share({ port, ttl, only, name, link, note }, values.json);
+  return share({ port, ttl, only, name, link, note }, values.json, path);
 }
 
 try {

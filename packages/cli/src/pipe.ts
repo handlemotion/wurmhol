@@ -5,6 +5,7 @@ import {
   parseDuration,
   PIPE_NAME_RULE,
   pipeName,
+  sameOriginPath,
   SOURCE_FIELDS,
   SOURCE_FIXES,
   sourceField,
@@ -191,6 +192,23 @@ class OpenPipe implements Pipe {
     await this.#tunnel.stop();
     await this.#closed;
   }
+}
+
+/**
+ * `path` checked as a page on the pipe (`/checkout?step=2`), resolved as a browser would, or a
+ * FixError when it would leave the pipe or is not a path.
+ */
+export function pagePath(path: string): string {
+  const resolved = sameOriginPath(path);
+  if (path.length > 2000 || (resolved === "/" && path.trim() !== "/")) {
+    throw new FixError(`Not a path on the pipe: ${path.slice(0, 80)}. Use one like /checkout.`);
+  }
+  return resolved;
+}
+
+/** The pipe's URL opened at `path` (already checked with `pagePath`). */
+export function pageUrl(url: string, path: string) {
+  return new URL(path, url).toString();
 }
 
 /** A server URL's origin, or a FixError naming WURMHOL_URL, where the CLI's server comes from. */

@@ -9,7 +9,7 @@ import pkg from "../package.json" with { type: "json" };
 import { consoleUrl, findToken, server } from "./config.ts";
 import { FixError } from "./errors.ts";
 import { appendRequest, recentRequests } from "./logs.ts";
-import { openPipe, type Pipe } from "./pipe.ts";
+import { openPipe, pagePath, pageUrl, type Pipe } from "./pipe.ts";
 import { listStates, matches } from "./state.ts";
 
 const INSTRUCTIONS = `Wurmhol gives a local dev server a private HTTPS URL that only members of the user's org can open, in their own browser, on any device.
@@ -94,12 +94,22 @@ export function createServer(pipes: Map<string, Held>) {
           .array(z.string())
           .optional()
           .describe("Emails of the org members who may open it. Default: every member"),
+        path: z
+          .string()
+          .optional()
+          .describe(
+            "A page to send the user to, like /checkout?step=2: the result's pageUrl opens there",
+          ),
       },
-      outputSchema: pipeShape,
+      outputSchema: {
+        ...pipeShape,
+        pageUrl: z.string().optional().describe("The URL at `path`, when one was given"),
+      },
       annotations: { openWorldHint: true },
     },
-    async ({ port, ttl, name, only }) => {
+    async ({ port, ttl, name, only, path }) => {
       try {
+        const page = path === undefined ? undefined : pagePath(path);
         let seconds: number | undefined;
         if (ttl !== undefined) {
           seconds = parseDuration(ttl) ?? undefined;
@@ -126,7 +136,11 @@ export function createServer(pipes: Map<string, Held>) {
         pipe.on("request", (request) => appendRequest(pipe.id, request, { port }));
         pipe.once("close", () => pipes.delete(pipe.id));
         const result = describe(held);
-        return ok(`${pipe.url}\nPort ${port}, ends ${result.endsAt}. Id ${pipe.id}.`, result);
+        const at = page === undefined ? undefined : pageUrl(pipe.url, page);
+        return ok(`${at ?? pipe.url}\nPort ${port}, ends ${result.endsAt}. Id ${pipe.id}.`, {
+          ...result,
+          ...(at ? { pageUrl: at } : {}),
+        });
       } catch (error) {
         return failure(error);
       }
