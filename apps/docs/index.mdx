@@ -1,0 +1,28 @@
+---
+title: "Introduction"
+description: "A private HTTPS URL for a coding agent's dev server."
+---
+
+Coding agents in cloud sandboxes build web apps you can't open. Wurmhol gives the dev server an
+HTTPS link (a pipe) that you open in your own browser, on any device.
+
+```bash
+npx wurmhol 8787
+# https://k3x9p2m7qa.wurmhol.dev
+```
+
+Only signed-in members of the org that owns the token get through. Everyone else gets the
+sign-in page, never your app.
+
+## Why not a tunnel?
+
+Cloud sandboxes, like Claude Code on the web, reach the internet only through an HTTPS proxy on
+port 443. There is no DNS and no other port, so Cloudflare quick tunnels and ngrok can't get out.
+The CLI needs one outbound WebSocket on 443 to `api.wurmhol.com`, and goes through
+`HTTPS_PROXY` like any other HTTPS request.
+
+## What the relay keeps
+
+TLS ends at the relay, so it can read the traffic it carries. It never logs or stores request or
+response bodies. It keeps only each page's `<title>` and favicon, to show the pipe on your org's
+wall. If that is not acceptable for your work, [host Wurmhol yourself](/self-hosting).

@@ -1,13 +1,31 @@
-// The marketing site: the static Astro build (`dist/`), served by Workers static assets, with no
-// Worker code. Every value here is a neutral default. The custom domain is not in this file: the
-// deploy sets it, as apps/worker's deploy script does with WORKER_DOMAIN
-// (`wrangler deploy --domain <apex>`; hosted Wurmhol uses wurmhol.com).
+// The marketing site: the static Astro build (`dist/`), served by Workers static assets, and the
+// docs at `/docs`, which worker/index.ts proxies to Mintlify. Every value here is a neutral
+// default. The custom domain is not in this file: the deploy sets it, as apps/worker's deploy
+// script does with WORKER_DOMAIN (`wrangler deploy --domain <apex>`; hosted Wurmhol uses
+// wurmhol.com).
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "wurmhol-site",
+  "main": "worker/index.ts",
   "compatibility_date": "2026-11-03",
+  // Vars set in the dashboard survive deploys.
+  "keep_vars": true,
   "assets": {
     "directory": "./dist",
+    "binding": "ASSETS",
     "not_found_handling": "404-page",
+    // Only the docs paths reach the Worker; everything else is served straight from `dist/`.
+    "run_worker_first": [
+      "/docs",
+      "/docs/*",
+      "/_mintlify/*",
+      "/mintlify-assets/*",
+      "/.well-known/vercel/*",
+    ],
+  },
+  "vars": {
+    // The Mintlify deployment `/docs` proxies to, `<subdomain>.mintlify.site`. Empty: no docs,
+    // `/docs` is the 404 page. Hosted Wurmhol: handlemotion.mintlify.site.
+    "DOCS_HOST": "",
   },
 }

@@ -185,6 +185,11 @@ cd apps/site && pnpm exec wrangler deploy --domain example.com
 
 If you deploy it on the apex, give the app its own host (for example `app.example.com`).
 
+The site's Worker also serves docs at `/docs` by proxying to a [Mintlify](https://mintlify.com)
+deployment of `apps/docs`. Set the `DOCS_HOST` var on `wurmhol-site` to its
+`<subdomain>.mintlify.site` host, and in Mintlify's custom domain settings turn on **Host at**
+with your domain and the base path `/docs`. Leave `DOCS_HOST` empty and `/docs` is the 404 page.
+
 ## Local
 
 ```bash
