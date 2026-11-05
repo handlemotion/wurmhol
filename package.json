@@ -31,7 +31,9 @@
     "oxlint": "^1.91.0",
     "turbo": "^2.11.10",
     "typescript": "7.0.2",
-    "vitest": "^5.1.0"
+    "undici": "^8.12.3",
+    "vitest": "^5.1.0",
+    "ws": "^8.22.1"
   },
   "engines": {
     "node": ">=26"
