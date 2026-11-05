@@ -173,12 +173,15 @@ export function Constellation(props: {
         el.style.transform = `translate3d(${left}px, ${top}px, 0)`;
         el.style.visibility = "visible";
       }
-      // The backdrop follows the anchor's place as it eases and as the camera pans, but not its
-      // drift: a whole drawing swaying with the button would read as the page moving.
+      // The backdrop is centred on the anchor as drawn, the Create pipe card included (it grows
+      // off-centre from the button), and follows the camera, but not the anchor's drift: a whole
+      // drawing swaying with the button would read as the page moving.
       const seat = sim.current.get(ANCHOR);
-      if (backdrop.current && seat) {
-        const x = snap(ox + seat.x);
-        const y = snap(oy + seat.y);
+      const shown = centres.get(ANCHOR);
+      const swayed = drawn.get(ANCHOR);
+      if (backdrop.current && seat && shown && swayed) {
+        const x = snap(ox + seat.x + shown.x - swayed.x);
+        const y = snap(oy + seat.y + shown.y - swayed.y);
         backdrop.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
         backdrop.current.style.visibility = "visible";
       }
