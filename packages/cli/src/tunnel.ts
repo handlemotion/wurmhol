@@ -141,8 +141,7 @@ export class Tunnel {
 
   /** Connects and resolves with the share's id and URL, or rejects with a FixError. */
   async start(): Promise<ShareInfo> {
-    const socket = await this.#dial();
-    this.#attach(socket);
+    await this.#dial();
     return this.#share!;
   }
 
@@ -205,7 +204,12 @@ export class Tunnel {
           this.#share = { id, url: shareUrl, endsAt };
         }
       });
-      socket.once("open", () => resolve(socket));
+      // Listening from the open event itself: the relay may send a request in the same packet as
+      // the upgrade, and `ws` emits it before an awaiting caller would get to attach.
+      socket.once("open", () => {
+        this.#attach(socket);
+        resolve(socket);
+      });
       socket.once("unexpected-response", (_request, response) => {
         const chunks: Buffer[] = [];
         response.on("data", (c: Buffer) => chunks.push(c));
@@ -519,8 +523,7 @@ export class Tunnel {
       await new Promise((resolve) => setTimeout(resolve, delay));
       delay = Math.min(delay * 2, 5000);
       try {
-        const socket = await this.#dial();
-        this.#attach(socket);
+        await this.#dial();
         this.#options.log("reconnected", { shareId: this.#share?.id });
         return;
       } catch (error) {

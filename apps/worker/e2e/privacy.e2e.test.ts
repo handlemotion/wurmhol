@@ -65,13 +65,18 @@ describe("what the relay keeps about viewers", () => {
       },
     });
     expect(response.status).toBe(200);
-    expect(seen).toHaveLength(1);
-    expect(seen[0]).not.toHaveProperty("x-forwarded-for");
-    expect(seen[0]).not.toHaveProperty("x-real-ip");
-    expect(seen[0]).not.toHaveProperty("true-client-ip");
-    expect(JSON.stringify(seen[0])).not.toContain("203.0.113.7");
+    // The relay's own requests for the page and its favicon send an `accept`; the viewer's here
+    // sends none.
+    const viewer = seen.filter((headers) => !headers.accept);
+    expect(viewer).toHaveLength(1);
+    for (const headers of seen) {
+      expect(headers).not.toHaveProperty("x-forwarded-for");
+      expect(headers).not.toHaveProperty("x-real-ip");
+      expect(headers).not.toHaveProperty("true-client-ip");
+      expect(JSON.stringify(headers)).not.toContain("203.0.113.7");
+    }
     // The headers apps need to build absolute URLs still arrive.
-    expect(seen[0]!["x-forwarded-host"]).toBe(new URL(started.url).host);
+    expect(viewer[0]!["x-forwarded-host"]).toBe(new URL(started.url).host);
     await local.close();
   });
 
