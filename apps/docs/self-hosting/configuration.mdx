@@ -51,6 +51,23 @@ On by default, with nothing to set up. People add `https://api.example.com/mcp` 
 - Assistants register by Client ID Metadata Document: the Worker fetches the HTTPS URL the assistant names as its client id, at most 64 KB, without following redirects.
 - It needs HTTPS, or plain HTTP on `localhost` or `127.0.0.1`. A stack on plain HTTP under any other host, like `api.localhost`, has it off.
 
+## Takedown
+
+When someone reports a pipe for phishing or abuse, you take it down with one call. Set `OPERATOR_TOKEN` first, a secret of at least 32 random characters (`openssl rand -base64 32`, then `wrangler secret put OPERATOR_TOKEN`). Without it, `/operator/*` answers 404.
+
+```bash
+curl -X POST https://dirt.example.com/operator/takedown \
+  -H "Authorization: Bearer $OPERATOR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"pipe": "https://k3x9m2p7qa.example-pipes.dev/login"}'
+```
+
+- `pipe` is the reported URL, its host, the pipe's id, or a named pipe's name.
+- The pipe ends now, the token that opened it is revoked, and that token's other pipes and machines end with it. Each CLI prints why and stops.
+- `"blockOrg": true` also blocks the org: every pipe of it ends, and none of its tokens, old or new, opens another. Add a `"note"` with the report it answers.
+- The answer lists the revoked token's id and every pipe that ended.
+- To unblock an org: `wrangler d1 execute wurmhol --remote --command "delete from org_blocks where org_id = '<org id>'"`.
+
 ## Docs link
 
 The wall's Docs links go to `https://wurmhol.com/docs`. Set `DOCS_URL` to send them to your own docs instead.

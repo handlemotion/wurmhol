@@ -10,13 +10,15 @@ import { MAX_STREAM_ID, ProtocolError, type Frame } from "./frame.ts";
 /** Bytes a sender may send on a new stream before its first `window` grant. */
 export const INITIAL_WINDOW = 1024 * 1024;
 
-/** Allocates stream ids for the side that opens streams (the relay). Never reuses one. */
-export class StreamIds {
-  #next = 1;
-  next(): number {
-    if (this.#next > MAX_STREAM_ID) throw new ProtocolError("stream ids exhausted");
-    return this.#next++;
+/** The relay opens every stream, numbering them from this one up. An id is never reused. */
+export const FIRST_STREAM_ID = 1;
+
+/** Checks `id`, the stream being opened now, and returns the one to open next. Throws once ids run out. */
+export function nextStreamId(id: number): number {
+  if (!Number.isInteger(id) || id < FIRST_STREAM_ID || id > MAX_STREAM_ID) {
+    throw new ProtocolError("stream ids exhausted");
   }
+  return id + 1;
 }
 
 /** The sender's side of one stream's window. */

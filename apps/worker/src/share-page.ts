@@ -2,9 +2,9 @@
 // Share object asks the dev server for `/` itself (`probe`) and reads the page's start, the same
 // as a viewer's first page. Nothing else of any response is kept, and nothing at all once the
 // pipe ends.
-import type { RequestHead } from "@wurmhol/protocol";
+import { forwardedHeaders, type RequestHead, WAITING_HEADER } from "@wurmhol/protocol";
 import { extractFaviconPath, extractTitle, readStart } from "./html-head.ts";
-import { forwardedHeaders, type Meta, type ShareState } from "./share-meta.ts";
+import type { Meta, ShareState } from "./share-meta.ts";
 
 /** Bytes of an HTML response read for its `<title>`. */
 export const TITLE_SCAN_BYTES = 64 * 1024;
@@ -12,7 +12,7 @@ const FAVICON_MAX_BYTES = 100 * 1024;
 /**
  * When a new pipe connects, the relay asks the dev server for `/` itself, so the wall has the
  * favicon (and title) before anyone opens it. A server not listening yet answers with the CLI's
- * waiting page (502); the probe tries again after each of these delays.
+ * waiting page (`WAITING_HEADER`); the probe tries again after each of these delays.
  */
 const PROBE_RETRY_MS = [2_000, 5_000, 10_000, 20_000];
 export const PROBE_FIRST_MS = 1_000;
@@ -86,16 +86,15 @@ export class SharePage {
           method: "GET",
           path: "/",
           // As on a viewer's request, for apps that build absolute URLs.
-          headers: [["accept", "text/html"], ...forwardedHeaders(meta)],
+          headers: [["accept", "text/html"], ...forwardedHeaders(meta.url)],
         },
         meta,
       );
-      const isHtml = /^text\/html\b/i.test(response.headers.get("content-type") ?? "");
-      if (response.status === 502 && isHtml) {
-        // The CLI's waiting page: the server is not up yet.
+      if (response.headers.has(WAITING_HEADER)) {
         await response.body?.cancel();
         throw new Error("the dev server is not listening yet");
       }
+      const isHtml = /^text\/html\b/i.test(response.headers.get("content-type") ?? "");
       if (response.ok && isHtml && response.body) {
         this.note(await readStart(response.body, TITLE_SCAN_BYTES), true);
       } else {

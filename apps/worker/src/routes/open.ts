@@ -5,10 +5,10 @@
 import { findMember, findShare } from "@wurmhol/db";
 import { Hono } from "hono";
 import { type AppEnv, resolveSession } from "../context.ts";
-import { shareOrigin, SHARE_ID } from "../env.ts";
+import { shareOrigin } from "../env.ts";
 import { errorPage } from "../pages.ts";
 import { shareStub } from "../share-do.ts";
-import { sameOriginPath } from "@wurmhol/protocol";
+import { sameOriginPath, SHARE_ID } from "@wurmhol/protocol";
 import { RESERVED_PREFIX } from "../viewer.ts";
 
 export const open = new Hono<AppEnv>().get("/", async (c) => {

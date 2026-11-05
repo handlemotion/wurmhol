@@ -1,5 +1,9 @@
 name: CI
 
+# `Checks` is the required status. It is a small job that passes only when every job before it
+# passed: the static checks, and all e2e shards (or e2e was rightly skipped for a docs-only pull
+# request). The work runs in parallel jobs so the e2e suites, the slow part, finish sooner.
+
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -15,11 +19,43 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    name: Checks
+  # Whether to run the e2e suites. Always on pushes and dispatches. A pull request skips them only
+  # when it changes nothing the Worker serves or tests: prose, the docs site, the marketing site.
+  scope:
+    name: Scope
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 5
+    outputs:
+      e2e: ${{ steps.scope.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect a change that needs no e2e
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          e2e=true
+          if [ "$EVENT" = "pull_request" ]; then
+            other=$(git diff --name-only "$BASE_SHA...$HEAD_SHA" \
+              | grep -cvE '^(docs/|apps/docs/|apps/site/)|\.md$' || true)
+            if [ "$other" = "0" ]; then e2e=false; fi
+          fi
+          echo "e2e=$e2e" >> "$GITHUB_OUTPUT"
+          echo "Run e2e: $e2e"
+
+  static:
+    name: Lint, types, unit
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     env:
       TURBO_CACHE_DIR: .turbo/cache
     steps:
@@ -28,37 +64,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # `Checks` is a required status, so the job always runs and reports; docs-only pull requests
-      # skip the slow steps below (types, tests, e2e). Format, lint and policies still run.
-      - name: Detect docs-only change
-        id: scope
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          full=true
-          if [ "$EVENT" = "pull_request" ]; then
-            other=$(git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -cvE '^docs/|\.md$' || true)
-            if [ "$other" = "0" ]; then full=false; fi
-          fi
-          echo "full=$full" >> "$GITHUB_OUTPUT"
-          echo "Run types, tests and e2e: $full"
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
+      - uses: ./.github/actions/setup
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .turbo/cache
           key: turbo-${{ runner.os }}-${{ github.sha }}
           restore-keys: turbo-${{ runner.os }}-
-
-      - run: pnpm install --frozen-lockfile
 
       - name: Format, lint, policies
         run: pnpm check
@@ -78,24 +90,73 @@ jobs:
           pnpm changeset status --since="$BASE_SHA"
 
       - name: Types
-        if: steps.scope.outputs.full == 'true'
         run: pnpm check-types
 
       - name: Build site
-        if: steps.scope.outputs.full == 'true'
         run: pnpm --filter @wurmhol/site build
 
       - name: Unit tests
-        if: steps.scope.outputs.full == 'true'
         run: pnpm test:all
 
-      # The wall's browser e2e drives Chromium through Playwright (the version in apps/worker).
-      - name: Chromium
-        if: steps.scope.outputs.full == 'true'
-        run: pnpm --filter @wurmhol/worker exec playwright install --with-deps chromium
+  # The real stack: wrangler dev (workerd) with local D1 and Durable Objects, the real CLI and a
+  # real local HTTP server. Nothing external, so no service containers. Vitest splits the files
+  # across shards by a hash of their path; together the shards run every file.
+  e2e:
+    name: E2E (${{ matrix.shard }}/3)
+    needs: scope
+    if: needs.scope.outputs.e2e == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      # Every shard reports, so one push shows every failing file.
+      fail-fast: false
+      # The shard count is also in the job name and the test command.
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      # The real stack: wrangler dev (workerd) with local D1 and Durable Objects, the real CLI and
-      # a real local HTTP server. Nothing external, so no service containers.
+      - uses: ./.github/actions/setup
+
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('./apps/worker/package.json').devDependencies.playwright")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      # The wall's browser e2e launches headless Chromium, which runs on the headless shell alone.
+      # The runner image already has every library it needs; `--with-deps` would only add apt
+      # fonts, whose download has taken up to 9 minutes on a slow mirror.
+      - name: Chromium
+        run: pnpm --filter @wurmhol/worker exec playwright install --only-shell chromium
+
       - name: E2E tests
-        if: steps.scope.outputs.full == 'true'
-        run: pnpm test:e2e
+        run: pnpm test:e2e -- --shard=${{ matrix.shard }}/3
+
+  checks:
+    name: Checks
+    needs: [scope, static, e2e]
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed
+        env:
+          SCOPE: ${{ needs.scope.result }}
+          STATIC: ${{ needs.static.result }}
+          E2E: ${{ needs.e2e.result }}
+          RUN_E2E: ${{ needs.scope.outputs.e2e }}
+        run: |
+          echo "scope: $SCOPE, static: $STATIC, e2e: $E2E (needed: $RUN_E2E)"
+          [ "$SCOPE" = success ] || exit 1
+          [ "$STATIC" = success ] || exit 1
+          if [ "$RUN_E2E" = false ]; then
+            [ "$E2E" = skipped ] || exit 1
+          else
+            [ "$E2E" = success ] || exit 1
+          fi

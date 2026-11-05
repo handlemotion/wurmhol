@@ -1,6 +1,6 @@
 // The Share object's stored state, and what its parts (`share-page.ts`, `share-views.ts`,
 // `share-previews.ts`) need from the object that owns it.
-import type { EndReason, HeaderList, PipeSource } from "@wurmhol/protocol";
+import type { EndReason, PipeSource } from "@wurmhol/protocol";
 import type { Preview } from "./github.ts";
 import type { Logger } from "./log.ts";
 import { orgStub } from "./org-do.ts";
@@ -51,13 +51,4 @@ export interface ShareState {
   /** Writes an open share's meta; never over a tombstone. */
   save(meta: Meta): void;
   org(orgId: string): ReturnType<typeof orgStub>;
-}
-
-/** The share's public host and scheme, as a proxy in front of the dev server would pass them. */
-export function forwardedHeaders(meta: Meta): HeaderList {
-  const url = new URL(meta.url);
-  return [
-    ["x-forwarded-host", url.host],
-    ["x-forwarded-proto", url.protocol.replace(":", "")],
-  ];
 }

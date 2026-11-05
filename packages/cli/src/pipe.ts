@@ -2,10 +2,10 @@
 // adds only its state file and log on top (ADR 0008, section 3).
 import { EventEmitter } from "node:events";
 import {
-  isEndReason,
   parseDuration,
   PIPE_NAME_RULE,
   pipeName,
+  sameOriginPath,
   SOURCE_FIELDS,
   SOURCE_FIXES,
   sourceField,
@@ -20,7 +20,10 @@ export const DEFAULT_CONSOLE = "https://dirt.wurmhol.com";
 
 export type { RequestEvent };
 
-/** Where a pipe comes from, as the wall shows it. Every field is optional. */
+/**
+ * Where a pipe comes from, as the wall shows it. Every field is optional. Spelled out, like
+ * `CloseReason`, so the public `.d.ts` stands alone (tsdown cannot emit protocol's types).
+ */
 export interface PipeSource {
   /** The forge's host, like `github.com`. */
   repoHost: string | null;
@@ -79,7 +82,10 @@ export interface OpenPipeOptions {
   token: string;
   /** A self-hosted install's origin. Default `https://api.wurmhol.com`. */
   server?: string;
-  /** Where the dev server listens. Default `127.0.0.1`; it still sees `Host: localhost:<port>`. */
+  /**
+   * Where the dev server listens. Default: `127.0.0.1`, or `::1` when only that answers (Vite on
+   * Node 17+). Either way it sees `Host: localhost:<port>`.
+   */
   host?: string;
   /**
    * How long the pipe lasts: seconds, or a duration like `"90m"` or `"8h"`. Default 4 hours on
@@ -188,6 +194,23 @@ class OpenPipe implements Pipe {
   }
 }
 
+/**
+ * `path` checked as a page on the pipe (`/checkout?step=2`), resolved as a browser would, or a
+ * FixError when it would leave the pipe or is not a path.
+ */
+export function pagePath(path: string): string {
+  const resolved = sameOriginPath(path);
+  if (path.length > 2000 || (resolved === "/" && path.trim() !== "/")) {
+    throw new FixError(`Not a path on the pipe: ${path.slice(0, 80)}. Use one like /checkout.`);
+  }
+  return resolved;
+}
+
+/** The pipe's URL opened at `path` (already checked with `pagePath`). */
+export function pageUrl(url: string, path: string) {
+  return new URL(path, url).toString();
+}
+
 /** A server URL's origin, or a FixError naming WURMHOL_URL, where the CLI's server comes from. */
 export function originOf(server: string) {
   try {
@@ -235,7 +258,7 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
     server,
     token,
     port: options.port,
-    host: options.host ?? "127.0.0.1",
+    host: options.host,
     ttl,
     viewers: options.viewers ?? [],
     name,
@@ -243,12 +266,9 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
     version: pkg.version,
     log,
     onRequest: (event) => pipe?.emit("request", event),
-    onEnd: (raw) => {
-      log("ended", { reason: raw });
+    onEnd: (reason) => {
+      log("ended", { reason });
       signal?.removeEventListener("abort", onAbort);
-      // A refusal on reconnect can carry the relay's own words; any of those means the pipe
-      // could not be resumed.
-      const reason: CloseReason = isEndReason(raw) ? raw : "disconnected";
       markClosed(reason);
       pipe?.emit("close", reason);
     },

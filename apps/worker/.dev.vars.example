@@ -37,6 +37,12 @@ ENVIRONMENT=development
 # localhost or 127.0.0.1: a stack on http://api.localhost has it off.
 MCP_ENABLED=
 
+# --- Takedown (ADR 0022) ---
+# Optional secret. At least 32 random characters: openssl rand -base64 32. The bearer token of
+# POST /operator/takedown on BETTER_AUTH_URL's host, which ends a reported pipe, revokes its
+# token and can block its org. Empty: /operator/* answers 404.
+OPERATOR_TOKEN=
+
 # --- Auth (Better Auth) ---
 # Secret. At least 32 random characters: openssl rand -base64 32
 BETTER_AUTH_SECRET=
