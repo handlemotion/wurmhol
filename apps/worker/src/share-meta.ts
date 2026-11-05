@@ -24,6 +24,8 @@ export interface ShareInit {
 export interface Meta extends ShareInit {
   state: "live" | "away";
   awaySince: number | null;
+  /** When the CLI's current socket connected; absent in pipes from before it. */
+  liveSince?: number;
   title: string | null;
   faviconPath: string | null;
   favicon: boolean;

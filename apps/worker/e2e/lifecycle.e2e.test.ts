@@ -104,6 +104,43 @@ describe("the wall and Terminate", () => {
     await local.close();
   });
 
+  it("a frozen CLI shows away once its heartbeats stop, and live again when it wakes", async () => {
+    // SIGSTOP is a container paused or a laptop asleep: the CLI's TCP connection stays open, so
+    // only the missing heartbeats say it is gone. Without that check the wall says live and the
+    // pipe holds its place until Cloudflare drops the socket.
+    const local = await localServer((_req, res) => res.end("x"));
+    const started = await share(stack, env, local.port);
+    const stateOf = async () => {
+      const { body } = await api<{ shares: { id: string; state: string }[] }>(
+        stack,
+        ada,
+        "/api/shares",
+      );
+      return body.shares.find((s) => s.id === started.id)?.state;
+    };
+    expect(await stateOf()).toBe("live");
+    const pid = pidOf(env, started.id);
+    process.kill(pid, "SIGSTOP");
+    const frozenAt = Date.now();
+    try {
+      await waitFor(async () => (await stateOf()) === "away", {
+        timeoutMs: 75_000,
+        intervalMs: 1000,
+        what: "the wall to show the frozen pipe away",
+      });
+      // Two missed heartbeats (20 s each), not one.
+      expect(Date.now() - frozenAt).toBeGreaterThan(30_000);
+    } finally {
+      process.kill(pid, "SIGCONT");
+    }
+    await waitFor(async () => (await stateOf()) === "live", {
+      timeoutMs: 20_000,
+      what: "the woken CLI to bring its pipe back",
+    });
+    await cli(["stop", String(local.port)], env);
+    await local.close();
+  });
+
   it("a revoked token ends its shares and cannot start new ones", async () => {
     const second = await createToken(stack, ada, "to revoke");
     const revocable = cliEnv(stack, second.token);
