@@ -60,6 +60,7 @@ const INTERNAL_HEADERS = {
   /** From the object: the share's org, on a response with a `Location` (the OAuth relay's). */
   org: "x-wurmhol-org",
 } as const;
+const INTERNAL_HEADER_NAMES = new Set<string>(Object.values(INTERNAL_HEADERS));
 
 /** The share's Durable Object: one per share, named by its id. */
 export function shareStub(env: Env, shareId: string) {
@@ -487,7 +488,7 @@ export class Share extends DurableObject<Env> {
     const headers = new Headers();
     for (const [name, raw] of forwardable(responseHead.headers)) {
       // The object's own headers to the Worker are never the dev server's to send.
-      if (name.toLowerCase().startsWith("x-wurmhol-")) continue;
+      if (INTERNAL_HEADER_NAMES.has(name.toLowerCase())) continue;
       const value = name.toLowerCase() === "set-cookie" ? pipeSetCookie(raw) : raw;
       if (value === null) continue;
       try {
