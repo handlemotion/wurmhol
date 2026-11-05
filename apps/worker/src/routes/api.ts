@@ -160,7 +160,7 @@ export const api = new Hono<AppEnv>()
   .get("/members", async (c) =>
     c.json({ members: await listMembers(c.var.db, c.var.member.orgId), you: c.var.member.id }),
   )
-  /** Removes a member and revokes their tokens, ending their pipes and machines (ADR 0019). */
+  /** Removes a member and revokes their tokens, ending their pipes and machines (ADR 0021). */
   .delete("/members/:id", requireOwner, async (c) => {
     const orgId = c.var.member.orgId;
     const memberId = c.req.param("id");

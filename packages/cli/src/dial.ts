@@ -34,23 +34,33 @@ export interface DialOptions {
   onOpen?: (socket: WebSocket) => void;
 }
 
+/**
+ * How long a socket waits, once both sides have sent their close frames, for the server to end
+ * the connection before ending it itself. `ws` waits 30 s by default, and until then emits no
+ * `close`: a revoked pipe or computer would keep running that long.
+ */
+const CLOSE_TIMEOUT_MS = 2_000;
+
 /** Opens a WebSocket to an http(s) URL on the server, or rejects with a FixError. */
 export function dial(target: URL, options: DialOptions): Promise<WebSocket> {
   const { proxy, agent } = proxyFor(target);
   const url = new URL(target);
   url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
+  // `closeTimeout` (ws 8.22) is not in @types/ws yet.
+  const socketOptions: WebSocket.ClientOptions & { closeTimeout: number } = {
+    headers: {
+      authorization: `Bearer ${options.token}`,
+      ...options.headers,
+      "user-agent": userAgent(options.version),
+    },
+    agent,
+    perMessageDeflate: false,
+    handshakeTimeout: 15_000,
+    closeTimeout: CLOSE_TIMEOUT_MS,
+    ...(options.maxPayload === undefined ? {} : { maxPayload: options.maxPayload }),
+  };
   return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url, {
-      headers: {
-        authorization: `Bearer ${options.token}`,
-        ...options.headers,
-        "user-agent": userAgent(options.version),
-      },
-      agent,
-      perMessageDeflate: false,
-      handshakeTimeout: 15_000,
-      ...(options.maxPayload === undefined ? {} : { maxPayload: options.maxPayload }),
-    });
+    const socket = new WebSocket(url, socketOptions);
     socket.binaryType = "nodebuffer";
     if (options.onUpgrade) socket.once("upgrade", options.onUpgrade);
     socket.once("open", () => {

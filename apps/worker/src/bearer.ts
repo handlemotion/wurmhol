@@ -46,7 +46,7 @@ export async function bearerToken(c: {
         );
   }
   // A token acts for whoever made it, so only while they are in its org. Leaving revokes their
-  // tokens (ADR 0019); this holds in the moment between the two, and for any token missed.
+  // tokens (ADR 0021); this holds in the moment between the two, and for any token missed.
   if (token.createdBy && !(await findMember(db, token.createdBy, token.orgId))) {
     return refuse(
       401,

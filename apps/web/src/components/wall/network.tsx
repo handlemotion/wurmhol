@@ -40,7 +40,16 @@ export function Network({ shares }: { shares: Share[] }) {
     restore.current = null;
     if (!id) return;
     const selector = id === ANCHOR ? "[data-create]" : `[data-pipe="${CSS.escape(id)}"]`;
-    document.querySelector<HTMLElement>(selector)?.focus();
+    // The pill mounts after the card's exit completes, and until then the only match can be the
+    // card's inert copy of it, which takes no focus: wait a few frames for the real one.
+    const focus = (frames: number) => {
+      const pill = [...document.querySelectorAll<HTMLElement>(selector)].find(
+        (el) => !el.closest("[inert]"),
+      );
+      if (pill) pill.focus();
+      else if (frames > 0) requestAnimationFrame(() => focus(frames - 1));
+    };
+    focus(10);
   };
 
   // Escape, or a press anywhere outside the open card, closes it. A press on another pill opens

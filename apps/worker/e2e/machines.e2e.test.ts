@@ -202,7 +202,10 @@ describe("a computer running wurmhol host", () => {
     );
     // Catches: a revoked token's computer still listed, and still able to open pipes.
     await waitFor(() => adas.machines?.length === 0, { what: "the machine gone" });
-    await waitFor(() => host.exited !== undefined, { timeoutMs: 15_000, what: "the CLI to exit" });
+    await waitFor(() => host.exited !== undefined, {
+      timeoutMs: 15_000,
+      what: "the CLI to exit",
+    });
     expect(host.exited).toBe(1);
     expect(host.output).toContain("token");
     adas.socket.close();
@@ -210,7 +213,7 @@ describe("a computer running wurmhol host", () => {
 
   /**
    * `person` runs `wurmhol host` and a pipe in ada's org, then `go` takes them out of it. Their
-   * tokens there are revoked (ADR 0019), so both stop and neither can come back.
+   * tokens there are revoked (ADR 0021), so both stop and neither can come back.
    */
   async function leavesTheOrg(person: Person, go: () => Promise<void>) {
     const theirEnv = cliEnv(stack, (await createToken(stack, person, "their laptop")).token);

@@ -1,4 +1,4 @@
-# 0019: Leaving an org revokes the tokens you made there
+# 0021: Leaving an org revokes the tokens you made there
 
 Status: accepted. Extends spec v1 section 3 (Members: remove) and section 6 (Token leaked), and
 ADR 0018 (machines).
