@@ -130,12 +130,22 @@ export function parsePipeSource(raw: unknown): SourceResult {
   return { ok: true, source: any ? source : null };
 }
 
+/** `path` without leading and trailing slashes, in one linear pass (no backtracking regex). */
+function trimSlashes(path: string) {
+  let start = 0;
+  let end = path.length;
+  while (start < end && path[start] === "/") start++;
+  while (end > start && path[end - 1] === "/") end--;
+  return path.slice(start, end);
+}
+
 /**
  * A git remote URL as its forge's host and the repo's path, or null for a local path. Credentials
  * in the URL (`https://user:token@host/…`) are never part of the result.
  */
 export function repoFromRemote(remote: string): { repoHost: string; repo: string } | null {
   const value = remote.trim();
+  if (value.length > 2048) return null;
   let host: string;
   let path: string;
   // scp-like syntax: `git@github.com:owner/name.git`.
@@ -159,8 +169,7 @@ export function repoFromRemote(remote: string): { repoHost: string; repo: string
   const repoHost = sourceField("repoHost", host);
   const repo = sourceField(
     "repo",
-    path
-      .replace(/^\/+|\/+$/g, "")
+    trimSlashes(path)
       .replace(/\.git$/, "")
       .replace(/^~[^/]*\//, ""),
   );

@@ -20,6 +20,15 @@ it("never carries credentials from the remote URL", () => {
   expect(JSON.stringify(parsed)).not.toContain("ghs_secret");
 });
 
+it("reads a remote of many slashes in linear time", () => {
+  // Catches: a backtracking regex that takes seconds on a crafted remote (CodeQL's polynomial
+  // regex alert), stalling the CLI before every pipe.
+  const started = performance.now();
+  expect(repoFromRemote(`https://github.com/a${"/".repeat(2000)}b`)).toBeNull();
+  expect(repoFromRemote(`https://github.com/${"/".repeat(100_000)}x`)).toBeNull();
+  expect(performance.now() - started).toBeLessThan(100);
+});
+
 it.each([
   // Catches: a local path's directories shown as a repo, or a file URL followed.
   "/srv/git/app.git",
