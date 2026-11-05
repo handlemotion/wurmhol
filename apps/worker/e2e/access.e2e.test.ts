@@ -33,9 +33,20 @@ beforeAll(async () => {
   hits = [];
   local = await localServer((req, res) => {
     hits.push(req.url ?? "");
+    if (req.url === "/favicon.ico") {
+      return res.writeHead(200, { "content-type": "image/png" }).end(Buffer.from([0, 0, 1, 0]));
+    }
     res.writeHead(200, { "content-type": "text/html" }).end("<title>secret app</title>secret");
   });
   shared = await share(stack, env, local.port);
+  // The relay asks the dev server for `/` and its favicon itself when a pipe starts, for the
+  // wall, until it has the favicon. Wait for that, so `hits` counts only what viewers cause.
+  await waitFor(
+    async () =>
+      (await browserFetch(`${stack.url}/api/shares/${shared.id}/favicon`, { cookie: ada.cookie }))
+        .status === 200,
+    { timeoutMs: 15_000, what: "the relay's own probe of the pipe" },
+  );
 });
 
 afterAll(async () => {
