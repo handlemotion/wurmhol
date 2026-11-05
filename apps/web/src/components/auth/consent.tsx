@@ -1,14 +1,16 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Skeleton } from "skullet/react";
 import { ConsentPlate } from "@/components/auth/consent-plate";
 import { Button } from "@/components/ui/button";
 import { Heading } from "@/components/ui/heading";
 import { SkeletonProvider } from "@/components/ui/skeleton-provider";
-import { IconCheck, IconX } from "@/components/icons/lucide";
-import { Strong, Text, TextLink } from "@/components/ui/text";
-import { api, ApiError, type Me } from "@/lib/api";
+import { IconCheck } from "@/components/icons/lucide";
+import { Text } from "@/components/ui/text";
+import { Tooltip, TooltipTrigger } from "@/components/ui/tooltip";
+import { api, ApiError } from "@/lib/api";
 
-/** What each scope lets the assistant do (ADR 0014), one short line each. */
+/** What each scope lets the assistant do (ADR 0014), one line each. */
 const SCOPE_TEXT: Record<string, string> = {
   "pipes:read": "See your open pipes",
   "pipes:write": "Stop any of them",
@@ -43,16 +45,14 @@ function Review() {
   const review = useQuery({
     queryKey: ["consent", clientId],
     queryFn: async () => {
-      const [client, me] = await Promise.all([
-        api<PublicClient>(
-          `/api/auth/oauth2/public-client?client_id=${encodeURIComponent(clientId)}`,
-        ),
-        api<Me>("/api/me"),
-      ]);
-      return { client, orgs: me.orgs, email: me.user.email };
+      const client = await api<PublicClient>(
+        `/api/auth/oauth2/public-client?client_id=${encodeURIComponent(clientId)}`,
+      );
+      return { client };
     },
     retry: false,
   });
+  const [tip, setTip] = useState(false);
   const decide = useMutation({
     mutationFn: (accept: boolean) =>
       api<{ url: string }>("/api/auth/oauth2/consent", {
@@ -76,44 +76,43 @@ function Review() {
       data={review.data}
       sample={{
         client: { client_id: "https://claude.ai/oauth/mcp-client", client_name: "Claude" },
-        orgs: [{ id: "", name: "Handlemotion", role: "member", personal: false }],
-        email: "ada@example.com",
       }}
       label="Loading the request"
     >
-      {({ client, orgs, email }) => {
-        const host = clientHost(client.client_id);
-        const name = client.client_name ?? host ?? "This app";
+      {({ client }) => {
+        const name = client.client_name ?? clientHost(client.client_id) ?? "This app";
+        // Geometry, measured in ink: the heading sits 16px above its rows, the rows 15px apart
+        // (13px text on a 20px line, 8px between lines), the buttons 26px below the list and
+        // 8px apart. So the heading reads with its list and the buttons as their own group.
+        // Each check sits centred on its row's 20px line.
         return (
           <div className="flex flex-col gap-6">
             <div className="flex flex-col gap-2">
               <Heading size="sm">{name} wants to reach your pipes</Heading>
-              <Text>
-                In {orgs.map((o) => (o.personal ? "your personal org" : o.name)).join(", ")}, as{" "}
-                <Strong>{email}</Strong>. <TextLink onPress={toLogin}>Not you?</TextLink>
-              </Text>
+              <ul className="flex flex-col gap-2">
+                {scopes.map((scope) => (
+                  <li key={scope} className="flex items-center gap-2">
+                    <IconCheck aria-hidden className="size-icon shrink-0 text-muted-foreground" />
+                    <Text className="leading-5">{SCOPE_TEXT[scope]}</Text>
+                  </li>
+                ))}
+              </ul>
             </div>
-            <ul className="flex flex-col gap-2">
-              {scopes.map((scope) => (
-                <li key={scope} className="flex items-center gap-2">
-                  <IconCheck aria-hidden className="size-icon shrink-0 text-muted-foreground" />
-                  <Text>{SCOPE_TEXT[scope]}</Text>
-                </li>
-              ))}
-              <li className="flex items-center gap-2">
-                <IconX aria-hidden className="size-icon shrink-0 text-muted-foreground" />
-                <Text>Never open pipes or see what passes through them</Text>
-              </li>
-            </ul>
             <div className="flex flex-col gap-2">
-              <Button
-                size="lg"
-                isPending={decide.isPending && decide.variables === true}
-                isDisabled={decide.isPending}
-                onPress={() => decide.mutate(true)}
-              >
-                Allow
-              </Button>
+              {/* React Aria opens a tooltip on hover only after the page has seen a press, and
+                  people arrive here straight from signing in: the button's own hover opens it. */}
+              <TooltipTrigger isOpen={tip} onOpenChange={setTip} isDisabled={!redirectHost}>
+                <Button
+                  size="lg"
+                  onHoverChange={setTip}
+                  isPending={decide.isPending && decide.variables === true}
+                  isDisabled={decide.isPending}
+                  onPress={() => decide.mutate(true)}
+                >
+                  Allow
+                </Button>
+                <Tooltip placement="end">Sends you back to {redirectHost}</Tooltip>
+              </TooltipTrigger>
               <Button
                 intent="outline"
                 size="lg"
@@ -125,16 +124,10 @@ function Review() {
               </Button>
             </div>
             {decide.error && !(decide.error instanceof ApiError && decide.error.status === 401) && (
-              <Text className="text-danger-subtle-foreground">{decide.error.message}</Text>
+              <Text className="leading-5 text-danger-subtle-foreground">
+                {decide.error.message}
+              </Text>
             )}
-            <Text className="text-xs">
-              {redirectHost ? (
-                <>
-                  Allowing sends you back to <Strong>{redirectHost}</Strong>.{" "}
-                </>
-              ) : null}
-              {host ? `${name} says it is from ${host}; Wurmhol hasn't verified that.` : null}
-            </Text>
           </div>
         );
       }}
