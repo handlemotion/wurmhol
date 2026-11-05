@@ -24,6 +24,10 @@
     "ENVIRONMENT": "production",
     // The app's public origin: the login page, the wall, the API and `/connect`.
     "BETTER_AUTH_URL": "http://localhost:8787",
+    // The host the CLI dials (ADR 0006): /connect and /health only. Empty: BETTER_AUTH_URL's host.
+    "CONNECT_HOST": "",
+    // Hosts that 301 to BETTER_AUTH_URL, comma-separated (e.g. app.wurmhol.com).
+    "APP_ALIASES": "",
     // Shares live at `<id>.<SHARE_DOMAIN>`, same scheme and port as BETTER_AUTH_URL.
     "SHARE_DOMAIN": "pipe.localhost",
     "AUTH_TRUSTED_ORIGINS": "http://localhost:5173",

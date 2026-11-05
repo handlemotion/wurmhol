@@ -299,7 +299,7 @@ describe("through a sandbox's CONNECT proxy", () => {
     const result = await cli(["8080"], { ...env, HTTPS_PROXY: proxy.url, HTTP_PROXY: proxy.url });
     expect(result.code).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("Allowlist localhost and *.pipe.localhost");
+    expect(result.stderr).toContain("Allowlist localhost in");
     await proxy.close();
   });
 });

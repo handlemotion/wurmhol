@@ -1,5 +1,5 @@
 import { app } from "./app.ts";
-import { loadConfig, shareIdFromHost } from "./env.ts";
+import { hostRole, loadConfig } from "./env.ts";
 import { createLogger } from "./log.ts";
 import { handleShareHost } from "./viewer.ts";
 
@@ -9,14 +9,35 @@ export { RateLimiter } from "./rate-limiter.ts";
 export { Share } from "./share-do.ts";
 
 export default {
-  /** `<id>.pipe.wurmhol.com` is a share; every other host is the app. */
+  /**
+   * One Worker, four kinds of host (ADR 0006): pipes (`<id>.pipe.wurmhol.com`), the CLI's
+   * endpoint (`api.wurmhol.com`, `/connect` only), aliases that redirect to the app
+   * (`app.wurmhol.com`), and the app itself (`dirt.wurmhol.com`: console, API, sign-in).
+   */
   async fetch(request, env, ctx) {
-    const shareId = shareIdFromHost(loadConfig(env), request.headers.get("host"));
-    if (shareId === null) return app.fetch(request, env, ctx);
+    const config = loadConfig(env);
+    const host = hostRole(config, request.headers.get("host"));
+    if (host.role === "alias") {
+      const url = new URL(request.url);
+      const target = new URL(`${url.pathname}${url.search}`, config.auth.baseURL);
+      return Response.redirect(target.toString(), 301);
+    }
+    if (host.role === "connect") {
+      const { pathname } = new URL(request.url);
+      if (pathname === "/connect" || pathname === "/health") return app.fetch(request, env, ctx);
+      return Response.json(
+        {
+          error: "not found",
+          fix: `This host is for the wurmhol CLI. Open ${config.auth.baseURL}.`,
+        },
+        { status: 404 },
+      );
+    }
+    if (host.role === "app") return app.fetch(request, env, ctx);
     try {
-      return await handleShareHost(request, env, shareId);
+      return await handleShareHost(request, env, host.shareId);
     } catch (error) {
-      createLogger({ component: "viewer" }).error("viewer.error", { error, shareId });
+      createLogger({ component: "viewer" }).error("viewer.error", { error, shareId: host.shareId });
       return new Response("internal error", { status: 500 });
     }
   },
