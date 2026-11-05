@@ -12,12 +12,14 @@ import {
   Copy,
   CreditCard,
   Ellipsis,
+  ExternalLink,
   Info,
   KeyRound,
   LogOut,
   Mail,
   TriangleAlert,
   Users,
+  X,
   type LucideIcon,
   type LucideProps,
 } from "lucide-react";
@@ -38,9 +40,11 @@ export const IconCircleX = thin(CircleX, "IconCircleX");
 export const IconCopy = thin(Copy, "IconCopy");
 export const IconCreditCard = thin(CreditCard, "IconCreditCard");
 export const IconEllipsis = thin(Ellipsis, "IconEllipsis");
+export const IconExternalLink = thin(ExternalLink, "IconExternalLink");
 export const IconInfo = thin(Info, "IconInfo");
 export const IconKey = thin(KeyRound, "IconKey");
 export const IconLogOut = thin(LogOut, "IconLogOut");
 export const IconMail = thin(Mail, "IconMail");
 export const IconTriangleAlert = thin(TriangleAlert, "IconTriangleAlert");
 export const IconUsers = thin(Users, "IconUsers");
+export const IconX = thin(X, "IconX");
