@@ -1,0 +1,17 @@
+{
+  "name": "@wurmhol/worker",
+  "private": "true",
+  "description": "The Wurmhol Worker: Hono API, auth, Stripe, relay routing, Durable Objects",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "doppler run -p wurmhol -c dev_worker --mount .dev.vars --format env -- wrangler dev",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "hono": "^4.13.16"
+  },
+  "devDependencies": {
+    "wrangler": "^4.157.0"
+  }
+}
