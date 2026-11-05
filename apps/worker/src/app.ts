@@ -96,6 +96,13 @@ export const app = new Hono<AppEnv>()
   .on(["GET", "POST"], ["/api/auth/device", "/api/auth/device/*"], (c) =>
     c.json({ error: "use /api/device" }, 404),
   )
+  // Development sends no mail: the link comes back in the response, for the login page to show.
+  .post("/api/auth/sign-in/magic-link", limitAuth, async (c) => {
+    const response = await c.var.auth.handler(c.req.raw);
+    const devLink = c.get("devLink");
+    if (!devLink || !response.ok) return response;
+    return c.json({ ...(await response.json<object>()), devLink });
+  })
   .on(["GET", "POST"], "/api/auth/*", limitAuth, (c) => c.var.auth.handler(c.req.raw))
   .route("/api/device", deviceApproval)
   .route("/api", account)

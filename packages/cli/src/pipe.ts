@@ -1,7 +1,7 @@
 // A pipe in the caller's process: `openPipe`, the `wurmhol` package's export, and the CLI's daemon, which
 // adds only its state file and log on top (ADR 0008, section 3).
 import { EventEmitter } from "node:events";
-import { parseDuration } from "@wurmhol/protocol";
+import { parseDuration, PIPE_NAME_RULE, pipeName } from "@wurmhol/protocol";
 import pkg from "../package.json" with { type: "json" };
 import { FixError } from "./errors.ts";
 import { type RequestEvent, Tunnel } from "./tunnel.ts";
@@ -51,6 +51,12 @@ export interface OpenPipeOptions {
    * `openPipe` rejects. Default: every member of the org.
    */
   viewers?: string[];
+  /**
+   * A name for a pipe that keeps its URL: `"my-app"` opens `https://my-app.wurmhol.dev` every
+   * time, so it can be registered as an OAuth redirect URI. The first org to use a name keeps it;
+   * one pipe per name is open at a time.
+   */
+  name?: string;
   /** Aborting rejects a pending `openPipe`, or closes an open pipe. */
   signal?: AbortSignal;
   /**
@@ -159,6 +165,10 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
   if (ttl !== undefined && (ttl === null || !Number.isSafeInteger(ttl) || ttl < 1)) {
     throw new FixError(`Not a lifetime: ${options.ttl}. Use one like 90m or 8h.`);
   }
+  const name = options.name === undefined ? undefined : pipeName(options.name);
+  if (name === null) {
+    throw new FixError(`Not a pipe name: ${options.name}. Use ${PIPE_NAME_RULE}.`);
+  }
   const { signal } = options;
   signal?.throwIfAborted();
 
@@ -180,6 +190,7 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
     host: options.host ?? "127.0.0.1",
     ttl,
     viewers: options.viewers ?? [],
+    name,
     version: pkg.version,
     log,
     onRequest: (event) => pipe?.emit("request", event),

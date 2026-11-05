@@ -16,6 +16,8 @@ export interface AppEnv {
     /** This request's ID (`x-request-id`), on every log line. */
     requestId: string;
     log: Logger;
+    /** Development only: the magic link this request created, for the login page to show. */
+    devLink?: string;
   };
 }
 
@@ -24,16 +26,42 @@ export function magicLinksOn(config: Config) {
   return config.MAIL_FROM !== undefined || config.ENVIRONMENT !== "production";
 }
 
-/** Builds Better Auth for one request scope. */
-export function authFor(env: Env, config: Config, db: Db): Auth {
+/**
+ * The magic link on the origin the person asked from. The login page sends an absolute
+ * `callbackURL`, which Better Auth has already checked against the trusted origins; a stack
+ * opened through a pipe gets a link that opens on that pipe, not on its own `BETTER_AUTH_URL`
+ * (`localhost`), which the person can't reach.
+ */
+export function linkOnCallbackOrigin(url: string) {
+  const link = new URL(url);
+  const callback = link.searchParams.get("callbackURL") ?? "";
+  if (!URL.canParse(callback)) return url;
+  const origin = new URL(callback).origin;
+  return origin === link.origin
+    ? url
+    : new URL(`${link.pathname}${link.search}`, origin).toString();
+}
+
+/**
+ * Builds Better Auth for one request scope. In development, `onDevLink` receives each magic
+ * link, since no mail is sent there.
+ */
+export function authFor(
+  env: Env,
+  config: Config,
+  db: Db,
+  onDevLink: (url: string) => void = () => {},
+): Auth {
   return createAuth({
     db,
     ...config.auth,
     sendMagicLink: magicLinksOn(config)
-      ? async ({ email, url }) => {
+      ? async ({ email, url: built }) => {
+          const url = linkOnCallbackOrigin(built);
           if (config.ENVIRONMENT === "development") {
             // oxlint-disable-next-line no-console -- the dev sign-in link, by design
             console.log(JSON.stringify({ event: "auth.dev_link", email, url }));
+            onDevLink(url);
           }
           // Mail goes out whenever a sender is set (wrangler dev simulates the binding). The
           // e2e suites leave it unset and read the link from D1 instead.
@@ -62,7 +90,10 @@ export const requestScope = createMiddleware<AppEnv>(async (c, next) => {
   const db = createDb(c.env.DB);
   c.set("config", config);
   c.set("db", db);
-  c.set("auth", authFor(c.env, config, db));
+  c.set(
+    "auth",
+    authFor(c.env, config, db, (url) => c.set("devLink", url)),
+  );
   await next();
 });
 

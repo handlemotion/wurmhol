@@ -6,9 +6,12 @@
 // `Wurmhol-Viewers: ana@x.com,bo@y.com` narrows a new share to those members of the token's org
 // (ADR 0008, per-pipe access); without it, the whole org may open it.
 //
+// A `name` query parameter opens a named pipe (ADR 0009) at `<name>.<SHARE_DOMAIN>`: the same
+// host every time, held by the first org to use the name, one open pipe per name.
+//
 // Refusals answer with plain HTTP before the upgrade, as `{ error, fix }`: the CLI prints `fix`,
 // one line that says what to do.
-import { formatDuration } from "@wurmhol/protocol";
+import { formatDuration, PIPE_NAME_RULE, pipeName } from "@wurmhol/protocol";
 import {
   findMembersByEmail,
   findShare,
@@ -78,6 +81,11 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
       { limit },
     );
   }
+  const rawName = c.req.query("name");
+  const name = rawName === undefined ? null : pipeName(rawName);
+  if (rawName !== undefined && !name) {
+    return refuse(400, "bad name", `Pick a pipe name of ${PIPE_NAME_RULE}.`);
+  }
   let viewers: string[] | null = null;
   const named = (c.req.header(VIEWERS_HEADER) ?? "")
     .split(",")
@@ -104,7 +112,17 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
     tokenId: token.id,
     startedBy: token.createdBy,
     port,
+    name,
   });
+  if (!started.ok) {
+    return started.reason === "taken"
+      ? refuse(409, "name taken", `Another org has the pipe name ${name}. Pick another --name.`)
+      : refuse(
+          409,
+          "name open",
+          `The org already has a pipe named ${name} open on port ${started.port}. End it first: wurmhol stop ${name}, or terminate it on ${config.auth.baseURL}.`,
+        );
+  }
   const starter = token.createdBy
     ? await db.query.users.findFirst({
         where: (u, { eq }) => eq(u.id, token.createdBy!),
@@ -116,7 +134,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
     orgId: token.orgId,
     tokenId: token.id,
     port,
-    url: shareOrigin(config, started.id),
+    url: shareOrigin(config, { id: started.id, name }),
     startedBy: starter?.name || starter?.email || null,
     startedAt: started.startedAt.getTime(),
     viewers,

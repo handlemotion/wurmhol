@@ -1,4 +1,5 @@
 import { authEnvSchema } from "@wurmhol/auth";
+import { pipeName } from "@wurmhol/protocol";
 import { z } from "zod";
 
 // Secrets are not in wrangler.jsonc, so `wrangler types` cannot see them. Documented in
@@ -147,20 +148,27 @@ export function loadConfig(env: Env): Config {
   return config;
 }
 
-/** The public origin of share `id`: `https://<id>.wurmhol.dev`. */
-export function shareOrigin(config: Config, id: string) {
+/**
+ * The public origin of a share: `https://<label>.wurmhol.dev`, where the label is a named pipe's
+ * name (ADR 0009) or the share's id.
+ */
+export function shareOrigin(config: Config, share: { id: string; name?: string | null }) {
   const app = new URL(config.auth.baseURL);
-  return `${app.protocol}//${id}.${config.SHARE_DOMAIN}${app.port ? `:${app.port}` : ""}`;
+  const label = share.name || share.id;
+  return `${app.protocol}//${label}.${config.SHARE_DOMAIN}${app.port ? `:${app.port}` : ""}`;
 }
 
-/** The share id a request's host names, or null when it is not a share host. */
-export function shareIdFromHost(config: Config, host: string | null): string | null {
+/**
+ * The first label of a share host, or null when the host is not one. An id names its share; a
+ * name (ADR 0009) names its org's open pipe, if any. Anything else is "".
+ */
+export function shareLabelFromHost(config: Config, host: string | null): string | null {
   if (!host) return null;
   const hostname = host.toLowerCase().replace(/:\d+$/, "");
   const suffix = `.${config.SHARE_DOMAIN}`;
   if (!hostname.endsWith(suffix)) return null;
-  const id = hostname.slice(0, -suffix.length);
-  return SHARE_ID.test(id) ? id : "";
+  const label = hostname.slice(0, -suffix.length);
+  return SHARE_ID.test(label) || pipeName(label) === label ? label : "";
 }
 
 /** A share id: 10 lowercase letters and digits. */
@@ -168,14 +176,14 @@ export const SHARE_ID = /^[a-z0-9]{10}$/;
 
 /** What a request's host is for (ADR 0006). */
 export type HostRole =
-  | { role: "share"; shareId: string }
+  | { role: "share"; label: string }
   | { role: "connect" }
   | { role: "alias" }
   | { role: "app" };
 
 export function hostRole(config: Config, host: string | null): HostRole {
-  const shareId = shareIdFromHost(config, host);
-  if (shareId !== null) return { role: "share", shareId };
+  const label = shareLabelFromHost(config, host);
+  if (label !== null) return { role: "share", label };
   const hostname = (host ?? "").toLowerCase().replace(/:\d+$/, "");
   if (config.CONNECT_HOST && hostname === config.CONNECT_HOST) return { role: "connect" };
   if (config.APP_ALIASES.includes(hostname)) return { role: "alias" };

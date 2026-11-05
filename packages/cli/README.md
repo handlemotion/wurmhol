@@ -18,14 +18,19 @@ that only reaches listed hosts, allow `api.wurmhol.com`: it is the only host the
 | Command                              | Does                                                             |
 | ------------------------------------ | ---------------------------------------------------------------- |
 | `wurmhol <port> [--ttl 8h] [--json]` | Open a pipe to a port. `--json` prints `{url, port, id, endsAt}` |
+| `wurmhol <port> --name my-app`       | Open it at `https://my-app.wurmhol.dev`, the same URL every time |
 | `wurmhol ls [--json]`                | List open pipes and when each ends                               |
-| `wurmhol stop <port\|id>`            | End one (`--all` ends every one)                                 |
+| `wurmhol stop <port\|id\|name>`      | End one (`--all` ends every one)                                 |
 | `wurmhol init [--skill]`             | Tell this repo's agents how to share (see below)                 |
 | `wurmhol login`                      | Approve this computer; stores `~/.wurmhol/credentials.json`      |
 | `wurmhol logout`                     | Delete the stored token                                          |
 
 A pipe ends after 4 hours. `--ttl` asks for another lifetime, like `90m` or `8h`, up to 12 hours
 on wurmhol.com.
+
+`--name` keeps the URL, so an app that signs in with Google or GitHub can be tried through a pipe:
+register `https://my-app.wurmhol.dev/<your callback path>` with the provider once. The first org to
+use a name keeps it, and one pipe per name is open at a time.
 
 By default every member of the token's org can open a pipe. `--only ana@x.com,bo@y.com` narrows it
 to those members.
@@ -48,7 +53,8 @@ await pipe.close();
 
 Options: `server` (a self-hosted install), `host` (where the dev server listens, default
 `127.0.0.1`), `ttl` (seconds, or a duration like `"8h"`; `pipe.endsAt` says when it ends),
-`viewers` (emails of the org members who may open it, like `--only`), `signal` (an `AbortSignal`
+`viewers` (emails of the org members who may open it, like `--only`), `name` (a URL that stays
+the same, like `--name`), `signal` (an `AbortSignal`
 that closes the pipe) and `log` (`(event, fields) => {}`, the connection's connects, drops and
 reconnects; never request contents). `openPipe` rejects with a `FixError` whose message is the
 one-line fix the CLI prints. ESM only.

@@ -12,7 +12,9 @@ signed-in members of the token's org can open.
    output: Vite moves to the next free port when 5173 is taken).
 2. **Share it:** `npx wurmhol <port>`. It returns once the pipe answers and prints the URL as its
    first line (`--json` prints `{url, port, id}`). The pipe keeps running after the command
-   returns; a server that restarts on the same port stays shared.
+   returns; a server that restarts on the same port stays shared. When the URL must stay the
+   same (an OAuth redirect URI, a link the user keeps), add `--name <name>`: the pipe opens at
+   `https://<name>.wurmhol.dev` every time, and `npx wurmhol stop <name>` ends it.
 3. **Send the user the URL** in your reply, as a plain link. They sign in to open it.
 4. **Stop it when the user is done looking:** `npx wurmhol stop <port>`. `npx wurmhol ls` lists
    what is open; `npx wurmhol stop --all` ends every pipe.
