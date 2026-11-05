@@ -21,7 +21,7 @@ export interface ShareCard {
   views: { name: string; lastSeenAt: number }[];
   /** `away`: its CLI dropped and has up to 60 s to come back. */
   state: "live" | "away";
-  /** Where it came from (ADR 0012): repo, branch, commit, agent session, link and note. */
+  /** Where it came from (ADR 0015): repo, branch, commit, agent session, link and note. */
   source: PipeSource | null;
 }
 
@@ -43,7 +43,7 @@ function month(at = Date.now()) {
 
 /**
  * A stored card in the current shape. Cards written by an older Worker lack the fields added
- * since (`views`, ADR 0008; `source`, ADR 0012); they get those fields' empty values so walls can rely on the shape.
+ * since (`views`, ADR 0008; `source`, ADR 0015); they get those fields' empty values so walls can rely on the shape.
  */
 function current(card: Partial<ShareCard> & Pick<ShareCard, "id">): ShareCard {
   return { views: [], source: null, ...card } as ShareCard;

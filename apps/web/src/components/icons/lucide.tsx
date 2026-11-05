@@ -12,6 +12,8 @@ import {
   CircleX,
   Copy,
   CreditCard,
+  Crown,
+  DoorOpen,
   Ellipsis,
   ExternalLink,
   Info,
@@ -19,9 +21,12 @@ import {
   Laptop,
   LogOut,
   Mail,
+  Pencil,
   Plus,
   Sparkles,
+  Trash2,
   TriangleAlert,
+  UserRound,
   Users,
   X,
   type LucideIcon,
@@ -44,6 +49,8 @@ export const IconCircleCheck = thin(CircleCheck, "IconCircleCheck");
 export const IconCircleX = thin(CircleX, "IconCircleX");
 export const IconCopy = thin(Copy, "IconCopy");
 export const IconCreditCard = thin(CreditCard, "IconCreditCard");
+export const IconCrown = thin(Crown, "IconCrown");
+export const IconDoorOpen = thin(DoorOpen, "IconDoorOpen");
 export const IconEllipsis = thin(Ellipsis, "IconEllipsis");
 export const IconExternalLink = thin(ExternalLink, "IconExternalLink");
 export const IconInfo = thin(Info, "IconInfo");
@@ -51,8 +58,11 @@ export const IconKey = thin(KeyRound, "IconKey");
 export const IconLaptop = thin(Laptop, "IconLaptop");
 export const IconLogOut = thin(LogOut, "IconLogOut");
 export const IconMail = thin(Mail, "IconMail");
+export const IconPencil = thin(Pencil, "IconPencil");
 export const IconPlus = thin(Plus, "IconPlus");
 export const IconSparkles = thin(Sparkles, "IconSparkles");
+export const IconTrash = thin(Trash2, "IconTrash");
 export const IconTriangleAlert = thin(TriangleAlert, "IconTriangleAlert");
+export const IconUser = thin(UserRound, "IconUser");
 export const IconUsers = thin(Users, "IconUsers");
 export const IconX = thin(X, "IconX");

@@ -56,7 +56,7 @@ export interface TunnelOptions {
   viewers: string[];
   /** A named pipe's name (`--name`): the same host every time. */
   name?: string;
-  /** Where a new share comes from (ADR 0012); a reconnect keeps what the share started with. */
+  /** Where a new share comes from (ADR 0015); a reconnect keeps what the share started with. */
   source: PipeSource | null;
   version: string;
   log: Logger;

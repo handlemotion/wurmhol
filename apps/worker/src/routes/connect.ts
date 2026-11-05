@@ -10,7 +10,7 @@
 // host every time, held by the first org to use the name, one open pipe per name. The OAuth
 // relay's label (ADR 0010) is no pipe's name.
 //
-// `Wurmhol-Source` says where a new pipe came from (ADR 0012): URI-encoded JSON of
+// `Wurmhol-Source` says where a new pipe came from (ADR 0015): URI-encoded JSON of
 // `@wurmhol/protocol`'s `PipeSource`, every field optional and bounded. It goes on the share's
 // history row and its card on the wall.
 //
@@ -39,7 +39,7 @@ import { INTERNAL_HEADERS, type ShareInit } from "../share-do.ts";
 /** The header that names a new share's viewers, comma-separated emails. */
 export const VIEWERS_HEADER = "wurmhol-viewers";
 const MAX_VIEWERS = 50;
-/** The header that says where a new share came from (ADR 0012). */
+/** The header that says where a new share came from (ADR 0015). */
 export const SOURCE_HEADER = "wurmhol-source";
 /** Bigger than any source within `SOURCE_LIMITS`, URI-encoded. */
 const MAX_SOURCE_HEADER = 24 * 1024;

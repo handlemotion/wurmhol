@@ -1,4 +1,4 @@
-// Where a pipe came from (ADR 0012): the repo, branch and commit of the directory the CLI ran in,
+// Where a pipe came from (ADR 0015): the repo, branch and commit of the directory the CLI ran in,
 // the agent session that ran it, and an optional link and note. The CLI builds it and the Worker
 // checks it with the same rules, so whatever the CLI sends is what the Worker accepts. Every
 // field is optional and bounded; URLs are http or https only.
@@ -169,7 +169,7 @@ export function repoFromRemote(remote: string): { repoHost: string; repo: string
 
 /**
  * Agents known from a variable they set in the shell they run commands in, first match wins. Each
- * is verified in the agent's own source or docs, or a real run (ADR 0012 has the sources).
+ * is verified in the agent's own source or docs, or a real run (ADR 0015 has the sources).
  */
 const AGENTS: [agent: string, matches: (env: Record<string, string | undefined>) => boolean][] = [
   ["Claude Code", (env) => env.CLAUDECODE === "1"],
