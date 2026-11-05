@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer as createVite, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { WebSocketServer } from "ws";
 import {
   alive,
   api,
@@ -345,6 +346,61 @@ describe("through a sandbox's CONNECT proxy", () => {
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("Allowlist localhost in");
     await proxy.close();
+  });
+});
+
+describe("browser WebSocket limits", () => {
+  it("closes the dev server's socket when the relay gives up waiting for it to open", async () => {
+    // The dev server accepts a second after the relay stopped waiting (15 s). Without a
+    // ws-close for that stream, the CLI's socket opens then and stays open with nobody behind it.
+    const wss = new WebSocketServer({ noServer: true });
+    let upgrades = 0;
+    let dropped = false;
+    const local = await localServer((_req, res) => res.end("x"));
+    local.server.on("upgrade", (req, socket, head) => {
+      upgrades++;
+      socket.on("close", () => (dropped = true));
+      setTimeout(() => wss.handleUpgrade(req, socket, head, () => {}), 16_000);
+    });
+    const { url } = await share(stack, env, local.port);
+    const cookie = await viewerCookie(stack, ada, url);
+    const status = await new Promise<number>((resolve) => {
+      const socket = browserSocket(`${url}/slow`, [], { cookie, origin: url });
+      socket.once("unexpected-response", (_req, res) => resolve(res.statusCode ?? 0));
+      socket.once("open", () => resolve(101));
+    });
+    expect(status).toBe(502);
+    expect(upgrades).toBe(1);
+    await waitFor(() => dropped, { timeoutMs: 5_000, what: "the CLI's local connection closed" });
+    await cli(["stop", String(local.port)], env);
+    wss.close();
+    await local.close();
+  });
+
+  it("closes a browser socket that more is queued toward than it can read, at both ends", async () => {
+    // 24 MiB at once: past the 16 MiB the relay lets queue toward one end of a socket.
+    const wss = new WebSocketServer({ noServer: true });
+    let serverClose: number | null = null;
+    const local = await localServer((_req, res) => res.end("x"));
+    local.server.on("upgrade", (req, socket, head) =>
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        ws.on("close", (code) => (serverClose = code));
+        const piece = Buffer.alloc(512 * 1024, 7);
+        for (let i = 0; i < 48 && ws.readyState === ws.OPEN; i++) ws.send(piece);
+      }),
+    );
+    const { url } = await share(stack, env, local.port);
+    const cookie = await viewerCookie(stack, ada, url);
+    const socket = browserSocket(`${url}/flood`, [], { cookie, origin: url });
+    let received = 0;
+    socket.on("message", (data: Buffer) => (received += data.byteLength));
+    const code = await new Promise<number>((resolve) => socket.once("close", resolve));
+    expect(code).toBe(1013);
+    expect(received).toBeLessThan(24 * 1024 * 1024);
+    await waitFor(() => serverClose === 1013, { what: "the dev server's socket closed" });
+    await cli(["stop", String(local.port)], env);
+    wss.close();
+    await local.close();
   });
 });
 

@@ -18,7 +18,7 @@ import {
   viewerRequestHeaders,
   withoutCookie,
 } from "./headers.ts";
-import { HttpStreamOrder, INITIAL_WINDOW, ReceiveWindow, SendWindow } from "./mux.ts";
+import { HttpStreamOrder, INITIAL_WINDOW, ReceiveWindow, SendBacklog, SendWindow } from "./mux.ts";
 
 const bytes = (...values: number[]) => new Uint8Array(values);
 
@@ -265,6 +265,25 @@ describe("flow control", () => {
     }
     expect(sent).toBe(body.byteLength);
     expect(delivered).toBe(body.byteLength);
+  });
+});
+
+describe("websocket send backlog", () => {
+  const MiB = 1024 * 1024;
+
+  // Catches: a stream cut while its peer keeps up (no drain, or drain in the wrong unit), and a
+  // flood that is never cut (drain credited ahead of time, so a later burst starts negative).
+  it("allows a steady stream at the drain rate, and refuses a burst over the limit", () => {
+    const backlog = new SendBacklog({ limit: 4 * MiB, drainPerSecond: 2 * MiB, now: 0 });
+    for (let t = 0; t <= 60_000; t += 500) expect(backlog.add(MiB, t)).toBe(true);
+    // An idle minute earns no credit for the burst after it.
+    expect(backlog.pending).toBeLessThanOrEqual(MiB);
+    const later = 10 * 60_000;
+    const accepted = [1, 2, 3, 4, 5].map(() => backlog.add(MiB, later));
+    expect(accepted).toEqual([true, true, true, true, false]);
+    // A clock that steps back neither drains nor grows the backlog.
+    expect(backlog.add(0, later - 5_000)).toBe(false);
+    expect(backlog.pending).toBe(5 * MiB);
   });
 });
 
