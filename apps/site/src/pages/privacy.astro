@@ -56,6 +56,12 @@ const kept = [
     kept: "90 days from the pipe's start, then deleted",
   },
   {
+    what: "Who opened a pipe",
+    detail:
+      "For each member who opened a pipe: when they first and last opened it, and how many requests they made. Never which pages, and no IP address or user agent. Only the pipe's org sees it.",
+    kept: "Deleted with the pipe's history, 90 days from the pipe's start",
+  },
+  {
     what: "Page title and favicon",
     detail:
       "The <title> of the last HTML page and the favicon the dev server serves, so the pipe has a recognizable card on the org's wall.",
@@ -132,8 +138,9 @@ const processors = [
             ends.
           </li>
           <li>
-            Only signed-in members of the org that owns a pipe can open it. Wurmhol's own cookies
-            are removed before a request reaches your dev server.
+            Only signed-in members of the org that owns a pipe can open it, or only the members its
+            starter named. Wurmhol's own cookies are removed before a request reaches your dev
+            server.
           </li>
           <li>
             TLS ends at Wurmhol's relay, so the relay could technically read what passes through

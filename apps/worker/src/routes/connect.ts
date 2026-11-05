@@ -3,15 +3,28 @@
 // may ask for its lifetime in seconds (`ttl`), up to `LIMIT_SHARE_SECONDS`; without one it lasts
 // `DEFAULT_SHARE_SECONDS`.
 //
+// `Wurmhol-Viewers: ana@x.com,bo@y.com` narrows a new share to those members of the token's org
+// (ADR 0008, per-pipe access); without it, the whole org may open it.
+//
 // Refusals answer with plain HTTP before the upgrade, as `{ error, fix }`: the CLI prints `fix`,
 // one line that says what to do.
 import { formatDuration } from "@wurmhol/protocol";
-import { findShare, orgStanding, recordShareEnd, recordShareStart } from "@wurmhol/db";
+import {
+  findMembersByEmail,
+  findShare,
+  orgStanding,
+  recordShareEnd,
+  recordShareStart,
+} from "@wurmhol/db";
 import { Hono } from "hono";
 import { bearerToken, refuse } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
 import { shareOrigin, SHARE_ID } from "../env.ts";
 import { INTERNAL_HEADERS, type ShareInit } from "../share-do.ts";
+
+/** The header that names a new share's viewers, comma-separated emails. */
+export const VIEWERS_HEADER = "wurmhol-viewers";
+const MAX_VIEWERS = 50;
 
 export const connect = new Hono<AppEnv>().get("/", async (c) => {
   if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
@@ -65,6 +78,27 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
       { limit },
     );
   }
+  let viewers: string[] | null = null;
+  const named = (c.req.header(VIEWERS_HEADER) ?? "")
+    .split(",")
+    .map((email) => email.trim())
+    .filter(Boolean);
+  if (named.length > MAX_VIEWERS) {
+    return refuse(400, "too many viewers", `Name at most ${MAX_VIEWERS} people with --only.`);
+  }
+  if (named.length) {
+    const found = await findMembersByEmail(db, token.orgId, named);
+    if (found.unknown.length) {
+      return refuse(
+        400,
+        "not members",
+        `${found.unknown.join(", ")} ${found.unknown.length === 1 ? "is not a member" : "are not members"} of the token's org. Invite them at ${config.auth.baseURL} (menu → Members), or leave them out of --only.`,
+        { unknown: found.unknown },
+      );
+    }
+    viewers = found.members.map((member) => member.userId);
+  }
+
   const started = await recordShareStart(db, {
     orgId: token.orgId,
     tokenId: token.id,
@@ -85,6 +119,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
     url: shareOrigin(config, started.id),
     startedBy: starter?.name || starter?.email || null,
     startedAt: started.startedAt.getTime(),
+    viewers,
     limits: { seconds, monthlyBytes: config.LIMIT_MONTHLY_BYTES },
   };
   const org = c.env.ORG.get(c.env.ORG.idFromName(token.orgId));
@@ -98,6 +133,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
       title: null,
       favicon: false,
       lastRequestAt: null,
+      views: [],
       state: "live",
     },
     { active: config.LIMIT_ACTIVE_SHARES, monthlyBytes: config.LIMIT_MONTHLY_BYTES },

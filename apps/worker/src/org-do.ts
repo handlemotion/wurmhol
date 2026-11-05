@@ -16,6 +16,8 @@ export interface ShareCard {
   /** Whether the relay has seen the dev server serve a favicon. */
   favicon: boolean;
   lastRequestAt: number | null;
+  /** Who opened it, most recent first (the view log, ADR 0008). */
+  views: { name: string; lastSeenAt: number }[];
   /** `away`: its CLI dropped and has up to 60 s to come back. */
   state: "live" | "away";
 }

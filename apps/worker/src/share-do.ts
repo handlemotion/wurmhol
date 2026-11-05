@@ -1,13 +1,23 @@
 // One Share Durable Object per share (spec section 5). It holds the CLI's WebSocket (hibernation
 // API), multiplexes every viewer request and browser WebSocket over it as streams
 // (`@wurmhol/protocol`), records the page title and the last request for the wall, and enforces
-// the share's limits: its lifetime, the org's monthly bytes, and membership of each viewer.
+// the share's limits: its lifetime, the org's monthly bytes, and membership of each viewer (and,
+// when the CLI named some, that the viewer is one of them). It keeps the view log: per viewer,
+// first and last seen and a request count, never paths, IPs or user agents (ADR 0008).
 //
 // Request and response bodies pass through and are never logged or stored. Only the `<title>`
 // of HTML responses and the favicon are kept, while the share is open: at its end the object
 // keeps a tombstone (`state`, `endReason`) and nothing else. The viewer's IP is not forwarded.
 import { DurableObject } from "cloudflare:workers";
-import { createDb, findMember, randomSecret, recordShareEnd, sha256Hex } from "@wurmhol/db";
+import {
+  createDb,
+  findMember,
+  randomSecret,
+  recordShareEnd,
+  recordShareViews,
+  type ShareView,
+  sha256Hex,
+} from "@wurmhol/db";
 import {
   chunk,
   decodeFrame,
@@ -41,6 +51,8 @@ export interface ShareInit {
   url: string;
   startedBy: string | null;
   startedAt: number;
+  /** User ids that may open it (`--only`); null: every member of the org. */
+  viewers: string[] | null;
   limits: { seconds: number; monthlyBytes: number };
 }
 
@@ -52,6 +64,12 @@ interface Meta extends ShareInit {
   favicon: boolean;
   lastRequestAt: number | null;
   bytes: number;
+}
+
+/** One viewer's line in the view log, with their name for the wall once looked up. */
+interface View extends ShareView {
+  name: string | null;
+  flushedAt: number;
 }
 
 /** All an ended share keeps: enough to answer "ended", and why, to a viewer or its CLI. */
@@ -105,6 +123,8 @@ const USAGE_FLUSH_MS = 5_000;
 const USAGE_FLUSH_BYTES = 8 * 1024 * 1024;
 /** The wall's "last request" line updates at most this often. */
 const LAST_REQUEST_PUSH_MS = 5_000;
+/** A viewer's counts go to D1 and the wall when they first open the share, then at most this often. */
+const VIEW_FLUSH_MS = 30_000;
 /** One-time viewer codes (spec section 6). */
 const CODE_TTL_MS = 60_000;
 
@@ -264,6 +284,12 @@ export class Share extends DurableObject<Env> {
     return code;
   }
 
+  /** Whether `userId` is on the share's list of viewers, when it has one. Membership is separate. */
+  mayView(userId: string) {
+    const viewers = this.#meta()?.viewers;
+    return !viewers || viewers.includes(userId);
+  }
+
   /** Swaps a one-time code for the user it was issued to, once. */
   async redeemCode(code: string): Promise<string | null> {
     const key = `code:${await sha256Hex(code)}`;
@@ -347,7 +373,7 @@ export class Share extends DurableObject<Env> {
     const meta = this.#meta();
     if (!meta) return errorPage(410, "This pipe has ended.");
     const viewer = request.headers.get(INTERNAL_HEADERS.viewer);
-    if (!viewer || !(await this.#isMember(viewer, meta.orgId))) {
+    if (!viewer || !this.mayView(viewer) || !(await this.#isMember(viewer, meta.orgId))) {
       return new Response("not a member", { status: 403, headers: { "x-wurmhol-refused": "1" } });
     }
     if (!this.#cli() && !(await this.#waitForCli())) {
@@ -356,6 +382,7 @@ export class Share extends DurableObject<Env> {
       });
     }
     this.#touch(meta);
+    this.#noteView(meta, viewer);
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
       return this.#openViewerSocket(request, meta);
     }
@@ -392,6 +419,62 @@ export class Share extends DurableObject<Env> {
       this.ctx.waitUntil(
         this.#org(meta.orgId).update(meta.id, { lastRequestAt: meta.lastRequestAt }),
       );
+    }
+  }
+
+  /** Counts one request for the view log. */
+  #noteView(meta: Meta, userId: string) {
+    // A request still in flight when the share ended must not write the log back.
+    if (!this.#meta()) return;
+    const now = Date.now();
+    const key = `view:${userId}`;
+    const seen = this.ctx.storage.kv.get<View>(key);
+    const view: View = seen
+      ? { ...seen, lastSeenAt: now, requests: seen.requests + 1 }
+      : { userId, name: null, firstSeenAt: now, lastSeenAt: now, requests: 1, flushedAt: 0 };
+    this.ctx.storage.kv.put(key, view);
+    if (now - view.flushedAt >= VIEW_FLUSH_MS) this.ctx.waitUntil(this.#flushViews(meta));
+  }
+
+  #views() {
+    return [...this.ctx.storage.kv.list<View>({ prefix: "view:" })].map(([, view]) => view);
+  }
+
+  /**
+   * Writes the view log to D1 and the wall's card, naming viewers seen for the first time.
+   * `final` is the flush at the share's end; any other flush stops writing to storage once the
+   * share has ended, so the tombstone stays all the object keeps.
+   */
+  async #flushViews(meta: Meta, final = false) {
+    const put = (view: View) => {
+      if (final || this.#meta()) this.ctx.storage.kv.put(`view:${view.userId}`, view);
+    };
+    try {
+      const now = Date.now();
+      for (const view of this.#views()) put({ ...view, flushedAt: now });
+      const db = createDb(this.env.DB);
+      const unnamed = this.#views()
+        .filter((view) => view.name === null)
+        .map((view) => view.userId);
+      if (unnamed.length) {
+        const users = await db.query.users.findMany({
+          where: (u, { inArray }) => inArray(u.id, unnamed),
+          columns: { id: true, name: true, email: true },
+        });
+        for (const user of users) {
+          const view = this.ctx.storage.kv.get<View>(`view:${user.id}`);
+          if (view) put({ ...view, name: user.name || user.email });
+        }
+      }
+      const views = this.#views();
+      await recordShareViews(db, meta, views);
+      await this.#org(meta.orgId).update(meta.id, {
+        views: views
+          .toSorted((a, b) => b.lastSeenAt - a.lastSeenAt)
+          .map((view) => ({ name: view.name ?? "Someone", lastSeenAt: view.lastSeenAt })),
+      });
+    } catch (error) {
+      this.#log.warn("share.views_failed", { shareId: meta.id, error });
     }
   }
 
@@ -876,6 +959,11 @@ export class Share extends DurableObject<Env> {
     meta.bytes += pending;
     const org = this.#org(meta.orgId);
     if (pending) await org.addUsage(pending, meta.limits.monthlyBytes);
+    // The view log's last counts go to D1; the object keeps none of it.
+    await this.#flushViews(meta, true);
+    for (const [key] of this.ctx.storage.kv.list({ prefix: "view:" })) {
+      this.ctx.storage.kv.delete(key);
+    }
     await org.remove(meta.id);
     await recordShareEnd(createDb(this.env.DB), { id: meta.id, reason, bytes: meta.bytes });
     this.#log.info("share.ended", {

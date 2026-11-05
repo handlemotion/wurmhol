@@ -161,6 +161,11 @@ describe("the daily retention job", () => {
     const boEnv = cliEnv(stack, (await createToken(stack, bo)).token);
     const local = await localServer((_req, res) => res.end("ok"));
     const started = await share(stack, boEnv, local.port);
+    // Bo opens it, so the view log has a row that must go with the pipe's history.
+    const opened = await browserFetch(`${started.url}/`, {
+      cookie: await viewerCookie(stack, bo, started.url),
+    });
+    expect(opened.status).toBe(200);
     await stopAll(boEnv);
     await local.close();
     await waitFor(
@@ -180,8 +185,9 @@ describe("the daily retention job", () => {
         userCode.replaceAll("-", ""),
       ).length,
       shares: rows("select id from shares where id = ?", started.id).length,
+      views: rows("select user_id from share_views where share_id = ?", started.id).length,
     });
-    const all = { sessions: 1, verifications: 1, invites: 1, deviceCodes: 1, shares: 1 };
+    const all = { sessions: 1, verifications: 1, invites: 1, deviceCodes: 1, shares: 1, views: 1 };
 
     // Today: nothing is due.
     await runRetention(Date.now());
@@ -194,9 +200,10 @@ describe("the daily retention job", () => {
       invites: 0,
       deviceCodes: 0,
       shares: 1,
+      views: 1,
     });
-    // In 91 days: the pipe's history is gone too.
+    // In 91 days: the pipe's history is gone too, and who opened it with it.
     await runRetention(Date.now() + 91 * DAY_MS);
-    expect(counts().shares).toBe(0);
+    expect(counts()).toMatchObject({ shares: 0, views: 0 });
   });
 });

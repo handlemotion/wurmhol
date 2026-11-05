@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // wurmhol: share a local dev server at a private HTTPS URL (spec section 7).
 //
-//   npx wurmhol <port> [--ttl 8h] [--json]   start a share; prints its URL first, then returns
+//   npx wurmhol <port> [--ttl 8h] [--json] [--only <emails>]
+//                                 start a share; prints its URL first, then returns
 //   wurmhol ls [--json]           open shares on this machine
 //   wurmhol stop <port|id>        end one; `--all` ends every one
 //   wurmhol init [--skill]        tell the repo's agents how to share
@@ -41,6 +42,7 @@ const HELP = `wurmhol ${pkg.version}: a private HTTPS URL for a local dev server
 Usage:
   npx wurmhol <port> [--json]   Open a pipe to a port; prints the URL, then returns
     --ttl <duration>            How long it lasts, like 90m or 8h (default 4h, at most 12h)
+    --only a@x.com,b@y.com      Only these members of the org may open it
   wurmhol ls [--json]           List open pipes
   wurmhol stop <port|id>        End a pipe (--all ends every one)
   wurmhol init [--skill]        Tell this repo's agents how to share (AGENTS.md or
@@ -126,10 +128,21 @@ function logout() {
 }
 
 /** Starts the detached daemon and waits for it to report the URL (or the reason it could not). */
-async function share(port: number, ttl: number | undefined, json: boolean) {
+async function share(
+  port: number,
+  ttl: number | undefined,
+  json: boolean,
+  only: string | undefined,
+) {
   token();
   const entry = fileURLToPath(import.meta.url);
-  const args = [entry, "__daemon", String(port), ...(ttl === undefined ? [] : [String(ttl)])];
+  const args = [
+    entry,
+    "__daemon",
+    String(port),
+    ...(ttl === undefined ? [] : [String(ttl)]),
+    ...(only ? ["--only", only] : []),
+  ];
   const child = spawn(process.execPath, args, {
     detached: true,
     stdio: ["ignore", "ignore", "ignore", "ipc"],
@@ -154,7 +167,7 @@ async function share(port: number, ttl: number | undefined, json: boolean) {
 }
 
 /** The daemon: holds the share's pipe until it ends. Reports readiness over IPC. */
-async function daemon(port: number, ttl: number | undefined) {
+async function daemon(port: number, ttl: number | undefined, only: string | undefined) {
   const report = (message: ReadyMessage) => process.send?.(message);
   const log = (shareId: string | null, event: string, fields: Record<string, unknown>) => {
     try {
@@ -168,7 +181,11 @@ async function daemon(port: number, ttl: number | undefined) {
   };
   let pipe: Pipe;
   try {
-    pipe = await openPipe({ server: server(), token: token(), port, ttl }, { log });
+    const viewers = only
+      ?.split(",")
+      .map((email) => email.trim())
+      .filter(Boolean);
+    pipe = await openPipe({ server: server(), token: token(), port, ttl, viewers }, { log });
   } catch (error) {
     report({ type: "error", message: error instanceof FixError ? error.message : String(error) });
     process.exit(1);
@@ -317,6 +334,7 @@ async function main() {
     allowPositionals: true,
     options: {
       json: { type: "boolean", default: false },
+      only: { type: "string" },
       all: { type: "boolean", default: false },
       skill: { type: "boolean", default: false },
       ttl: { type: "string" },
@@ -329,7 +347,7 @@ async function main() {
   if (values.help || !command) return void process.stdout.write(HELP);
   if (command === "__daemon") {
     const ttl = positionals[2] === undefined ? undefined : Number(positionals[2]);
-    return daemon(parsePort(argument) ?? fail("bad port"), ttl);
+    return daemon(parsePort(argument) ?? fail("bad port"), ttl, values.only);
   }
   if (command === "ls") return ls(values.json);
   if (command === "stop") return stop(argument, values.all);
@@ -344,7 +362,7 @@ async function main() {
       parseDuration(values.ttl) ??
       fail(`Not a lifetime: ${values.ttl}. Use --ttl 90m or --ttl 8h.`);
   }
-  return share(port, ttl, values.json);
+  return share(port, ttl, values.json, values.only);
 }
 
 await main();
