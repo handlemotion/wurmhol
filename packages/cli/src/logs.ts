@@ -1,4 +1,4 @@
-// A pipe's log on this machine (ADR 0022): `~/.wurmhol/logs/<id>.log`, one JSON object a line.
+// A pipe's log on this machine (ADR 0023): `~/.wurmhol/logs/<id>.log`, one JSON object a line.
 // The daemon writes its connection's events there and, per viewer request the dev server
 // answered, the method, the path with its query values dropped, the status and the duration:
 // never bodies, headers, cookies or query values. It stays here; the relay keeps none of it.

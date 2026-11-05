@@ -211,3 +211,16 @@ export const githubInstallations = sqliteTable(
     index("github_installations_installation_idx").on(table.installationId),
   ],
 );
+
+/**
+ * Orgs an operator blocked for abuse (ADR 0022): their tokens open no pipes and connect no
+ * machines. Deleting the row unblocks the org.
+ */
+export const orgBlocks = sqliteTable("org_blocks", {
+  orgId: text("org_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  /** The operator's note: the report it answers. Never shown to the org. */
+  reason: text("reason"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).default(now).notNull(),
+});
