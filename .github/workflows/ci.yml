@@ -89,6 +89,11 @@ jobs:
         if: steps.scope.outputs.full == 'true'
         run: pnpm test:all
 
+      # The wall's browser e2e drives Chromium through Playwright (the version in apps/worker).
+      - name: Chromium
+        if: steps.scope.outputs.full == 'true'
+        run: pnpm --filter @wurmhol/worker exec playwright install --with-deps chromium
+
       # The real stack: wrangler dev (workerd) with local D1 and Durable Objects, the real CLI and
       # a real local HTTP server. Nothing external, so no service containers.
       - name: E2E tests
