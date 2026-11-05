@@ -100,7 +100,7 @@ jobs:
   publish-cli:
     name: Publish the CLI
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 25
     environment: production
     permissions:
       # The release tag and GitHub release.
@@ -121,18 +121,38 @@ jobs:
 
       - run: pnpm install --frozen-lockfile --filter wurmhol...
 
+      # npm accepts a publish minutes before it serves the version, and `npm view` 404s meanwhile.
+      # The job waits until npm serves it, so the next run (queued behind this one by the
+      # `production` concurrency group) finds it and skips. A run that still lands in that window,
+      # such as a re-run after a timeout, gets npm's 409 "previously staged version": the version is
+      # already published, so it waits too.
       - name: Publish when the version is new
         working-directory: packages/cli
         run: |
+          set -o pipefail
           version="$(node -p 'require("./package.json").version')"
-          if npm view "wurmhol@$version" version >/dev/null 2>&1; then
+          on_npm() { npm view "wurmhol@$version" version --prefer-online >/dev/null 2>&1; }
+          if on_npm; then
             echo "wurmhol@$version is already on npm"
-          else
-            # Trusted publishing needs npm 11.5.1 or later.
-            npm --version
-            pnpm build
-            npm publish --access public
+            exit 0
           fi
+          # Trusted publishing needs npm 11.5.1 or later.
+          npm --version
+          pnpm build
+          log="$RUNNER_TEMP/npm-publish.log"
+          if ! npm publish --access public 2>&1 | tee "$log"; then
+            grep -q 'previously staged version' "$log" || exit 1
+            echo "An earlier run published wurmhol@$version; npm is still processing it"
+          fi
+          for _ in $(seq 60); do
+            if on_npm; then
+              echo "wurmhol@$version is on npm"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::npm did not serve wurmhol@$version within 15 minutes of publishing"
+          exit 1
 
       # Re-runs finish a release whose publish succeeded. Versions with no changelog section
       # (the first, published by hand) get no release.

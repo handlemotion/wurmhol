@@ -37,6 +37,8 @@ Cloudflare Workers Builds deploys `main` (build `pnpm --filter @wurmhol/web buil
    `wrangler secret delete`.
 3. **Publish the CLI** when `packages/cli/package.json`'s version is not on npm, through npm
    trusted publishing: npm trusts this workflow's OIDC token, so no npm token exists anywhere.
+   npm takes a few minutes to serve a new version, and the job waits until it does (up to 15
+   minutes), so a green job means `npm install wurmhol@<version>` works.
 
 ## The CLI on npm
 
