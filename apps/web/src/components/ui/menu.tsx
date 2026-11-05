@@ -65,11 +65,11 @@ const MENU_ITEM_SELECTOR = "[role='menuitem'], [role='menuitemradio'], [role='me
  * The widest row sets the menu's width (fit-content): its last mark (the label, or the check on
  * a chosen row), then the row's 24px end padding, so the longest row breathes on the right; icons
  * sit 12px in. Short menus keep a 132px floor so they don't look pinched, and a menu of pivot
- * rows (an avatar over two lines: orgs, people) a 240px one, so a few short names still read as
+ * rows (an avatar over two lines: orgs, people) a 272px one, so a few short names still read as
  * the menu's main rows; past 300px labels truncate instead of wrapping. The floor beats the popover's own `min-w-(--trigger-width)`, so
  * a wide trigger doesn't stretch its menu. Don't fix a menu's width or override its cap.
  */
-const MENU_WIDTH = "w-max min-w-33 has-[[slot=description]]:min-w-60 max-w-75";
+const MENU_WIDTH = "w-max min-w-33 has-[[slot=description]]:min-w-68 max-w-75";
 
 export function Menu<T extends object>({ className, placement, popover, ...props }: MenuProps<T>) {
   // One fill springs between the rows (transitive's magnetic hover); the rows paint none.

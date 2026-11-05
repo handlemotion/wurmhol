@@ -10,24 +10,28 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
 import { useCreateOrg, useDeleteOrg, useLeaveOrg, useRenameOrg } from "@/hooks/use-app";
 
 /** The org actions in the switcher menu, each confirmed in a small dialog. */
-export type OrgAction = "create" | "rename" | "leave" | "delete";
+export type OrgAction = "create" | "settings" | "delete";
 
 /**
- * Start a new org, or rename, leave or delete the active one (spec section 3, header menu). Leaving and deleting say
- * what happens on the button itself, in red: neither can be undone from here.
+ * Start a new org, or open the active one's settings (rename, leave) or delete it (spec section 3,
+ * header menu). Leaving and deleting say what happens on the button itself, in red: neither can be
+ * undone from here.
  */
 export function OrgDialog({
   action,
   orgName,
+  isOwner,
   onClose,
 }: {
   action: OrgAction | null;
   orgName: string;
+  isOwner: boolean;
   onClose: () => void;
 }) {
   return (
@@ -35,11 +39,10 @@ export function OrgDialog({
       isOpen={action !== null}
       onOpenChange={(open) => !open && onClose()}
       size="md"
-      role={action === "rename" || action === "create" ? "dialog" : "alertdialog"}
+      role={action === "delete" ? "alertdialog" : "dialog"}
     >
       {action === "create" && <Create onDone={onClose} />}
-      {action === "rename" && <Rename orgName={orgName} onDone={onClose} />}
-      {action === "leave" && <Leave orgName={orgName} onDone={onClose} />}
+      {action === "settings" && <Settings orgName={orgName} isOwner={isOwner} onDone={onClose} />}
       {action === "delete" && <Delete orgName={orgName} onDone={onClose} />}
     </Dialog>
   );
@@ -80,57 +83,72 @@ function Create({ onDone }: { onDone: () => void }) {
   );
 }
 
-function Rename({ orgName, onDone }: { orgName: string; onDone: () => void }) {
+/**
+ * The active org's settings: its name, which owners change, and leaving it. Leaving sits apart
+ * below a divider, in red, since it can't be undone from here.
+ */
+function Settings({
+  orgName,
+  isOwner,
+  onDone,
+}: {
+  orgName: string;
+  isOwner: boolean;
+  onDone: () => void;
+}) {
   const [name, setName] = useState(orgName);
   const rename = useRenameOrg();
-  return (
-    <form
-      className="contents"
-      onSubmit={(event) => {
-        event.preventDefault();
-        rename.mutate(name, { onSuccess: onDone });
-      }}
-    >
-      <DialogHeader>
-        <DialogTitle>Rename org</DialogTitle>
-      </DialogHeader>
-      <DialogBody className="gap-3">
-        <TextField aria-label="Org name" isRequired autoFocus value={name} onChange={setName}>
-          <Input maxLength={80} />
-        </TextField>
-        <Failure error={rename.error} />
-      </DialogBody>
-      <DialogFooter>
-        <DialogClose>Cancel</DialogClose>
-        <Button type="submit" isPending={rename.isPending} isDisabled={!name.trim()}>
-          Rename
-        </Button>
-      </DialogFooter>
-    </form>
-  );
-}
-
-function Leave({ orgName, onDone }: { orgName: string; onDone: () => void }) {
   const leave = useLeaveOrg();
+  const changed = name.trim() !== "" && name.trim() !== orgName;
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Leave {orgName}?</DialogTitle>
-        <DialogDescription>
-          You lose its pipes and tokens. Getting back in takes a new invite link.
-        </DialogDescription>
+        <DialogTitle>Org settings</DialogTitle>
       </DialogHeader>
-      <Failure error={leave.error} />
-      <DialogFooter>
-        <DialogClose>Cancel</DialogClose>
-        <Button
-          intent="danger"
-          isPending={leave.isPending}
-          onPress={() => leave.mutate(undefined, { onSuccess: onDone })}
+      <DialogBody className="gap-5">
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            rename.mutate(name, { onSuccess: onDone });
+          }}
         >
-          Leave {orgName}
-        </Button>
-      </DialogFooter>
+          <div className="flex gap-2">
+            <TextField
+              aria-label="Org name"
+              isRequired
+              isDisabled={!isOwner}
+              value={name}
+              onChange={setName}
+              className="flex-1"
+            >
+              <Input maxLength={80} />
+            </TextField>
+            {isOwner && (
+              <Button type="submit" isPending={rename.isPending} isDisabled={!changed}>
+                Save
+              </Button>
+            )}
+          </div>
+          <Failure error={rename.error} />
+        </form>
+        <Separator />
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <Text className="text-foreground">Leave org</Text>
+            <Text>You lose its pipes and tokens. Getting back in takes a new invite link.</Text>
+          </div>
+          <Button
+            intent="danger"
+            className="shrink-0"
+            isPending={leave.isPending}
+            onPress={() => leave.mutate(undefined, { onSuccess: onDone })}
+          >
+            Leave org
+          </Button>
+        </div>
+        <Failure error={leave.error} />
+      </DialogBody>
     </>
   );
 }

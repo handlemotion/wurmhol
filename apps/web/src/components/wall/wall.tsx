@@ -6,13 +6,12 @@ import { Skeleton } from "skullet/react";
 import {
   IconChevronsUpDown,
   IconCreditCard,
-  IconDoorOpen,
   IconEllipsis,
   IconArrowUpRight,
   IconCheck,
   IconExternalLink,
   IconLaptop,
-  IconPencil,
+  IconSettings,
   IconPlus,
   IconSparkles,
   IconTrash,
@@ -187,6 +186,7 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
       <OrgDialog
         action={orgAction}
         orgName={active?.name ?? ""}
+        isOwner={owner}
         onClose={() => setOrgAction(null)}
       />
       <nav
@@ -248,11 +248,10 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
   );
 }
 
-/** What the switcher offers: anyone starts an org; owners rename and delete the active one. */
+/** What the switcher offers: anyone starts an org or opens its settings; owners delete it. */
 const ORG_ACTIONS = [
   { id: "create", label: "New org", Icon: IconPlus, owner: false, danger: false },
-  { id: "rename", label: "Rename org", Icon: IconPencil, owner: true, danger: false },
-  { id: "leave", label: "Leave org", Icon: IconDoorOpen, owner: false, danger: false },
+  { id: "settings", label: "Org settings", Icon: IconSettings, owner: false, danger: false },
   { id: "delete", label: "Delete org", Icon: IconTrash, owner: true, danger: true },
 ] as const;
 
