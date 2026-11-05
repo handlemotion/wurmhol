@@ -1,0 +1,13 @@
+// The marketing site: the static Astro build (`dist/`), served by Workers static assets, with no
+// Worker code. Every value here is a neutral default. The custom domain is not in this file: the
+// deploy sets it, as apps/worker's deploy script does with WORKER_DOMAIN
+// (`wrangler deploy --domain <apex>`; hosted Wurmhol uses wurmhol.com).
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "wurmhol-site",
+  "compatibility_date": "2026-11-03",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page",
+  },
+}

@@ -1,0 +1,28 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="Not found: Wurmhol" description="This page doesn't exist.">
+  <main class="notfound">
+    <h1>This page doesn't exist.</h1>
+    <a href="/">Back to wurmhol.com</a>
+  </main>
+</Base>
+
+<style>
+  .notfound {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    max-width: 960px;
+    margin-inline: auto;
+    padding: 96px 16px;
+  }
+  h1 {
+    font-size: 24px;
+    font-weight: 600;
+  }
+  a {
+    color: var(--muted-foreground);
+  }
+</style>

@@ -1,0 +1,103 @@
+/* Color tokens copied from apps/web/src/styles.css, so the site and the console share one
+   palette. Light by default; the dark block swaps the raw values. Only the roles this page uses. */
+:root {
+  color-scheme: light;
+  --background: #ffffff;
+  --surface: #fdfdfd;
+  --foreground: #171717;
+  --muted-foreground: #858585;
+  --subtle-foreground: #a6a6a6;
+  --border: #e8e8e8;
+  --accent: #f3f3f3;
+  --hover: color-mix(in oklab, var(--foreground) 3%, transparent);
+  --primary: #0d3eef;
+  --primary-button: #1a4bff;
+  --primary-foreground: #ffffff;
+  --well: #f0f0f0;
+  --well-hover: #e8e8e8;
+  --hairline-line: #d9d9d9;
+
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --gutter: 16px;
+  --measure: 960px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: #0e0e0e;
+    --surface: #141414;
+    --foreground: #ededed;
+    --muted-foreground: #8f8f8f;
+    --subtle-foreground: #6b6b6b;
+    --border: #262626;
+    --accent: #1f1f1f;
+    --primary: #5b7cff;
+    --primary-button: #3d63ff;
+    --well: #1c1c1c;
+    --well-hover: #242424;
+    --hairline-line: #333333;
+  }
+}
+
+@media (min-width: 640px) {
+  :root {
+    --gutter: 32px;
+  }
+}
+
+/* Sharp: no rounded corners anywhere, and no shadows. */
+*,
+::before,
+::after {
+  box-sizing: border-box;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-feature-settings:
+    "liga" 1,
+    "calt" 1;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+h1,
+h2,
+h3,
+p,
+ul,
+ol,
+dl,
+dd,
+figure {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
