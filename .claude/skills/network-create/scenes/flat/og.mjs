@@ -8,7 +8,7 @@ import { best, meet, PHI, plate } from "../../scripts/flat.mjs";
 
 // The copy inside the browser circle.
 const COPY = [
-  { text: "Wurmhol", size: 64, weight: 600 },
+  { text: "Wurmhol", size: 30 },
   { text: "A private URL for your", size: 30 },
   { text: "agent's dev server.", size: 30 },
 ];
@@ -31,7 +31,7 @@ export default (o) =>
       const small = [big[0] + R * (1.85 + rnd() * 0.35), y];
 
       p.hole({ c: big, r: R });
-      p.text(big, COPY, { pad: u * 0.5, gap: 0.5 });
+      p.text(big, COPY, { pad: u * 0.5, gap: 0.3 });
 
       p.ray([0, y], [W, y]);
       p.circle(small, r);
