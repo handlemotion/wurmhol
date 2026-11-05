@@ -110,6 +110,25 @@ export function useMachines(enabled: boolean) {
   return machines;
 }
 
+/**
+ * A setup code for `wurmhol host --code` (ADR 0019): already approved for the signed-in person in
+ * the active org, so the computer that runs the command logs in without asking. Minted while
+ * `enabled`, fresh each time the steps open, and again before it expires; dropped once unused.
+ */
+export function useSetupCode(enabled: boolean) {
+  return useQuery({
+    queryKey: ["setup-code"],
+    queryFn: () =>
+      api<{ code: string; expires_in: number }>("/api/device/setup", { method: "POST" }),
+    enabled,
+    gcTime: 0,
+    staleTime: 20 * 60_000,
+    refetchInterval: 20 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+}
+
 /** Opens a pipe on one of the person's computers, to a port it reported. */
 export function useOpenPort() {
   return useMutation({

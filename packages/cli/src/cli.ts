@@ -33,7 +33,7 @@ import {
 } from "./credentials.ts";
 import { FixError } from "./errors.ts";
 import { host as runHost } from "./host.ts";
-import { login as deviceLogin } from "./login.ts";
+import { login as deviceLogin, redeem } from "./login.ts";
 import { DEFAULT_CONSOLE, DEFAULT_SERVER, openPipe, type Pipe } from "./pipe.ts";
 import { detectSource } from "./source.ts";
 import { alive, listStates, logFile, removeState, writeState } from "./state.ts";
@@ -65,6 +65,7 @@ Usage:
                                 CLAUDE.md); --skill also writes .claude/skills/wurmhol
   wurmhol host                  Connect this computer to the wall, to open pipes to its
                                 ports from Create pipe in the browser; logs in first if needed
+    --code <code>               Log in with the setup code in Create pipe's command
   wurmhol login                 Approve this computer in the browser; stores a token
   wurmhol logout                Delete the stored token
   wurmhol mcp                   Run an MCP server on stdio (open_pipe, list_pipes,
@@ -123,6 +124,18 @@ function token() {
   fail(`Run wurmhol login, or set WURMHOL_TOKEN to a token from ${consoleUrl()} (menu → Tokens).`);
 }
 
+/** Stores a granted token as this server's login and says so. */
+function saveLogin(granted: { token: string; org: { name: string | null }; name: string }) {
+  writeCredentials({
+    server: server(),
+    token: granted.token,
+    org: granted.org.name,
+    name: granted.name,
+  });
+  const org = granted.org.name ? ` to ${granted.org.name}` : "";
+  process.stdout.write(`Logged in${org} as ${granted.name}. Token saved in ${credentialsFile()}\n`);
+}
+
 async function login() {
   try {
     const granted = await deviceLogin({
@@ -132,16 +145,7 @@ async function login() {
       prompt: (code) =>
         process.stdout.write(`Open ${code.verification_uri} and enter ${code.user_code}\n`),
     });
-    writeCredentials({
-      server: server(),
-      token: granted.token,
-      org: granted.org.name,
-      name: granted.name,
-    });
-    const org = granted.org.name ? ` to ${granted.org.name}` : "";
-    process.stdout.write(
-      `Logged in${org} as ${granted.name}. Token saved in ${credentialsFile()}\n`,
-    );
+    saveLogin(granted);
     if (process.env.WURMHOL_TOKEN?.trim()) {
       process.stdout.write("WURMHOL_TOKEN is set and wins over the saved token.\n");
     }
@@ -218,17 +222,35 @@ async function share(
 }
 
 /**
- * `wurmhol host`: logs in if there is no token yet, then keeps this computer connected to the
- * wall. A port picked there opens as `wurmhol <port>` would, from the home directory (its git
- * repo is not this one's to tell), and keeps running if this process ends.
+ * `wurmhol host`: logs in with Create pipe's setup code when given one (ADR 0019), else if there
+ * is no token yet, then keeps this computer connected to the wall. A port picked there opens as
+ * `wurmhol <port>` would, from the home directory (its git repo is not this one's to tell), and
+ * keeps running if this process ends.
  */
-async function serveHost() {
-  if (!findToken()) await login();
+async function serveHost(code: string | undefined) {
   const say = (line: string) => process.stdout.write(`${line}\n`);
+  let granted: string | null = null;
+  if (code) {
+    try {
+      const redeemed = await redeem({
+        server: server(),
+        code,
+        name: hostname(),
+        version: pkg.version,
+      });
+      saveLogin(redeemed);
+      granted = redeemed.token;
+    } catch (error) {
+      fail(error instanceof FixError ? error.message : String(error));
+    }
+  } else if (!findToken()) {
+    await login();
+  }
   try {
     await runHost({
       server: server(),
-      token: token(),
+      // The card's code names the org the person is looking at, so it wins over WURMHOL_TOKEN.
+      token: granted ?? token(),
       name: hostname(),
       version: pkg.version,
       say,
@@ -465,6 +487,7 @@ function parseCommandLine(args = process.argv.slice(2)) {
         all: { type: "boolean", default: false },
         skill: { type: "boolean", default: false },
         ttl: { type: "string" },
+        code: { type: "string" },
         help: { type: "boolean", short: "h", default: false },
         version: { type: "boolean", short: "v", default: false },
       },
@@ -490,7 +513,7 @@ async function main() {
   if (command === "stop") return stop(argument, values.all);
   if (command === "init") return init(values.skill);
   if (command === "login") return login();
-  if (command === "host") return serveHost();
+  if (command === "host") return serveHost(values.code?.trim() || undefined);
   if (command === "logout") return logout();
   if (command === "mcp") return (await import("./mcp.ts")).serve();
   const port = parsePort(command);

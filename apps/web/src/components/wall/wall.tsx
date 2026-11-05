@@ -45,6 +45,7 @@ import {
   useOpenBilling,
   useOpenPort,
   usePrefetchDialogs,
+  useSetupCode,
   useSignOut,
   useSwitchOrg,
   useTerminate,
@@ -415,7 +416,8 @@ function Swap(props: {
   );
 }
 
-const HOST = "npx wurmhol host";
+/** The command Create from this computer copies, with its setup code (ADR 0019). */
+const host = (code: string) => `npx wurmhol host --code ${code}`;
 
 /** npm's mark (svgl) at 13px inside the rows' 15px icon slot, as the design draws it. */
 function NpmMark() {
@@ -527,9 +529,10 @@ function StepMark({ n, done }: { n: number; done: boolean }) {
 }
 
 /**
- * Create from this computer (ADR 0018): run the CLI here, approve it in this browser, then pick
- * a port it found. The first two collapse to their answer once a computer connects; picking a
- * port opens its pipe and its card.
+ * Create from this computer (ADR 0018, 0019): run the command here, then pick a port it found.
+ * The command carries a setup code for the signed-in person, so the CLI needs no approval. The
+ * first step collapses to its answer once a computer connects; picking a port opens its pipe and
+ * its card.
  */
 function MachineSteps({
   onBack,
@@ -542,6 +545,7 @@ function MachineSteps({
   const openPort = useOpenPort();
   const [picked, setPicked] = useState<string | null>(null);
   const connected = machines?.length ? machines : null;
+  const setup = useSetupCode(!connected);
   const row = "flex h-8 items-center gap-2.5 px-2 text-sm";
   return (
     <>
@@ -563,21 +567,26 @@ function MachineSteps({
           </span>
           {!connected && (
             <div className="ps-8.25 pe-2">
-              <CopyField label="Run" value={HOST} />
+              {setup.isError ? (
+                <span role="alert" className="text-xs text-danger-subtle-foreground">
+                  {setup.error.message}
+                </span>
+              ) : (
+                <Skeleton
+                  id="setup-code"
+                  data={setup.data}
+                  sample={{ code: "x".repeat(40), expires_in: 1800 }}
+                  label="Loading the command"
+                >
+                  {({ code }) => <CopyField label="Run" value={host(code)} />}
+                </Skeleton>
+              )}
             </div>
           )}
         </li>
-        <li>
-          <span className={cn(row, connected ? "text-muted-foreground" : "text-foreground")}>
-            <StepMark n={2} done={Boolean(connected)} />
-            <span className="truncate">
-              {connected ? "Approved" : "Approve it at the link it prints"}
-            </span>
-          </span>
-        </li>
         <li className="flex min-h-0 flex-1 flex-col">
           <span className={cn(row, connected ? "text-foreground" : "text-subtle-foreground")}>
-            <StepMark n={3} done={false} />
+            <StepMark n={2} done={false} />
             <span className="truncate">Pick a port</span>
           </span>
           {connected && (

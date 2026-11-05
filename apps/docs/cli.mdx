@@ -17,8 +17,10 @@ description: "Every command, flag and variable of `npx wurmhol`."
 ## Open pipes from the browser
 
 `npx wurmhol host` keeps this computer connected to your wall. In Create pipe, **Create from this
-computer** lists the web servers running on it, by port and page title; pick one and its pipe
-opens. It logs in first if this computer has no token yet: approve it at the link it prints. Only
+computer** gives you the command to run, with a one-time setup code that logs this computer in as
+you, then lists the web servers running on it, by port and page title; pick one and its pipe
+opens. Run without `--code` and with no token yet, it logs in first: approve it at the link it
+prints. Only
 you see your computers, and only ports they report can be opened. Pipes it opens keep running
 when you stop it; end them with `wurmhol stop` or Terminate on the wall.
 

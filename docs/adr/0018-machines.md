@@ -1,7 +1,8 @@
 # 0018: Open pipes from the browser, through `wurmhol host`
 
-Status: accepted. Extends spec v1 section 3 (Create pipe) and section 7 (the CLI). Departs from
-section 3's "the wall only lists pipes": the wall can now start one, on a computer that asks it to.
+Status: accepted; the card's approval step is replaced by ADR 0019. Extends spec v1 section 3
+(Create pipe) and section 7 (the CLI). Departs from section 3's "the wall only lists pipes": the
+wall can now start one, on a computer that asks it to.
 
 ## Context
 

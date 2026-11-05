@@ -7,9 +7,12 @@
 //   is returned instead.
 // - The console's three calls under `/api/device`, for a signed-in member: look a code up, approve
 //   it for the active org, or deny it. The org is recorded on the code's scope as `org:<id>`.
+// - A setup code (ADR 0019): `POST /api/device/setup` issues a code already approved by the
+//   caller for the active org and hands back its device code, which Create pipe puts in
+//   `wurmhol host --code`. The CLI redeems it on `/device/token` like any other, once.
 //
 // A code's scope is a space-separated list: `name:<computer>` (from the CLI, URI-encoded) and,
-// once approved, `org:<id>`.
+// once approved, `org:<id>`. A setup code has no name; the CLI sends it when it redeems.
 import { zValidator } from "@hono/zod-validator";
 import { APIError, DEVICE_CLIENT_ID } from "@wurmhol/auth";
 import { createToken, findMember, listOrgsForUser, setPendingDeviceScope } from "@wurmhol/db";
@@ -78,8 +81,13 @@ async function limitPerIp(c: Context<AppEnv>) {
   return wait ? tooManyRequests(wait) : null;
 }
 
-const codeBody = z.object({ name: z.string().trim().min(1).max(80) });
-const tokenBody = z.object({ device_code: z.string().min(1).max(200) });
+const computerName = z.string().trim().min(1).max(80);
+const codeBody = z.object({ name: computerName });
+const tokenBody = z.object({
+  device_code: z.string().min(1).max(200),
+  /** The computer's name, for a setup code, whose scope has none. */
+  name: computerName.optional(),
+});
 
 /** The CLI's calls: no session, no token; the device code is the credential. */
 export const deviceFlow = new Hono<AppEnv>()
@@ -107,12 +115,13 @@ export const deviceFlow = new Hono<AppEnv>()
     const limited = await limitPerIp(c);
     if (limited) return limited;
     c.header("cache-control", "no-store");
+    const body = c.req.valid("json");
     let redeemed;
     try {
       redeemed = await c.var.auth.api.deviceToken({
         body: {
           grant_type: GRANT_TYPE,
-          device_code: c.req.valid("json").device_code,
+          device_code: body.device_code,
           client_id: DEVICE_CLIENT_ID,
         },
       });
@@ -131,7 +140,9 @@ export const deviceFlow = new Hono<AppEnv>()
     const session = await context.internalAdapter.findSession(redeemed.access_token);
     await context.internalAdapter.deleteSession(redeemed.access_token);
     if (!session) throw new Error("device login: the plugin's session is missing");
-    const { name, orgId } = parseScope(redeemed.scope);
+    const scope = parseScope(redeemed.scope);
+    const { orgId } = scope;
+    const name = scope.name ?? body.name ?? null;
     const member = orgId ? await findMember(c.var.db, session.user.id, orgId) : null;
     if (!member || !name) {
       c.var.log.info("device.refused", { orgId: orgId ?? undefined });
@@ -222,6 +233,27 @@ export const deviceApproval = new Hono<AppEnv>()
     });
     c.var.log.info("device.approved", { orgId: c.var.member.orgId });
     return c.json({ ok: true });
+  })
+  /**
+   * A setup code for Create pipe's command (ADR 0019): issued, claimed and approved for the
+   * caller and the active org in one call, so the computer that redeems it needs no approval.
+   */
+  .post("/setup", limitPerMember("manage"), async (c) => {
+    const issued = await c.var.auth.api.deviceCode({
+      body: {
+        client_id: DEVICE_CLIENT_ID,
+        scope: formatScope({ name: null, orgId: c.var.member.orgId }),
+      },
+    });
+    const claimed = await claim(c, issued.user_code);
+    if (claimed.status !== "pending") throw new Error("setup code: not pending once issued");
+    await c.var.auth.api.deviceApprove({
+      body: { userCode: claimed.userCode },
+      headers: c.req.raw.headers,
+    });
+    c.var.log.info("device.setup", { orgId: c.var.member.orgId });
+    c.header("cache-control", "no-store");
+    return c.json({ code: issued.device_code, expires_in: issued.expires_in });
   })
   .post("/deny", limitPerMember("manage"), zValidator("json", userCodeBody), async (c) => {
     const claimed = await claim(c, c.req.valid("json").code);
