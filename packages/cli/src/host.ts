@@ -2,10 +2,11 @@
 // `<WURMHOL_URL>/host`, dialed like a pipe's (HTTPS_PROXY, NODE_EXTRA_CA_CERTS). It reports the
 // web ports open here as they come and go; when its owner picks one in Create pipe, the relay
 // asks it to open a pipe to that port, and it answers with the pipe's URL or why it could not.
+import { type HostMessage, MACHINE_LIMITS, parseRelayMessage } from "@wurmhol/protocol";
 import WebSocket from "ws";
 import { dial } from "./dial.ts";
 import { FixError } from "./errors.ts";
-import { type LocalPort, PortScanner } from "./ports.ts";
+import { PortScanner } from "./ports.ts";
 
 export interface HostOptions {
   server: string;
@@ -21,8 +22,6 @@ export interface HostOptions {
 
 /** How often the ports are looked at again. */
 const SCAN_MS = 3000;
-
-type FromRelay = { type: "open"; id: string; port: number };
 
 function connect(options: HostOptions): Promise<WebSocket> {
   const url = new URL("/host", options.server);
@@ -64,9 +63,12 @@ export async function host(options: HostOptions): Promise<never> {
 function session(socket: WebSocket, scanner: PortScanner, options: HostOptions) {
   return new Promise<void>((resolve) => {
     let sent = "";
+    const send = (message: HostMessage) => socket.send(JSON.stringify(message));
     const report = async () => {
-      const ports: LocalPort[] = await scanner.scan();
-      const message = JSON.stringify({ type: "ports", ports });
+      const message = JSON.stringify({
+        type: "ports",
+        ports: await scanner.scan(),
+      } satisfies HostMessage);
       if (message === sent || socket.readyState !== WebSocket.OPEN) return;
       socket.send(message);
       sent = message;
@@ -77,25 +79,24 @@ function session(socket: WebSocket, scanner: PortScanner, options: HostOptions) 
     const ping = setInterval(() => socket.ping(), 30_000);
     socket.on("message", (data, binary) => {
       if (binary) return;
-      let message: FromRelay;
+      let raw: unknown;
       try {
-        message = JSON.parse(String(data)) as FromRelay;
+        raw = JSON.parse(String(data));
       } catch {
         return;
       }
-      if (message.type !== "open" || !Number.isInteger(message.port)) return;
+      const message = parseRelayMessage(raw);
+      if (!message) return;
       options.say(`Opening a pipe to port ${message.port}…`);
       options.open(message.port).then(
         (url) => {
           options.say(`${message.port} → ${url}`);
-          socket.send(JSON.stringify({ type: "opened", id: message.id, url }));
+          send({ type: "opened", id: message.id, url });
         },
         (error: unknown) => {
           const text = error instanceof Error ? error.message : String(error);
           options.say(`Could not open port ${message.port}: ${text}`);
-          socket.send(
-            JSON.stringify({ type: "failed", id: message.id, message: text.slice(0, 500) }),
-          );
+          send({ type: "failed", id: message.id, message: text.slice(0, MACHINE_LIMITS.message) });
         },
       );
     });

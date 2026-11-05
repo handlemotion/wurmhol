@@ -20,6 +20,7 @@ import { createToken, findMember, listOrgsForUser, setPendingDeviceScope } from 
 import { type Context, Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { COMPUTER_NAME_MAX } from "@wurmhol/protocol";
 import { type AppEnv, requireMember } from "../context.ts";
 import { limitPerIp, limitPerMember } from "../rate-limiter.ts";
 
@@ -76,7 +77,7 @@ const FIXES: Record<string, string> = {
   invalid_grant: "That login is unknown or was already used. Run wurmhol login again.",
 };
 
-const computerName = z.string().trim().min(1).max(80);
+const computerName = z.string().trim().min(1).max(COMPUTER_NAME_MAX);
 const codeBody = z.object({ name: computerName });
 const tokenBody = z.object({
   device_code: z.string().min(1).max(200),

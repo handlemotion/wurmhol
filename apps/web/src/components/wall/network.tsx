@@ -3,7 +3,7 @@ import { cn } from "cn";
 import { useEffect, useRef, useState } from "react";
 import { IconPlus } from "@/components/icons/lucide";
 import { Button } from "@/components/ui/button";
-import type { Share } from "@/lib/api";
+import type { ShareCard } from "@wurmhol/protocol";
 import { Constellation } from "./constellation";
 import { ANCHOR } from "./constellation-layout";
 import { CreateCard } from "./create-card";
@@ -16,7 +16,7 @@ import { WallPlate } from "./wall-plate";
  * at a time; it opens where its pill stands, and the view pans to it while every other pill
  * holds its place.
  */
-export function Network({ shares }: { shares: Share[] }) {
+export function Network({ shares }: { shares: ShareCard[] }) {
   const [open, setOpen] = useState<string | null>(null);
   // A pipe opened from this computer: its card opens once the wall has it.
   const [opened, setOpened] = useState<string | null>(null);

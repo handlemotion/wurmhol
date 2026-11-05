@@ -15,6 +15,7 @@ import {
   type Stack,
   startStack,
   stopAll,
+  viewerCookie,
   waitFor,
 } from "./support.ts";
 
@@ -110,6 +111,20 @@ it("waits for a server that starts after its pipe, and never takes the waiting p
   await stopAll(env);
   late.closeAllConnections();
   await new Promise((resolve) => late.close(resolve));
+});
+
+it("keeps the waiting page's title off the wall when a viewer opens a pipe before its server is up", async () => {
+  const placeholder = await localServer(() => {});
+  await placeholder.close();
+  const started = await share(stack, env, placeholder.port);
+  const cookie = await viewerCookie(stack, ada, started.url);
+  const waiting = await browserFetch(`${started.url}/`, { cookie });
+  expect(waiting.status).toBe(502);
+  expect(await waiting.text()).toContain(`Waiting for the server on port ${placeholder.port}`);
+  // Catches the viewer's title scan reading the CLI's waiting page as the app's title.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  expect(await card(started.id)).toMatchObject({ title: null, favicon: false });
+  await stopAll(env);
 });
 
 it.each([

@@ -43,22 +43,20 @@ export function linkOnCallbackOrigin(url: string) {
 }
 
 /**
- * Builds Better Auth for one request scope. In development, `onDevLink` receives each magic
- * link, since no mail is sent there. `mcp` adds the hosted MCP server's OAuth provider (ADR
- * 0014), for its routes only: the provider reads D1 each time an instance starts.
+ * Builds Better Auth for one request. In development, `onDevLink` receives each magic link,
+ * since no mail is sent there. `mcpResource` loads the hosted MCP server's OAuth provider for it.
  */
-export function authFor(
+function authFor(
   env: Env,
   config: Config,
   db: Db,
-  onDevLink: (url: string) => void = () => {},
-  options: { mcp?: boolean } = {},
+  onDevLink: (url: string) => void,
+  mcpResource: string | null,
 ): Auth {
-  const resource = options.mcp ? mcpResource(config) : null;
   return createAuth({
     db,
     ...config.auth,
-    mcp: resource ? { resource } : undefined,
+    mcp: mcpResource ? { resource: mcpResource } : undefined,
     sendMagicLink: magicLinksOn(config)
       ? async ({ email, url: built }) => {
           const url = linkOnCallbackOrigin(built);
@@ -88,31 +86,30 @@ async function sendMagicLinkMail(env: Env, config: Config, email: string, url: s
   });
 }
 
+function scope(withMcpProvider: boolean) {
+  return createMiddleware<AppEnv>(async (c, next) => {
+    const config = loadConfig(c.env);
+    const db = createDb(c.env.DB);
+    c.set("config", config);
+    c.set("db", db);
+    const resource = withMcpProvider ? mcpResource(config) : null;
+    c.set(
+      "auth",
+      authFor(c.env, config, db, (url) => c.set("devLink", url), resource),
+    );
+    await next();
+  });
+}
+
 /** Per-request config, database and Better Auth. */
-export const requestScope = createMiddleware<AppEnv>(async (c, next) => {
-  const config = loadConfig(c.env);
-  const db = createDb(c.env.DB);
-  c.set("config", config);
-  c.set("db", db);
-  c.set(
-    "auth",
-    authFor(c.env, config, db, (url) => c.set("devLink", url)),
-  );
-  await next();
-});
+export const requestScope = scope(false);
 
 /**
- * The same scope, with the hosted MCP server's OAuth provider loaded: `/mcp`, its metadata, and
- * the OAuth routes under `/api/auth`.
+ * The same scope, with the hosted MCP server's OAuth provider (ADR 0014) loaded: `/mcp`, its
+ * metadata, and the OAuth routes under `/api/auth`. Only there, since the provider reads D1 each
+ * time an instance starts.
  */
-export const mcpScope = createMiddleware<AppEnv>(async (c, next) => {
-  const config = loadConfig(c.env);
-  const db = createDb(c.env.DB);
-  c.set("config", config);
-  c.set("db", db);
-  c.set("auth", authFor(c.env, config, db, undefined, { mcp: true }));
-  await next();
-});
+export const mcpScope = scope(true);
 
 /** The signed-in user, from Better Auth's session. */
 export interface SessionUser {

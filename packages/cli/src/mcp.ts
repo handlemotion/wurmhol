@@ -3,7 +3,7 @@
 // the agent's MCP session and ends with it; no daemon is left behind.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { PIPE_NAME_RULE, parseDuration, pipeName } from "@wurmhol/protocol";
+import { MAX_PORT, PIPE_NAME_RULE, parseDuration, pipeName } from "@wurmhol/protocol";
 import { z } from "zod";
 import pkg from "../package.json" with { type: "json" };
 import { consoleUrl, findToken, server } from "./config.ts";
@@ -76,7 +76,7 @@ export function createServer(pipes: Map<string, Held>) {
       description:
         "Give a local port a private HTTPS URL that members of the user's org can open in their own browser. Returns once the URL works. Send the URL to the user.",
       inputSchema: {
-        port: z.number().int().min(1).max(65535).describe("The port the dev server listens on"),
+        port: z.number().int().min(1).max(MAX_PORT).describe("The port the dev server listens on"),
         ttl: z
           .string()
           .optional()

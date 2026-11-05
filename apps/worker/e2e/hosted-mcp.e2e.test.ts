@@ -315,6 +315,20 @@ describe("hosted MCP server", () => {
     const pipesToken = (await createToken(stack, ada, "cli")).token;
     await expect(connect(pipesToken)).rejects.toThrow("This token can only open pipes.");
     await pipe.local.close();
+
+    // Catches an org token outliving its maker's membership. Leaving revokes their tokens; this
+    // removes the membership alone, as a token the revocation missed.
+    const cy = await signIn(stack);
+    const cyToken = (await createToken(stack, cy, "mcp", { scope: "org" })).token;
+    const db = stack.db({ write: true });
+    try {
+      db.prepare("delete from members where user_id = (select id from users where email = ?)").run(
+        cy.email,
+      );
+    } finally {
+      db.close();
+    }
+    await expect(connect(cyToken)).rejects.toThrow("no longer in its org");
   });
 
   it("lives on the CLI's host only, and keeps Better Auth's other OAuth routes closed", async () => {
