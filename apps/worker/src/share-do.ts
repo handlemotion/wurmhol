@@ -57,6 +57,8 @@ const INTERNAL_HEADERS = {
   viewer: "x-wurmhol-viewer",
   /** From the object: the viewer may no longer open the share. */
   refused: "x-wurmhol-refused",
+  /** From the object: the share's org, on a response with a `Location` (the OAuth relay's). */
+  org: "x-wurmhol-org",
 } as const;
 
 /** The share's Durable Object: one per share, named by its id. */
@@ -96,6 +98,18 @@ export function shareGone(reason: EndReason | null) {
 /** Whether the object refused the viewer (removed from the org, or not on the share's list). */
 export function refusedViewer(response: Response) {
   return response.headers.has(INTERNAL_HEADERS.refused);
+}
+
+/**
+ * A viewer's response from the object without the object's own headers, and the share's org
+ * when the response redirects somewhere (null otherwise).
+ */
+export function fromShare(response: Response): { response: Response; orgId: string | null } {
+  const orgId = response.headers.get(INTERNAL_HEADERS.org);
+  if (orgId === null) return { response, orgId };
+  const out = new Response(response.body, response);
+  out.headers.delete(INTERNAL_HEADERS.org);
+  return { response: out, orgId };
 }
 
 /** How long a viewer's membership check stays good before D1 is asked again. */
@@ -472,6 +486,8 @@ export class Share extends DurableObject<Env> {
 
     const headers = new Headers();
     for (const [name, raw] of forwardable(responseHead.headers)) {
+      // The object's own headers to the Worker are never the dev server's to send.
+      if (name.toLowerCase().startsWith("x-wurmhol-")) continue;
       const value = name.toLowerCase() === "set-cookie" ? pipeSetCookie(raw) : raw;
       if (value === null) continue;
       try {
@@ -480,6 +496,7 @@ export class Share extends DurableObject<Env> {
         // A header the runtime refuses (invalid characters): dropped, not fatal.
       }
     }
+    if (headers.has("location")) headers.set(INTERNAL_HEADERS.org, meta.orgId);
     const isHtml = /^text\/html\b/i.test(headers.get("content-type") ?? "");
     let scan = options.scanTitle && isHtml && !headers.has(WAITING_HEADER) ? "" : null;
     const noBody = head.method === "HEAD" || [101, 204, 205, 304].includes(responseHead.status);

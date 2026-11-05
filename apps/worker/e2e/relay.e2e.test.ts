@@ -72,6 +72,9 @@ describe("a share round-trip", () => {
           "b=2; Path=/; Domain=pipe.localhost",
           "__Host-wurmhol=forged; Path=/; Secure",
         ],
+        // The object's signals to the Worker: a dev server must not be able to send them.
+        "x-wurmhol-refused": "1",
+        "x-wurmhol-org": "someone-else",
       });
       res.end(
         "<!doctype html><html><head><title>Ada&#39;s app</title></head><body>hi</body></html>",
@@ -90,6 +93,8 @@ describe("a share round-trip", () => {
     expect(response.status).toBe(201);
     expect(await response.text()).toContain("<body>hi</body>");
     expect(response.headers.getSetCookie()).toEqual(["a=1; Path=/", "b=2; Path=/"]);
+    expect(response.headers.get("x-wurmhol-refused")).toBeNull();
+    expect(response.headers.get("x-wurmhol-org")).toBeNull();
     const request = seen.find((s) => s.path === "/deep/path?q=1&r=%20")!;
     expect(request.host).toBe(`localhost:${local.port}`);
     expect(request.xfh).toBe(new URL(started.url).host);
