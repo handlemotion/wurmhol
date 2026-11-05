@@ -1,0 +1,14 @@
+# Headers for the web app's static files (Workers static assets). Worker responses get theirs
+# from apps/worker/src/security-headers.ts; keep the shared values (HSTS, nosniff,
+# Permissions-Policy) in step. From Omni.
+#
+# CSP: everything from our own origin only, including the wall's WebSocket and the favicons it
+# shows (served by /api). Billing leaves for Stripe's own pages, so no Stripe.js here.
+# Styles allow 'unsafe-inline': React Aria sets style attributes and UI libraries inject <style>.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+  Strict-Transport-Security: max-age=63072000; includeSubDomains
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: same-origin
+  Permissions-Policy: accelerometer=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), publickey-credentials-create=(self), publickey-credentials-get=(self)
+  Cross-Origin-Opener-Policy: same-origin
