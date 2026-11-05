@@ -1,113 +1,129 @@
 ---
 name: network-create
-description: Generates Wurmhol's brand graphics, the network style - hairline 3D wireframes of node clusters, beaded curves and the wormhole throat, with true hidden-line removal, rendered to clean SVG and PNG by scripts. Use whenever you make or change an illustration, hero, backdrop, empty state, diagram, icon or mark for the app, the marketing site or docs, or when asked for brand graphics in "the network style".
+description: Generates Wurmhol's brand graphics in the network style - flat construction drawings (circles, axes, frames and rays laid out by proportion, with square nodes exactly where shapes meet), plus a 3D wireframe mode for depth plates - rendered to clean SVG and PNG by scripts and held to the style by a checker. Use whenever you make or change an illustration, hero, backdrop, empty state, diagram, icon or mark for the app, the marketing site or docs, or when asked for brand graphics in "the network style".
 ---
 
 # Network graphics
 
-Wurmhol's graphics are technical plates: networks of nodes drawn as precise wireframes around one
-pivot, the hole. Everything is generated from a scene file, never drawn by hand, so a graphic is
-exact, reproducible and editable by changing numbers.
+Wurmhol's graphics are construction drawings of a network around one pivot, the hole. They read
+like architecture: proportion, axes and exact intersections. Everything is generated from a
+scene file, never drawn by hand, so a graphic is exact, reproducible and editable by changing
+numbers.
 
 ## The style
 
-**One stroke.** Every line shares one color and one width (default 1px, `non-scaling-stroke`).
-Hierarchy never comes from weight, gray levels or opacity. It comes from three line states only:
-
-| State  | Means                                        | How                        |
-| ------ | -------------------------------------------- | -------------------------- |
-| Solid  | Structure you can see                        | default                    |
-| Dashed | Far side of a surface, or construction lines | `hidden: "dash"`, `dashed` |
-| Dotted | Paths, guides, ground                        | `line: false` with beads   |
-
-**Dots mark points.** Nodes, intersections and beads evenly spaced along a curve, one radius.
-Under perspective, beads crowd with distance: that is most of the depth.
-
-**One accent, one pivot.** The brand `primary` marks the single thing the plate is about: the
-pivot dot at the throat and, at most, the one thread that passes through it. Never two.
-
-**The hole is the pivot.** Compose around a throat, a ring or a well, with networks (node
-globes, lattices, arcs) on either side. The product is a link between two places that can't see
-each other; the plate says that.
-
-**Depth from geometry, not effects.** Perspective, occlusion and bead density. No gradients,
-shadows, blur, glow or fills (the checker rejects them). Generous empty paper.
+- **Flat first.** 2D construction geometry: circles, axes, frames, rays and tangents. The 3D mode
+  (below) is for the rare plate that needs depth.
+- **Nodes only where shapes meet.** A node marks a computed point: an axis crossing a circle,
+  two circles crossing, a tangent point, a diagonal's crossing, a centre of similitude. Never a
+  point placed by eye. `meet.*` computes them exactly.
+- **Proportion, not taste.** Radii, offsets and frames come from a ratio (φ, √2, √3) or the
+  module `u` (a fraction of the short side). Node sizes come from `u` too, in two or three steps.
+- **One stroke.** One color, one width (1px). Hierarchy comes only from solid (structure), dashed
+  (construction) and dotted lines. No gray levels, opacity, gradients, shadows or blur.
+- **Square nodes, mono tags.** Filled squares for nodes (a dot for the pivot or a crossing),
+  mono labels, and `tag` readouts (swatch plus value) for the few names that matter: `container`,
+  `browser`, `:5173`, a `*.wurmhol.dev` host. No real tokens or user data.
+- **One accent, one pivot.** The brand `primary` marks the single thing the plate is about, plus
+  at most the one line or tag tied to it.
+- **Complete and balanced.** A plate fills its frame: outer layers run past the edge, so it reads
+  as part of a larger drawing. The ink's centre of mass sits near the frame's centre. Two shapes
+  and a line is not a plate.
 
 ## Tools
 
 Everything is in `scripts/` and needs only Node (PNG output uses the pre-installed Playwright).
 
-| File         | What it does                                                                                 |
-| ------------ | -------------------------------------------------------------------------------------------- |
-| `engine.mjs` | Scene, camera (yaw, pitch, roll, perspective, auto-fit), depth-buffer hidden lines, SVG      |
-| `prims.mjs`  | Geometry: `throat`, `sphere`, `cluster`, `sheet`, `torus`, `arc`, `ticks`, `field`, `circle` |
-| `render.mjs` | Scene files to SVG, PNG at 2x, both themes, and a contact sheet                              |
-| `check.mjs`  | Fails an SVG that breaks the style: widths, colors, dot sizes, effects                       |
+| File         | What it does                                                                                                      |
+| ------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `flat.mjs`   | `plate()`: `line`, `ray`, `circle`, `arc`, `frame`, `node`, `label`, `fan`; `meet` intersections; `best` search   |
+| `engine.mjs` | 3D mode: scene, camera, depth-buffer hidden lines (curves dash exactly where a surface hides them)                |
+| `prims.mjs`  | 3D geometry: `throat`, `sphere`, `cluster`, `sheet`, `torus`, `arc`, `ticks`, `field`; also `connect` (MST + kNN) |
+| `render.mjs` | Scene files to SVG, PNG at 2x, light and dark, `--ink currentColor`, a contact sheet                              |
+| `check.mjs`  | Fails a plate that is thick, off-palette, incomplete (under 85% coverage) or unbalanced (centre over 7% off)      |
 
-How hidden lines work: surfaces (`mesh`) rasterize into a depth buffer at output resolution;
-each curve is sampled every 1.5px and split into visible and hidden runs against it, short
-flickers are merged, and runs are simplified (RDP, 0.08px). So a curve on the back of a globe
-dashes exactly where the globe hides it, with no hand masking.
+`best(build, { seed, tries })` is the generative step. It builds `tries` candidates from seeded
+randomness and keeps the most balanced one that fills the frame. Put the variation (offsets,
+which step of a scale, which crossings get nodes) in `build`, and let the search choose.
 
 ## Workflow
 
-1. **Concept first.** Say in one sentence what the plate shows and where the pivot is. Pick the
-   nearest scene in `scenes/` as a starting point.
-2. **Write a scene file** (`scenes/<name>.mjs`, or next to where the graphic ships). It
-   default-exports `(o) => scene`, passing `o.ink`, `o.accent`, `o.stroke` into `style`:
+1. **Concept first.** In one sentence: what construction, where the pivot is, and which two
+   places it links. Start from the nearest scene in `scenes/flat/`.
+2. **Write the scene** (`scenes/flat/<name>.mjs`, or beside where the graphic ships):
 
    ```js
-   import { scene } from "../scripts/engine.mjs";
-   import { cluster, throat } from "../scripts/prims.mjs";
+   import { best, meet, PHI, plate } from "../../scripts/flat.mjs";
 
-   export default (o) => {
-     const s = scene({
-       width: o.width,
-       height: o.height,
-       camera: { pitch: 16, yaw: 20, perspective: 24 },
-       style: { ink: o.ink, accent: o.accent, stroke: o.stroke },
-     });
-     s.add(throat({ rs: 1, h: 3.2, rings: 12, meridians: 32, beads: 13 }), { hidden: "none" });
-     s.add(cluster({ c: [-4, 3.5, 0], r: 1, n: 44, k: 4, shell: 1, seed: o.seed }));
-     s.dot([0, 0, 0], { accent: true, hidden: "solid" });
-     return s;
-   };
+   export default (o) =>
+     best(
+       (rnd) => {
+         const p = plate({
+           width: o.width,
+           height: o.height,
+           style: { ink: o.ink, accent: o.accent, stroke: o.stroke, paper: o.paper },
+         });
+         const u = Math.min(o.width, o.height) / 24;
+         const y = o.height / 2;
+         const r = o.height * (0.3 + rnd() * 0.04);
+         const a = [o.width / 2 - r / 2, y];
+         const b = [o.width / 2 + r / 2, y];
+         p.ray([0, y], [o.width, y])
+           .circle(a, r)
+           .circle(b, r)
+           .circle(a, r * PHI, { dashed: true });
+         const [t0, t1] = meet.circles(a, r, b, r);
+         p.line(t0, t1, { accent: true })
+           .node(t0, { size: u * 0.5 })
+           .node(t1, { size: u * 0.5 });
+         return p;
+       },
+       { seed: o.seed },
+     );
    ```
 
-3. **Render and look**, both themes, at 2x:
+3. **Render and look**, both themes, at 2x (flat plates are usually 1600x1000):
 
    ```bash
-   node .claude/skills/network-create/scripts/render.mjs .claude/skills/network-create/scenes/*.mjs --out /tmp/net --theme both --sheet
+   node .claude/skills/network-create/scripts/render.mjs .claude/skills/network-create/scenes/flat/*.mjs --size 1600x1000 --theme both --out /tmp/net --sheet
    ```
 
-   Open the PNGs (or `index.html`) and judge them as a plate: one pivot, clear silhouette,
-   nothing tangled at the throat, enough empty paper.
+   Judge each plate: is every node on a real crossing, does it fill the frame, is the pivot the
+   one thing you see first, is anything tangled where lines converge?
 
-4. **Check** every SVG you ship:
+4. **Check** every SVG you ship, and fix what it reports:
 
    ```bash
    node .claude/skills/network-create/scripts/check.mjs /tmp/net/*.svg
    ```
 
-5. **Ship.** For UI, render with `--ink currentColor` and use the SVG as a component's markup so
-   it follows the theme through `text-*` classes; for the quiet backdrop behind forms use
-   `--tone quiet`. Commit the scene file beside the SVG so it can be regenerated.
+5. **Ship.** For UI, render with `--ink currentColor` and use the SVG as markup so it follows the
+   theme through `text-*` classes (`--tone quiet` for backdrops behind forms). Commit the scene
+   file beside the SVG so it can be regenerated.
 
-## Choosing parameters
+## Constructions that work
 
-- **Dense meshes hide, sparse diagrams dash.** A throat or sheet with 20+ lines reads cleaner
-  with `hidden: "none"`; a construction sphere or a node globe reads better dashed.
-- **Node globes:** `cluster({ shell: 1, n: 30–50, k: 4 })` gives an even near-triangulation
-  whose links run as great-circle arcs over an occluding hull. `shell < 1` scatters nodes through
-  the volume with straight links (no hull), for looser constellations.
-- **Perspective:** `perspective` is the camera distance in world units. 14–24 for heroes (beads
-  crowd visibly), 0 (orthographic) for diagrams, marks and anything axonometric.
-- **Marks and icons:** draw at 256 with `stroke` 10–14 and `dot` near 1.5x the stroke; check at
-  16px. Keep to a ring, a few nodes and the pivot.
-- **Seeds:** clusters are seeded. Try a few `--seed` values and keep the best one in the scene.
+- **Apollonian circles** (`apollonian`): two limit points are the two places. One family of
+  circles passes through both, the other closes around each, and they cross at right angles.
+- **Common tangents** (`tangents`): a small and a large circle. The inner tangents cross at the
+  internal centre of similitude, which is the pivot.
+- **Vesica chain** (`vesica`): equal circles through each other's centres. Lenses stand √3·r
+  tall, and the middle chord is the link.
+- **One-point perspective** (`corridor`): frames shrinking by 1/φ to a vanishing point, which is
+  the pivot. Floor and ceiling lines on a modular step, starting at a frame, not the point.
+- **Golden subdivision** (`frames`): squares cut off a φ rectangle, quarter arcs for the spiral.
+  The eye is exactly where the two diagonals cross.
+- **Readout graph** (`readout`): tagged nodes on a grid, MST plus crossing edges, construction
+  crosses on the grid.
+- **System loop** (`orbits`): places as circles, the request as the accent arc with arrowheads,
+  steps as labelled nodes.
 
-## Scenes
+When lines converge on a point, stop them short of it (as `corridor` does). A fan of 20 lines
+into one pixel reads as a smudge.
 
-`throat` (the hero: two node globes linked through the throat), `constellation` (many globes,
-one hub), `lattice` (a grid network drained by a well), `axon` (axonometric diagram), `globe`
-(a technical plate with an instrument ring and a card), `mark` (icon study).
+## Depth mode (3D)
+
+`engine.mjs` and `prims.mjs` draw wireframe plates with true hidden lines: node globes,
+throats, spacetime sheets. Scenes are in `scenes/*.mjs` (`globe` is the reference plate). Use
+them where depth carries the idea. Dense meshes read best with `hidden: "none"`; sparse ones
+dashed. The checker and the rules above apply unchanged.
