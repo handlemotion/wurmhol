@@ -26,7 +26,12 @@ The upstream guidance below is generic; where it conflicts with `AGENTS.md`, the
   with the GitHub MCP tools (base = the layer below), then link them bottom-first through the
   REST stacks API (at least two PRs, each based on the one below):
   `gh api -X POST repos/{owner}/{repo}/stacks --input - <<<'{"pull_requests":[<bottom>,...,<top>]}'`.
-  `gh api 'repos/{owner}/{repo}/stacks?pull_request=<n>'` reads a PR's stack.
+  `gh api 'repos/{owner}/{repo}/stacks?pull_request=<n>'` reads a PR's stack. To merge from a
+  cloud session, make the REST call `gh stack merge` makes: it merges every PR up to `<top>`,
+  all or nothing, and answers with a `uuid` to poll.
+  `gh api -X PUT repos/{owner}/{repo}/pulls/<top>/merge-async --input - <<<'{"merge_method":"squash","merge_action":"default"}'`,
+  then `gh api repos/{owner}/{repo}/pulls/<top>/merge-async/<uuid>` until `status` is not
+  `pending`.
 - **Merge only when the user (or the coordinating session the user put in charge) asks for that
   PR.** A stack merges through `gh stack merge <target> --yes --squash` (the `main` ruleset
   requires squash merges and the `Checks` status); never enable auto-merge. Stacks merge
