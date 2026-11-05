@@ -10,10 +10,7 @@
 //   wurmhol host                  connect this computer to the wall; open pipes from the browser
 //                                 (--install runs it at login, --uninstall removes that)
 //   wurmhol mcp                   a stdio MCP server with the same tools, for agents
-import { spawn } from "node:child_process";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
-import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
@@ -25,31 +22,19 @@ import {
   sourceField,
 } from "@wurmhol/protocol";
 import pkg from "../package.json" with { type: "json" };
-import skill from "../../../plugins/wurmhol/skills/wurmhol/SKILL.md";
-import {
-  credentialsFile,
-  readCredentials,
-  removeCredentials,
-  writeCredentials,
-} from "./credentials.ts";
+import { consoleUrl, envToken, findToken, savedLogin, server } from "./config.ts";
+import { credentialsFile, removeCredentials, writeCredentials } from "./credentials.ts";
+import { DAEMON_COMMAND, runDaemon, type ShareOptions, startDaemon } from "./daemon.ts";
 import { FixError } from "./errors.ts";
 import { host as runHost } from "./host.ts";
+import { init } from "./init.ts";
 import { login as deviceLogin, redeem } from "./login.ts";
 import { checkService, installService, stableEntry, uninstallService } from "./service.ts";
-import { DEFAULT_CONSOLE, DEFAULT_SERVER, openPipe, type Pipe } from "./pipe.ts";
-import { detectSource } from "./source.ts";
-import { alive, listStates, logFile, removeState, writeState } from "./state.ts";
+import { DEFAULT_CONSOLE, DEFAULT_SERVER } from "./pipe.ts";
+import { alive, listStates, logFile, removeState } from "./state.ts";
 
-/** The line `init` writes, with the repo's dev port (spec section 7). */
-const initLine = (port: number) =>
-  `Share the dev server with \`npx wurmhol ${port}\` (or the port it prints) and send the user the URL; end it with \`npx wurmhol stop ${port}\`.`;
-
-/** Dev servers' default ports, first match wins; anything else is a Worker on 8787. */
-const DEV_PORTS: [name: string, port: number][] = [
-  ["next", 3000],
-  ["astro", 4321],
-  ["vite", 5173],
-];
+/** This file: the daemon and the login service run it again. */
+const entry = fileURLToPath(import.meta.url);
 
 const HELP = `wurmhol ${pkg.version}: a private HTTPS URL for a local dev server
 
@@ -87,11 +72,9 @@ directory it was opened in, and the agent session, when the environment names on
   HTTPS_PROXY     Dial out through this proxy; NODE_EXTRA_CA_CERTS adds its CA
 `;
 
-type ReadyMessage =
-  | { type: "ready"; id: string; url: string; endsAt: string }
-  | { type: "error"; message: string };
-
-function fail(message: string): never {
+/** Exits with one line: a FixError's fix, or what went wrong. */
+function fail(error: unknown): never {
+  const message = error instanceof FixError ? error.message : String(error);
   process.stderr.write(`wurmhol: ${message}\n`);
   process.exit(1);
 }
@@ -100,28 +83,6 @@ function parsePort(value: string | undefined) {
   const port = Number(value);
   if (!value || !/^\d+$/.test(value) || port < 1 || port > 65535) return null;
   return port;
-}
-
-/** Where people make tokens: the console, or a self-hosted install's own origin. */
-function consoleUrl() {
-  return process.env.WURMHOL_URL ? server() : DEFAULT_CONSOLE;
-}
-
-function server() {
-  const url = process.env.WURMHOL_URL || DEFAULT_SERVER;
-  try {
-    return new URL(url).origin;
-  } catch {
-    fail(`WURMHOL_URL is not a URL: ${url}`);
-  }
-}
-
-/** WURMHOL_TOKEN when set, else the token `wurmhol login` stored for this server, else null. */
-function findToken() {
-  const value = process.env.WURMHOL_TOKEN?.trim();
-  if (value) return value;
-  const stored = readCredentials();
-  return stored && stored.server === server() ? stored.token : null;
 }
 
 function token() {
@@ -152,11 +113,11 @@ async function login() {
         process.stdout.write(`Open ${code.verification_uri} and enter ${code.user_code}\n`),
     });
     saveLogin(granted);
-    if (process.env.WURMHOL_TOKEN?.trim()) {
+    if (envToken()) {
       process.stdout.write("WURMHOL_TOKEN is set and wins over the saved token.\n");
     }
   } catch (error) {
-    fail(error instanceof FixError ? error.message : String(error));
+    fail(error);
   }
 }
 
@@ -165,64 +126,12 @@ function logout() {
   process.stdout.write(removed ? `Deleted ${credentialsFile()}\n` : "Not logged in.\n");
 }
 
-/** Starts the detached daemon and waits for it to report the URL (or the reason it could not). */
-async function startDaemon(
-  port: number,
-  options: {
-    ttl?: number;
-    only?: string;
-    name?: string;
-    link?: string;
-    note?: string;
-    cwd?: string;
-  } = {},
-): Promise<ReadyMessage> {
-  const entry = fileURLToPath(import.meta.url);
-  const args = [
-    entry,
-    "__daemon",
-    String(port),
-    ...(options.ttl === undefined ? [] : [String(options.ttl)]),
-    ...(options.only ? ["--only", options.only] : []),
-    ...(options.name ? ["--name", options.name] : []),
-    ...(options.link ? ["--link", options.link] : []),
-    ...(options.note ? ["--note", options.note] : []),
-  ];
-  const child = spawn(process.execPath, args, {
-    detached: true,
-    stdio: ["ignore", "ignore", "ignore", "ipc"],
-    env: process.env,
-    cwd: options.cwd,
-  });
-  const message = await new Promise<ReadyMessage>((resolve) => {
-    child.once("message", (m) => resolve(m as ReadyMessage));
-    child.once("exit", (code) =>
-      resolve({
-        type: "error",
-        message: `the pipe process exited (${code}); see ${logFile("daemon")}`,
-      }),
-    );
-  });
-  child.removeAllListeners("exit");
-  if (message.type === "ready") {
-    child.disconnect();
-    child.unref();
-  }
-  return message;
-}
-
-async function share(
-  port: number,
-  ttl: number | undefined,
-  json: boolean,
-  only: string | undefined,
-  name: string | undefined,
-  extra: { link?: string; note?: string },
-) {
+async function share(options: ShareOptions, json: boolean) {
   token();
-  const message = await startDaemon(port, { ttl, only, name, ...extra });
+  const message = await startDaemon(entry, options);
   if (message.type === "error") fail(message.message);
   const { url, id, endsAt } = message;
+  const { port } = options;
   const out = json ? JSON.stringify({ url, port, id, endsAt }) : url;
   process.stdout.write(`${out}\n`);
 }
@@ -247,7 +156,7 @@ async function serveHost(code: string | undefined) {
       saveLogin(redeemed);
       granted = redeemed.token;
     } catch (error) {
-      fail(error instanceof FixError ? error.message : String(error));
+      fail(error);
     }
   } else if (!findToken()) {
     await login();
@@ -263,13 +172,13 @@ async function serveHost(code: string | undefined) {
       open: async (port) => {
         const open = listStates().find((s) => s.port === port);
         if (open) return open.url;
-        const message = await startDaemon(port, { cwd: homedir() });
+        const message = await startDaemon(entry, { port }, homedir());
         if (message.type === "error") throw new FixError(message.message);
         return message.url;
       },
     });
   } catch (error) {
-    fail(error instanceof FixError ? error.message : String(error));
+    fail(error);
   }
 }
 
@@ -279,22 +188,21 @@ async function serveHost(code: string | undefined) {
  */
 async function installHost() {
   try {
-    const entry = stableEntry(fileURLToPath(import.meta.url));
+    const stable = stableEntry(entry);
     checkService();
-    const stored = readCredentials();
-    if (!stored || stored.server !== server()) await login();
+    if (!savedLogin()) await login();
     const env: Record<string, string> = {};
     for (const name of ["WURMHOL_HOME", "WURMHOL_URL"] as const) {
       const value = process.env[name];
       if (value) env[name] = value;
     }
     const log = logFile("host");
-    const file = installService({ node: process.execPath, entry, env, log });
+    const file = installService({ node: process.execPath, entry: stable, env, log });
     process.stdout.write(
       `Installed ${file}: wurmhol host is running and starts at login. Logs: ${log}\n`,
     );
   } catch (error) {
-    fail(error instanceof FixError ? error.message : String(error));
+    fail(error);
   }
 }
 
@@ -303,62 +211,8 @@ function uninstallHost() {
     const file = uninstallService();
     process.stdout.write(file ? `Removed ${file}\n` : "wurmhol host is not installed.\n");
   } catch (error) {
-    fail(error instanceof FixError ? error.message : String(error));
+    fail(error);
   }
-}
-
-/** The daemon: holds the share's pipe until it ends. Reports readiness over IPC. */
-async function daemon(
-  port: number,
-  ttl: number | undefined,
-  only: string | undefined,
-  name: string | undefined,
-  extra: { link?: string; note?: string },
-) {
-  const report = (message: ReadyMessage) => process.send?.(message);
-  const log = (shareId: string | null, event: string, fields: Record<string, unknown>) => {
-    try {
-      appendFileSync(
-        logFile(shareId ?? `port-${port}`),
-        `${JSON.stringify({ time: new Date().toISOString(), event, port, ...fields })}\n`,
-      );
-    } catch {
-      // Logging must never take the share down.
-    }
-  };
-  let pipe: Pipe;
-  try {
-    const viewers = only
-      ?.split(",")
-      .map((email) => email.trim())
-      .filter(Boolean);
-    const source = { ...(await detectSource(process.cwd(), process.env)), ...extra };
-    pipe = await openPipe(
-      { server: server(), token: token(), port, ttl, viewers, name, source },
-      { log },
-    );
-  } catch (error) {
-    report({ type: "error", message: error instanceof FixError ? error.message : String(error) });
-    process.exit(1);
-  }
-  pipe.once("close", () => {
-    removeState(pipe.id);
-    process.exit(0);
-  });
-  writeState({
-    id: pipe.id,
-    url: pipe.url,
-    port,
-    pid: process.pid,
-    startedAt: new Date().toISOString(),
-    endsAt: pipe.endsAt.toISOString(),
-  });
-  const stop = () => void pipe.close();
-  process.on("SIGTERM", stop);
-  process.on("SIGINT", stop);
-  process.on("SIGHUP", () => {}); // The terminal that started it may close.
-  report({ type: "ready", id: pipe.id, url: pipe.url, endsAt: pipe.endsAt.toISOString() });
-  process.disconnect?.();
 }
 
 function ls(json: boolean) {
@@ -411,79 +265,6 @@ async function stop(target: string | undefined, all: boolean) {
   }
   for (const s of chosen) removeState(s.id);
   for (const s of chosen) process.stdout.write(`stopped ${s.url}\n`);
-}
-
-/** A file's text, or null when it does not exist. */
-function readIfExists(path: string): string | null {
-  try {
-    return readFileSync(path, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-}
-
-/** The dev server's port, from package.json's dependencies and scripts. */
-function devPort(cwd: string): number {
-  let manifest: { dependencies?: object; devDependencies?: object; scripts?: object } = {};
-  try {
-    manifest = JSON.parse(readIfExists(join(cwd, "package.json")) ?? "{}");
-  } catch {
-    // Not JSON: no hints.
-  }
-  const deps = new Set([
-    ...Object.keys(manifest.dependencies ?? {}),
-    ...Object.keys(manifest.devDependencies ?? {}),
-  ]);
-  const scripts = Object.values(manifest.scripts ?? {}).join("\n");
-  for (const [name, port] of DEV_PORTS) {
-    if (deps.has(name) || new RegExp(`(^|[\\s;&|(])${name}(\\s|$)`, "m").test(scripts)) return port;
-  }
-  return 8787;
-}
-
-function init(writeSkill: boolean) {
-  const cwd = process.cwd();
-  const port = devPort(cwd);
-  // Read instead of checking existence first, then append: no window where the file can change
-  // between a check and the write.
-  let target = join(cwd, "AGENTS.md");
-  let current = "";
-  for (const name of ["AGENTS.md", "CLAUDE.md"]) {
-    const text = readIfExists(join(cwd, name));
-    if (text === null) continue;
-    target = join(cwd, name);
-    current = text;
-    break;
-  }
-  const say = (line: string) => process.stdout.write(`${line}\n`);
-  if (current.includes("npx wurmhol")) {
-    say(`${relative(cwd, target)} already mentions wurmhol`);
-  } else {
-    const separator = current && !current.endsWith("\n") ? "\n\n" : current ? "\n" : "";
-    appendFileSync(target, `${separator}${initLine(port)}\n`);
-    say(`Added a line to ${relative(cwd, target)} (port ${port}, from package.json)`);
-  }
-  if (writeSkill) {
-    const dir = join(cwd, ".claude/skills/wurmhol");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "SKILL.md"), skill);
-    say(`Wrote ${relative(cwd, join(dir, "SKILL.md"))}`);
-  }
-  const stored = readCredentials();
-  if (process.env.WURMHOL_TOKEN?.trim()) {
-    say("WURMHOL_TOKEN is set.");
-  } else if (stored && stored.server === server()) {
-    say(`Logged in: wurmhol uses the token in ${credentialsFile()}.`);
-  } else {
-    const host = new URL(server()).hostname;
-    say(
-      `No token. On this computer, run wurmhol login. Where the agent runs, set WURMHOL_TOKEN to a token from ${consoleUrl()} (menu → Tokens).`,
-    );
-    say(
-      `In a Claude Code cloud environment: WURMHOL_TOKEN under Environment variables, ${host} under Allowed domains.`,
-    );
-  }
 }
 
 const SEE_FLAGS = "Run `npx wurmhol@latest --help` to see the flags.";
@@ -544,12 +325,8 @@ async function main() {
   const [command, argument] = positionals;
   if (values.version) return void process.stdout.write(`${pkg.version}\n`);
   if (values.help || !command) return void process.stdout.write(HELP);
-  if (command === "__daemon") {
-    const ttl = positionals[2] === undefined ? undefined : Number(positionals[2]);
-    return daemon(parsePort(argument) ?? fail("bad port"), ttl, values.only, values.name, {
-      link: values.link,
-      note: values.note,
-    });
+  if (command === DAEMON_COMMAND) {
+    return runDaemon(argument ?? fail("no share options"), { server: server(), token: token() });
   }
   if (command === "ls") return ls(values.json);
   if (command === "stop") return stop(argument, values.all);
@@ -575,10 +352,14 @@ async function main() {
     const value = values[field];
     if (value !== undefined && sourceField(field, value) === null) fail(SOURCE_FIXES[field]);
   }
-  return share(port, ttl, values.json, values.only, values.name, {
-    link: values.link,
-    note: values.note,
-  });
+  const { only, name, link, note } = values;
+  return share({ port, ttl, only, name, link, note }, values.json);
 }
 
-await main();
+try {
+  await main();
+} catch (error) {
+  // Config read deep inside a command (WURMHOL_URL) throws its fix; anything else is a bug.
+  if (error instanceof FixError) fail(error);
+  throw error;
+}

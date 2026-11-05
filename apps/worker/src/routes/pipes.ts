@@ -6,6 +6,8 @@ import { createMiddleware } from "hono/factory";
 import { type BearerToken, bearerToken, refuse } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
 import { SHARE_ID } from "../env.ts";
+import { orgStub } from "../org-do.ts";
+import { shareStub } from "../share-do.ts";
 
 type PipesEnv = AppEnv & { Variables: { token: BearerToken } };
 
@@ -27,8 +29,7 @@ const requireOrgToken = createMiddleware<PipesEnv>(async (c, next) => {
 export const pipes = new Hono<PipesEnv>()
   .use(requireOrgToken)
   .get("/", async (c) => {
-    const org = c.env.ORG.get(c.env.ORG.idFromName(c.var.token.orgId));
-    return c.json({ pipes: await org.list() });
+    return c.json({ pipes: await orgStub(c.env, c.var.token.orgId).list() });
   })
   /** Terminate, as from the wall. Another org's pipe does not exist here. */
   .delete("/:id", async (c) => {
@@ -37,7 +38,7 @@ export const pipes = new Hono<PipesEnv>()
     if (!share || share.orgId !== c.var.token.orgId) {
       return refuse(404, "pipe not found", "List the org's open pipes with GET /v1/pipes.");
     }
-    await c.env.SHARE.get(c.env.SHARE.idFromName(share.id)).terminate("terminated");
+    await shareStub(c.env, share.id).terminate("terminated");
     c.var.log.info("share.terminated", { shareId: share.id, orgId: share.orgId });
     return c.json({ ok: true });
   });

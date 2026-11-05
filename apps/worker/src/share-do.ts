@@ -23,22 +23,25 @@ import {
 } from "@wurmhol/db";
 import {
   chunk,
+  CLOSE_CODES,
   decodeFrame,
   encodeFrame,
-  type Frame,
+  type EndReason,
   forwardable,
+  type Frame,
   type HeaderList,
   HttpStreamOrder,
-  type PipeSource,
   PING_TEXT,
+  type PipeSource,
   PONG_TEXT,
   ProtocolError,
-  RECONNECT_GRACE_MS,
   ReceiveWindow,
+  RECONNECT_GRACE_MS,
   type RequestHead,
   type ResponseHead,
   SendWindow,
   SHARE_COOKIE,
+  SHARE_HEADERS,
   withoutCookie,
   type WsClosePayload,
   type WsOpenPayload,
@@ -46,6 +49,8 @@ import {
 import { loadConfig } from "./env.ts";
 import { type Preview, postPreview, retirePreview } from "./github.ts";
 import { createLogger } from "./log.ts";
+import { orgStub } from "./org-do.ts";
+import { extractFaviconPath, extractTitle, readStart } from "./html-head.ts";
 import { errorPage } from "./pages.ts";
 
 /** What the Worker tells a new share's object when its CLI first connects. */
@@ -90,33 +95,46 @@ interface Tombstone {
   endReason: EndReason;
 }
 
-export type EndReason =
-  | "stopped"
-  | "terminated"
-  | "expired"
-  | "revoked"
-  | "limit"
-  | "disconnected"
-  | "no_subscription";
-
-/** Close codes the CLI reads to tell why its share ended (and not to reconnect). */
-export const CLOSE_CODES: Record<EndReason, number> = {
-  stopped: 1000,
-  terminated: 4001,
-  expired: 4002,
-  revoked: 4003,
-  limit: 4004,
-  disconnected: 4005,
-  no_subscription: 4006,
-};
 /** An older socket of the same CLI, replaced by its reconnect. */
 const REPLACED = 4000;
 
-/** Headers the Worker uses to talk to this object; never forwarded, never trusted from viewers. */
-export const INTERNAL_HEADERS = {
+/** Headers the Worker uses to talk to this object; never forwarded, never trusted from clients. */
+const INTERNAL_HEADERS = {
+  /** To the object: a new share's `ShareInit`, as JSON. */
   init: "x-wurmhol-init",
+  /** To the object: the signed-in viewer's user id. */
   viewer: "x-wurmhol-viewer",
+  /** From the object: the viewer may no longer open the share. */
+  refused: "x-wurmhol-refused",
 } as const;
+
+/** The share's Durable Object: one per share, named by its id. */
+export function shareStub(env: Env, shareId: string) {
+  return env.SHARE.get(env.SHARE.idFromName(shareId));
+}
+
+/**
+ * A client's request rebuilt for the object: our own headers are never taken from the client,
+ * only the one set here. With `url`, a bodiless GET to that URL (the CLI's `/connect`).
+ */
+export function toShare(
+  raw: Request,
+  internal: { init: ShareInit } | { viewer: string } | null,
+  url?: URL,
+): Request {
+  const headers = new Headers(raw.headers);
+  for (const name of Object.values(INTERNAL_HEADERS)) headers.delete(name);
+  if (internal && "init" in internal) {
+    headers.set(INTERNAL_HEADERS.init, JSON.stringify(internal.init));
+  }
+  if (internal && "viewer" in internal) headers.set(INTERNAL_HEADERS.viewer, internal.viewer);
+  return url ? new Request(url, { headers }) : new Request(raw, { headers });
+}
+
+/** Whether the object refused the viewer (removed from the org, or not on the share's list). */
+export function refusedViewer(response: Response) {
+  return response.headers.has(INTERNAL_HEADERS.refused);
+}
 
 /** Headers that carry the viewer's IP address. */
 const CLIENT_IP = new Set(["x-forwarded-for", "x-real-ip", "true-client-ip"]);
@@ -187,41 +205,6 @@ interface WsStream {
 
 const textDecoder = new TextDecoder();
 
-const TITLE_ENTITIES: Record<string, string> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  "#39": "'",
-};
-
-/** The `<title>` of an HTML document's start, decoded, or null. */
-export function extractTitle(html: string): string | null {
-  const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
-  if (!match) return null;
-  // One pass, so `&amp;lt;` decodes to `&lt;`, not `<`.
-  const title = match[1]!
-    .replace(
-      /&(amp|lt|gt|quot|#39);/g,
-      (whole: string, entity: string) => TITLE_ENTITIES[entity] ?? whole,
-    )
-    .replace(/\s+/g, " ")
-    .trim();
-  return title ? title.slice(0, 200) : null;
-}
-
-/** The favicon an HTML document's start links to, as a path on the share, or null. */
-export function extractFaviconPath(html: string): string | null {
-  for (const match of html.matchAll(/<link\b[^>]*>/gi)) {
-    const tag = match[0];
-    if (!/\brel\s*=\s*["']?[^"'>]*\bicon\b/i.test(tag)) continue;
-    const href = /\bhref\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1];
-    // Same-origin paths only: the relay fetches it through the CLI.
-    if (href && href.startsWith("/") && !href.startsWith("//")) return href.slice(0, 500);
-  }
-  return null;
-}
-
 export class Share extends DurableObject<Env> {
   #streams = new Map<number, HttpStream | WsStream>();
   #members = new Map<string, number>();
@@ -257,7 +240,7 @@ export class Share extends DurableObject<Env> {
   }
 
   #org(orgId: string) {
-    return this.env.ORG.get(this.env.ORG.idFromName(orgId));
+    return orgStub(this.env, orgId);
   }
 
   #cli(): WebSocket | null {
@@ -422,11 +405,9 @@ export class Share extends DurableObject<Env> {
       status: 101,
       webSocket: client,
       headers: {
-        "x-wurmhol-share-id": meta.id,
-        "x-wurmhol-share-url": meta.url,
-        "x-wurmhol-share-ends-at": new Date(
-          meta.startedAt + meta.limits.seconds * 1000,
-        ).toISOString(),
+        [SHARE_HEADERS.id]: meta.id,
+        [SHARE_HEADERS.url]: meta.url,
+        [SHARE_HEADERS.endsAt]: new Date(meta.startedAt + meta.limits.seconds * 1000).toISOString(),
       },
     });
   }
@@ -437,7 +418,10 @@ export class Share extends DurableObject<Env> {
     if (!meta) return errorPage(410, "This pipe has ended.");
     const viewer = request.headers.get(INTERNAL_HEADERS.viewer);
     if (!viewer || !this.mayView(viewer) || !(await this.#isMember(viewer, meta.orgId))) {
-      return new Response("not a member", { status: 403, headers: { "x-wurmhol-refused": "1" } });
+      return new Response("not a member", {
+        status: 403,
+        headers: { [INTERNAL_HEADERS.refused]: "1" },
+      });
     }
     if (!this.#cli() && !(await this.#waitForCli())) {
       return errorPage(503, "The pipe's CLI is reconnecting. This page retries on its own.", {
@@ -560,9 +544,7 @@ export class Share extends DurableObject<Env> {
       if (lower === "accept-encoding") continue;
       headers.push([name, value]);
     }
-    const shareUrl = new URL(meta.url);
-    headers.push(["x-forwarded-host", shareUrl.host]);
-    headers.push(["x-forwarded-proto", shareUrl.protocol.replace(":", "")]);
+    headers.push(...forwardedHeaders(meta));
     return { method: request.method, path: `${url.pathname}${url.search}`, headers };
   }
 
@@ -700,12 +682,8 @@ export class Share extends DurableObject<Env> {
         {
           method: "GET",
           path: "/",
-          headers: [
-            ["accept", "text/html"],
-            // As on a viewer's request, for apps that build absolute URLs.
-            ["x-forwarded-host", new URL(meta.url).host],
-            ["x-forwarded-proto", new URL(meta.url).protocol.replace(":", "")],
-          ],
+          // As on a viewer's request, for apps that build absolute URLs.
+          headers: [["accept", "text/html"], ...forwardedHeaders(meta)],
         },
         null,
         meta,
@@ -1112,22 +1090,13 @@ export class Share extends DurableObject<Env> {
   }
 }
 
-/** The first `limit` bytes of a body as text; the rest is never read. */
-async function readStart(body: ReadableStream<Uint8Array>, limit: number) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let text = "";
-  try {
-    while (text.length < limit) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      text += decoder.decode(value, { stream: true });
-      if (/<\/head>/i.test(text)) break;
-    }
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
-  return text.slice(0, limit);
+/** The share's public host and scheme, as a proxy in front of the dev server would pass them. */
+function forwardedHeaders(meta: Meta): HeaderList {
+  const url = new URL(meta.url);
+  return [
+    ["x-forwarded-host", url.host],
+    ["x-forwarded-proto", url.protocol.replace(":", "")],
+  ];
 }
 
 /** A close code a server may send: 1005, 1006 and 1015 are reserved for the runtime. */

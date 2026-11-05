@@ -5,8 +5,7 @@
 // signed-in member (ADR 0020), redeemed once on the same token endpoint.
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { HttpsProxyAgent } from "https-proxy-agent";
-import { getProxyForUrl } from "proxy-from-env";
+import { proxyFor, userAgent } from "./dial.ts";
 import { explainConnectError, explainRefusal, FixError } from "./errors.ts";
 
 interface Answer {
@@ -18,7 +17,7 @@ interface Answer {
 /** POSTs JSON to `path` on `server`, through the environment's proxy. */
 function postJson(server: string, path: string, body: unknown, version: string): Promise<Answer> {
   const url = new URL(path, server);
-  const proxy = getProxyForUrl(url.toString());
+  const { proxy, agent } = proxyFor(url);
   const send = url.protocol === "http:" ? httpRequest : httpsRequest;
   const payload = JSON.stringify(body);
   return new Promise((resolve, reject) => {
@@ -29,9 +28,9 @@ function postJson(server: string, path: string, body: unknown, version: string):
         headers: {
           "content-type": "application/json",
           "content-length": Buffer.byteLength(payload),
-          "user-agent": `wurmhol/${version} node/${process.versions.node}`,
+          "user-agent": userAgent(version),
         },
-        agent: proxy ? new HttpsProxyAgent(proxy) : undefined,
+        agent,
         timeout: 15_000,
       },
       (res) => {

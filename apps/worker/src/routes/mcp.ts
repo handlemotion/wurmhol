@@ -13,8 +13,9 @@ import { createMcpHandler, McpServer, requireScopes } from "@modelcontextprotoco
 import { z } from "zod";
 import type { AppEnv } from "../context.ts";
 import { SHARE_ID } from "../env.ts";
-import type { ShareCard } from "../org-do.ts";
+import { orgStub, type ShareCard } from "../org-do.ts";
 import { checkRateLimit } from "../rate-limiter.ts";
+import { shareStub } from "../share-do.ts";
 
 type Vars = AppEnv["Variables"];
 
@@ -135,7 +136,7 @@ function pipeOf(card: ShareCard, org: Reach) {
 /** The tools, for one request and one caller. */
 function buildServer(env: Env, vars: Vars, caller: Caller, waitSeconds: number) {
   const server = new McpServer({ name: "wurmhol", version: "1.0.0" });
-  const cards = (orgId: string) => env.ORG.get(env.ORG.idFromName(orgId)).list();
+  const cards = (orgId: string) => orgStub(env, orgId).list();
   const tooMany = () => toolError(`Too many requests. Wait ${waitSeconds} s and try again.`);
   const inReach = (orgId: string) => caller.orgs.find((o) => o.id === orgId);
   const read = requireScopes("pipes:read");
@@ -226,7 +227,7 @@ function buildServer(env: Env, vars: Vars, caller: Caller, waitSeconds: number) 
       if (waitSeconds) return tooMany();
       const found = await findPipe(pipe);
       if (!found) return notFound(pipe);
-      await env.SHARE.get(env.SHARE.idFromName(found.card.id)).terminate("terminated");
+      await shareStub(env, found.card.id).terminate("terminated");
       vars.log.info("share.terminated", {
         shareId: found.card.id,
         orgId: found.org.id,

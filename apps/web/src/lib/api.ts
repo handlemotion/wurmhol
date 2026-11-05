@@ -1,4 +1,5 @@
 // The Worker's API (apps/worker/src/routes/api.ts), as the web app reads it.
+import type { PipeSource } from "@wurmhol/protocol";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -22,6 +23,16 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
     throw new ApiError(response.status, message);
   }
   return body as T;
+}
+
+/** The Worker answered 401: no one is signed in. */
+export function isSignedOut(error: unknown) {
+  return error instanceof ApiError && error.status === 401;
+}
+
+/** Sends the browser to sign in, and back to this page after. */
+export function toLogin() {
+  location.assign(`/login?next=${encodeURIComponent(location.pathname + location.search)}`);
 }
 
 export interface Me {
@@ -50,18 +61,6 @@ export interface Share {
   preview: { pullRequest: number; url: string } | null;
 }
 
-/** `@wurmhol/protocol`'s `PipeSource`: what the CLI said about where the pipe came from. */
-export interface PipeSource {
-  repoHost: string | null;
-  repo: string | null;
-  branch: string | null;
-  commit: string | null;
-  link: string | null;
-  note: string | null;
-  agent: string | null;
-  agentUrl: string | null;
-}
-
 export type WallEvent =
   | { type: "snapshot"; shares: Share[] }
   | { type: "share.started"; share: Share }
@@ -76,6 +75,9 @@ export interface Machine {
   ports: { port: number; title: string | null }[];
   connectedAt: number;
 }
+
+/** What `/api/machines/live` sends (apps/worker/src/org-do.ts `MachinesEvent`). */
+export type MachinesEvent = { type: "machines"; machines: Machine[] };
 
 export type TokenScope = "pipes" | "org";
 /** Days until a new token expires; null never. */

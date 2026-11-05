@@ -68,12 +68,35 @@ interface MachineAttachment extends Machine {
 }
 
 /** The headers `/host` and `/api/machines/live` hand the Org object; never a client's own. */
-export const ORG_SOCKET_HEADERS = {
+const ORG_SOCKET_HEADERS = {
   kind: "x-wurmhol-org-socket",
   userId: "x-wurmhol-org-user",
   tokenId: "x-wurmhol-org-token",
   name: "x-wurmhol-org-machine-name",
 } as const;
+
+/** Which socket a route opens on the Org object: a wall, an owner's Create pipe card, a machine. */
+export type OrgSocket =
+  | { kind: "wall" }
+  | { kind: "watch"; userId: string }
+  | { kind: "machine"; userId: string; tokenId: string; name: string };
+
+/** The org's Durable Object: one per org, named by its id. */
+export function orgStub(env: Env, orgId: string) {
+  return env.ORG.get(env.ORG.idFromName(orgId));
+}
+
+/** The upgrade request to forward to the Org object, carrying only the socket fields set here. */
+export function toOrg(raw: Request, socket: OrgSocket): Request {
+  const headers = new Headers(raw.headers);
+  for (const name of Object.values(ORG_SOCKET_HEADERS)) headers.delete(name);
+  if (socket.kind !== "wall") {
+    for (const [key, value] of Object.entries(socket)) {
+      headers.set(ORG_SOCKET_HEADERS[key as keyof typeof ORG_SOCKET_HEADERS], value);
+    }
+  }
+  return new Request(raw, { headers });
+}
 
 export type OpenPortResult =
   | { ok: true; url: string }

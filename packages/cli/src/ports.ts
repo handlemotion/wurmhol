@@ -134,16 +134,12 @@ async function probe(port: number): Promise<LocalPort | null> {
 
 /**
  * Ports never to offer: those in WURMHOL_HOST_IGNORE (`9229,5555`), and the CLI's own server's
- * when WURMHOL_URL is a local one, since a pipe to it would loop back through itself.
+ * when it is a local one, since a pipe to it would loop back through itself.
  */
-function ignored() {
+function ignored(server: string) {
   const ports = (process.env.WURMHOL_HOST_IGNORE ?? "").split(/[\s,]+/).map(Number);
-  try {
-    const own = new URL(process.env.WURMHOL_URL ?? "");
-    if (["localhost", "127.0.0.1", "[::1]"].includes(own.hostname)) ports.push(Number(own.port));
-  } catch {
-    // Unset or not a URL: the CLI's own check reports that.
-  }
+  const own = new URL(server);
+  if (["localhost", "127.0.0.1", "[::1]"].includes(own.hostname)) ports.push(Number(own.port));
   return ports.filter((port) => Number.isInteger(port) && port > 0);
 }
 
@@ -155,9 +151,9 @@ export class PortScanner {
   #known = new Map<number, { answer: LocalPort | null; at: number }>();
   readonly #skip: Set<number>;
 
-  /** `skip`: ports never to offer, besides those `ignored` names. */
-  constructor(skip: Iterable<number> = []) {
-    this.#skip = new Set([...skip, ...ignored()]);
+  /** `server`: the origin the CLI dials, never offered when it is on this computer. */
+  constructor(server: string) {
+    this.#skip = new Set(ignored(server));
   }
 
   async scan(): Promise<LocalPort[]> {

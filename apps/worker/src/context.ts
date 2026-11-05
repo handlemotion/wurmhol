@@ -159,3 +159,21 @@ export const requireOwner = createMiddleware<AppEnv>(async (c, next) => {
   }
   await next();
 });
+
+/**
+ * A browser WebSocket authenticated by the session cookie. Browsers send cookies on cross-site
+ * handshakes, so only our own origins may open one (cross-site WebSocket hijacking). A handshake
+ * with no Origin is not a browser.
+ */
+export const ownOriginSocket = createMiddleware<AppEnv>(async (c, next) => {
+  if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
+    return c.json({ error: "expected a websocket upgrade" }, 426);
+  }
+  const origin = c.req.header("origin");
+  const { baseURL, trustedOrigins } = c.var.config.auth;
+  const allowed = new Set([new URL(baseURL).origin, ...trustedOrigins]);
+  if (origin !== undefined && !allowed.has(origin)) {
+    return c.json({ error: "origin not allowed" }, 403);
+  }
+  await next();
+});

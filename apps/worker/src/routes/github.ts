@@ -18,6 +18,7 @@ import type { AppEnv } from "../context.ts";
 import { requireMember, requireOwner } from "../context.ts";
 import type { GithubConfig } from "../env.ts";
 import { github, readState, signState, verifyWebhook } from "../github.ts";
+import { shareStub } from "../share-do.ts";
 
 function githubConfig(c: { var: AppEnv["Variables"] }): GithubConfig {
   const config = c.var.config.github;
@@ -61,7 +62,7 @@ export const githubRoutes = new Hono<AppEnv>()
         branch: head.ref,
       });
       for (const pipe of pipes) {
-        c.executionCtx.waitUntil(c.env.SHARE.get(c.env.SHARE.idFromName(pipe.id)).preview());
+        c.executionCtx.waitUntil(shareStub(c.env, pipe.id).preview());
       }
       c.var.log.info("github.pull_request", { pipes: pipes.length });
     }

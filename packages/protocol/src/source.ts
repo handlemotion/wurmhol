@@ -96,7 +96,7 @@ export const SOURCE_FIXES: Record<keyof PipeSource, string> = {
   commit: "The commit is not a hex hash.",
   link: `Pass an http or https URL of at most ${SOURCE_LIMITS.link} characters to --link.`,
   note: `Pass one line of at most ${SOURCE_LIMITS.note} characters to --note.`,
-  agent: "The agent's name is not one line of at most 40 characters.",
+  agent: `The agent's name is not one line of at most ${SOURCE_LIMITS.agent} characters.`,
   agentUrl: "The agent's session URL is not an http or https URL.",
 };
 

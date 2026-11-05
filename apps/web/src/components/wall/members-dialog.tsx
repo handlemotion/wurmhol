@@ -44,6 +44,7 @@ export function MembersDialog({
   const setRole = useSetRole();
   const [handOver, setHandOver] = useState<Member | null>(null);
   const owner = me.role === "owner";
+  const failure = setRole.error ?? remove.error;
 
   return (
     <Dialog
@@ -154,11 +155,7 @@ export function MembersDialog({
             </ul>
           )}
         </Skeleton>
-        {(setRole.error ?? remove.error) && (
-          <Text className="text-danger-subtle-foreground">
-            {(setRole.error ?? remove.error)!.message}
-          </Text>
-        )}
+        {failure && <Text className="text-danger-subtle-foreground">{failure.message}</Text>}
       </DialogBody>
       <TransferDialog member={handOver} onClose={() => setHandOver(null)} />
     </Dialog>
