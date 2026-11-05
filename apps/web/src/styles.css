@@ -35,7 +35,6 @@
   --well-hover: #e8e8e8;
   --hairline-line: #d9d9d9;
   --shadow-raised: 0 1px 2px 0 rgb(var(--shadow-ink) / 0.06);
-  --shadow-button: inset 0 1px 0 rgb(255 255 255 / 0.15);
   --shadow-overlay:
     0 1px 2px -1px rgb(var(--shadow-ink) / 0.04), 0 6px 10px -6px rgb(var(--shadow-ink) / 0.07);
 
@@ -91,7 +90,6 @@
     --well: #1c1c1c;
     --well-hover: #242424;
     --hairline-line: #333333;
-    --shadow-button: inset 0 1px 0 rgb(255 255 255 / 0.08);
     --secondary: #222222;
     --muted: #333333;
     --danger-subtle-foreground: oklch(0.75 0.16 25);
@@ -171,6 +169,18 @@
 /* The strong ease-out for anything the user causes, defined once (tactile-design). */
 @theme {
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  /* The login wormhole's fall: one ring moves into its inner neighbour's place per cycle. */
+  --animate-wormhole: wormhole 6s linear infinite;
+}
+
+/* Scales by the wormhole's ring ratio (`RATIO` in components/auth/wormhole.tsx). */
+@keyframes wormhole {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(0.72);
+  }
 }
 
 /* A toast's countdown bar empties over its duration. */
