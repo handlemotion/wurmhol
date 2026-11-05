@@ -11,7 +11,7 @@ import {
   type TokenExpiry,
   type TokenScope,
 } from "@/lib/api";
-import { earlyShares, takeWall } from "@/lib/live";
+import { connectMachines, earlyShares, takeWall } from "@/lib/live";
 import { meQuery } from "@/lib/me";
 
 export const keys = {
@@ -85,27 +85,7 @@ export function useMachines(enabled: boolean) {
   const [machines, setMachines] = useState<Machine[] | undefined>(undefined);
   useEffect(() => {
     if (!enabled) return;
-    let socket: WebSocket | null = null;
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const connect = () => {
-      const url = new URL("/api/machines/live", location.href);
-      url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
-      socket = new WebSocket(url);
-      socket.onmessage = (message) => {
-        const event = JSON.parse(String(message.data)) as { type: string; machines: Machine[] };
-        if (event.type === "machines") setMachines(event.machines);
-      };
-      socket.onclose = () => {
-        if (!stopped) timer = setTimeout(connect, 2000);
-      };
-    };
-    connect();
-    return () => {
-      stopped = true;
-      clearTimeout(timer);
-      socket?.close();
-    };
+    return connectMachines(setMachines);
   }, [enabled]);
   return machines;
 }

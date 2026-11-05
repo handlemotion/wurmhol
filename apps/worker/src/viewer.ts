@@ -3,7 +3,7 @@
 // in (`/open`), and comes back with a one-time code that this swaps for the cookie. The cookie
 // is stripped before anything reaches the dev server.
 import { readCookie, sameOriginPath, SHARE_COOKIE } from "@wurmhol/protocol";
-import { loadConfig, shareOrigin } from "./env.ts";
+import { loadConfig } from "./env.ts";
 import { createLogger } from "./log.ts";
 import { noteOAuthRedirect } from "./oauth-relay.ts";
 import { errorPage } from "./pages.ts";
@@ -14,7 +14,7 @@ import {
   signShareCookie,
   verifyShareCookie,
 } from "./share-cookie.ts";
-import { INTERNAL_HEADERS } from "./share-do.ts";
+import { refusedViewer, shareStub, toShare } from "./share-do.ts";
 
 /** Paths on a share host the relay keeps for itself. */
 export const RESERVED_PREFIX = "/__wurmhol/";
@@ -29,7 +29,7 @@ function isNavigation(request: Request) {
 export async function handleShareHost(request: Request, env: Env, shareId: string) {
   const config = loadConfig(env);
   if (!shareId) return errorPage(404, "This pipe has ended.");
-  const stub = env.SHARE.get(env.SHARE.idFromName(shareId));
+  const stub = shareStub(env, shareId);
   const status = await stub.status();
   if (status.state === "unknown" || status.state === "ended") {
     return errorPage(410, "This pipe has ended.");
@@ -64,12 +64,8 @@ export async function handleShareHost(request: Request, env: Env, shareId: strin
   );
   if (!userId) return signIn(request, config.auth.baseURL, shareId);
 
-  // Our own headers are never taken from the viewer: rebuild them.
-  const headers = new Headers(request.headers);
-  for (const name of Object.values(INTERNAL_HEADERS)) headers.delete(name);
-  headers.set(INTERNAL_HEADERS.viewer, userId);
-  const response = await stub.fetch(new Request(request, { headers }));
-  if (response.headers.get("x-wurmhol-refused")) {
+  const response = await stub.fetch(toShare(request, { viewer: userId }));
+  if (refusedViewer(response)) {
     // Removed from the org since the cookie was issued: sign in again, as someone who belongs.
     createLogger({ component: "viewer" }).info("viewer.refused", { shareId });
     const again = signIn(request, config.auth.baseURL, shareId);
@@ -98,5 +94,3 @@ function signIn(request: Request, appURL: string, shareId: string) {
     headers: { location: open.toString(), "cache-control": "no-store" },
   });
 }
-
-export { shareOrigin };

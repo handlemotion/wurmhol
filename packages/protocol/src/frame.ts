@@ -43,7 +43,8 @@ export const MAX_CHUNK_BYTES = 64 * 1024;
 /** Largest `ws-message` the relay carries whole (browser WebSocket messages are not chunked). */
 export const MAX_WS_MESSAGE_BYTES = 1024 * 1024;
 const HEADER_BYTES = 5;
-const MAX_STREAM_ID = 0xffff_ffff;
+/** Largest stream id: the header holds it in 32 bits. */
+export const MAX_STREAM_ID = 0xffff_ffff;
 
 /** Header list as sent on the wire: order and repeats kept (`set-cookie`). */
 export type HeaderList = [name: string, value: string][];
@@ -244,17 +245,39 @@ export function decodeFrame(message: string | ArrayBuffer | ArrayBufferView): Fr
     }
     case "ws-open": {
       const p = object(parseJson(payload), type);
-      if (p.headers !== undefined && !isHeaderList(p.headers)) {
-        throw new ProtocolError("ws-open headers must be pairs");
+      const open: WsOpenPayload = {};
+      if (p.path !== undefined) {
+        if (typeof p.path !== "string" || !p.path.startsWith("/")) {
+          throw new ProtocolError("ws-open path must start with /");
+        }
+        open.path = p.path;
       }
-      return { stream, type, payload: p as WsOpenPayload };
+      if (p.headers !== undefined) {
+        if (!isHeaderList(p.headers)) throw new ProtocolError("ws-open headers must be pairs");
+        open.headers = p.headers;
+      }
+      if (p.protocols !== undefined) {
+        if (!Array.isArray(p.protocols) || !p.protocols.every((v) => typeof v === "string")) {
+          throw new ProtocolError("ws-open protocols must be strings");
+        }
+        open.protocols = p.protocols;
+      }
+      if (p.accepted !== undefined) {
+        if (typeof p.accepted !== "boolean") throw new ProtocolError("ws-open accepted is a flag");
+        open.accepted = p.accepted;
+      }
+      if (p.protocol !== undefined) {
+        if (typeof p.protocol !== "string") throw new ProtocolError("ws-open protocol is a string");
+        open.protocol = p.protocol;
+      }
+      return { stream, type, payload: open };
     }
     case "ws-close": {
       const p = object(parseJson(payload), type);
-      if (typeof p.code !== "number" || typeof p.reason !== "string") {
+      if (!Number.isInteger(p.code) || typeof p.reason !== "string") {
         throw new ProtocolError("ws-close needs a code and a reason");
       }
-      return { stream, type, payload: { code: p.code, reason: p.reason } };
+      return { stream, type, payload: { code: p.code as number, reason: p.reason } };
     }
     case "window": {
       const p = object(parseJson(payload), type);

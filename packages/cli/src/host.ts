@@ -2,10 +2,9 @@
 // `<WURMHOL_URL>/host`, dialed like a pipe's (HTTPS_PROXY, NODE_EXTRA_CA_CERTS). It reports the
 // web ports open here as they come and go; when its owner picks one in Create pipe, the relay
 // asks it to open a pipe to that port, and it answers with the pipe's URL or why it could not.
-import { HttpsProxyAgent } from "https-proxy-agent";
-import { getProxyForUrl } from "proxy-from-env";
 import WebSocket from "ws";
-import { explainConnectError, explainRefusal, FixError } from "./errors.ts";
+import { dial } from "./dial.ts";
+import { FixError } from "./errors.ts";
 import { type LocalPort, PortScanner } from "./ports.ts";
 
 export interface HostOptions {
@@ -25,39 +24,10 @@ const SCAN_MS = 3000;
 
 type FromRelay = { type: "open"; id: string; port: number };
 
-function dial(options: HostOptions): Promise<WebSocket> {
+function connect(options: HostOptions): Promise<WebSocket> {
   const url = new URL("/host", options.server);
   url.searchParams.set("name", options.name);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  const proxy = getProxyForUrl(url.toString().replace(/^ws/, "http"));
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url, {
-      headers: {
-        authorization: `Bearer ${options.token}`,
-        "user-agent": `wurmhol/${options.version} node/${process.versions.node}`,
-      },
-      agent: proxy ? new HttpsProxyAgent(proxy) : undefined,
-      perMessageDeflate: false,
-      handshakeTimeout: 15_000,
-    });
-    socket.once("open", () => resolve(socket));
-    socket.once("unexpected-response", (_request, response) => {
-      const chunks: Buffer[] = [];
-      response.on("data", (c: Buffer) => chunks.push(c));
-      response.on("end", () => {
-        reject(
-          explainRefusal(response.statusCode ?? 0, Buffer.concat(chunks).toString("utf8"), {
-            server: options.server,
-            viaProxy: Boolean(proxy),
-          }),
-        );
-        socket.terminate();
-      });
-    });
-    socket.once("error", (error) =>
-      reject(explainConnectError(error, { server: options.server, proxy })),
-    );
-  });
+  return dial(url, { server: options.server, token: options.token, version: options.version });
 }
 
 /**
@@ -65,13 +35,13 @@ function dial(options: HostOptions): Promise<WebSocket> {
  * says retrying cannot help (a revoked token, say), with the fix.
  */
 export async function host(options: HostOptions): Promise<never> {
-  const scanner = new PortScanner();
+  const scanner = new PortScanner(options.server);
   let delay = 1000;
   let first = true;
   for (;;) {
     let socket: WebSocket;
     try {
-      socket = await dial(options);
+      socket = await connect(options);
     } catch (error) {
       if (error instanceof FixError && error.final) throw error;
       options.say(`${error instanceof Error ? error.message : String(error)} Retrying.`);

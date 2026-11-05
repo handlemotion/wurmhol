@@ -5,23 +5,22 @@ import { cimd } from "@better-auth/cimd";
 import { mcp } from "@better-auth/mcp";
 import { passkey } from "@better-auth/passkey";
 import { stripe, type StripeOptions } from "@better-auth/stripe";
-import { type Db, createPersonalOrg, schema } from "@wurmhol/db";
+import { type Db, createPersonalOrg, findMember, schema } from "@wurmhol/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { getDpopJktFromPayload, getJwks, verifyJwsAccessToken } from "better-auth/oauth2";
 import { APIError } from "better-auth/api";
-
-export { APIError };
 import { deviceAuthorization } from "better-auth/plugins/device-authorization";
 import { jwt } from "better-auth/plugins/jwt";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { multiSession } from "better-auth/plugins/multi-session";
 import { organization } from "better-auth/plugins/organization";
-import { and, asc, eq } from "drizzle-orm";
 import Stripe from "stripe";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import { fetchClientMetadata } from "./client-metadata.ts";
+
+export { APIError };
 
 const commaList = z
   .string()
@@ -160,16 +159,6 @@ export function createStripeClient(secretKey: string) {
   return new Stripe(secretKey, { httpClient: Stripe.createFetchHttpClient() });
 }
 
-/** The member row of `userId` in `orgId`, or null. */
-export async function findMembership(db: Db, userId: string, orgId: string) {
-  const [member] = await db
-    .select({ id: schema.members.id, role: schema.members.role })
-    .from(schema.members)
-    .where(and(eq(schema.members.userId, userId), eq(schema.members.organizationId, orgId)))
-    .limit(1);
-  return member ?? null;
-}
-
 /**
  * The one client of the device flow (`wurmhol login`, ADR 0008). The Worker fills it in on the
  * CLI's behalf; the plugin refuses any other.
@@ -177,8 +166,8 @@ export async function findMembership(db: Db, userId: string, orgId: string) {
 export const DEVICE_CLIENT_ID = "wurmhol-cli";
 
 /** Whether `userId` owns `orgId`: owners manage billing. */
-export async function isOwner(db: Db, userId: string, orgId: string) {
-  return (await findMembership(db, userId, orgId))?.role === "owner";
+async function isOwner(db: Db, userId: string, orgId: string) {
+  return (await findMember(db, userId, orgId))?.role === "owner";
 }
 
 function billingPlugin(env: AuthEnv, billing: BillingConfig) {
@@ -314,13 +303,14 @@ export interface AuthEnv extends Partial<
  * options. Model names are plural to match our tables.
  */
 export function createAuth(env: AuthEnv) {
+  const appName = env.appName ?? "Wurmhol";
   const socialProviders = {
     // `select_account` lets one browser add a second Google account (multi-session).
     ...(env.google ? { google: { ...env.google, prompt: "select_account" as const } } : {}),
     ...(env.github ? { github: env.github } : {}),
   };
   return betterAuth({
-    appName: env.appName ?? "Wurmhol",
+    appName,
     secret: env.secret,
     baseURL: env.baseURL,
     trustedOrigins: env.trustedOrigins ?? [],
@@ -377,12 +367,7 @@ export function createAuth(env: AuthEnv) {
         create: {
           // A new session starts in the user's oldest org, the same default the API uses.
           before: async (session) => {
-            const [member] = await env.db
-              .select({ orgId: schema.members.organizationId })
-              .from(schema.members)
-              .where(eq(schema.members.userId, session.userId))
-              .orderBy(asc(schema.members.createdAt))
-              .limit(1);
+            const member = await findMember(env.db, session.userId);
             return { data: { ...session, activeOrganizationId: member?.orgId ?? null } };
           },
         },
@@ -391,7 +376,7 @@ export function createAuth(env: AuthEnv) {
     plugins: [
       ...(env.sendMagicLink ? [magicLink({ sendMagicLink: env.sendMagicLink })] : []),
       passkey({
-        rpName: env.appName ?? "Wurmhol",
+        rpName: appName,
         ...(env.passkeyRpId ? { rpID: env.passkeyRpId } : {}),
         schema: { passkey: { modelName: "passkeys" } },
       }),

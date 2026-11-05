@@ -98,6 +98,8 @@ describe("malformed frames are refused", () => {
     ["end that is an array", json(4, [])],
     ["window of zero", json(9, { bytes: 0 })],
     ["window that is not whole", json(9, { bytes: 1.5 })],
+    ["ws-open with an absolute URL", json(5, { path: "@evil.example/", headers: [] })],
+    ["ws-open protocols that are not strings", json(5, { path: "/", protocols: [1] })],
     ["ws-message kind other than 0 or 1", bytes(6, 0, 0, 0, 1, 2, 65)],
     ["invalid UTF-8 JSON", bytes(4, 0, 0, 0, 1, 0xff, 0xfe)],
     ["oversized data", new Uint8Array(5 + MAX_CHUNK_BYTES + 1).fill(3, 0, 1)],
