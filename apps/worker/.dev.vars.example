@@ -23,7 +23,8 @@ SHARE_DOMAIN=pipe.localhost
 # may take that label as its name. Empty: no relay.
 OAUTH_RELAY_HOST=
 # production (default), development or test. development turns on magic-link sign-in with the
-# link printed to the wrangler console ({"event":"auth.dev_link",...}), with or without MAIL_FROM.
+# link printed to the wrangler console ({"event":"auth.dev_link",...}) and shown on the login page,
+# with or without MAIL_FROM.
 # Never set it in production: those links sign you in.
 ENVIRONMENT=development
 
