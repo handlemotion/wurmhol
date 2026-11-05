@@ -200,8 +200,8 @@ export function Constellation(props: {
   };
 
   return (
-    <div ref={canvas} className="relative w-full overflow-hidden">
-      <svg aria-hidden className="absolute inset-0 size-full text-hairline-line">
+    <div ref={canvas} className="relative w-full">
+      <svg aria-hidden className="absolute inset-0 size-full overflow-visible text-hairline-line">
         {nodes.map((node) => (
           <line
             key={node.id}

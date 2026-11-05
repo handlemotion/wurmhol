@@ -84,7 +84,9 @@ export function Wall({ me }: { me: Me }) {
   const [dialog, setDialog] = useState<"members" | "tokens" | null>(null);
 
   return (
-    <div className="min-h-dvh bg-background">
+    // Clipped at the page's edges, not the canvas's: a network the camera pans runs on under the
+    // floating header and off the sides of the window, never against an invisible box.
+    <div className="min-h-dvh overflow-clip bg-background">
       <Header me={me} onOpen={setDialog} />
       <main className="w-full px-4 sm:px-8">
         {me.standing && !me.standing.ok && <NeedsPlan owner={me.role === "owner"} />}
