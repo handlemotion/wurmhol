@@ -8,6 +8,7 @@
   Astro 4321, Vite 5173, else 8787), says whether a token is set (`WURMHOL_TOKEN` or
   `wurmhol login`) and how to get one, and `--skill` writes the `wurmhol` skill to
   `.claude/skills/wurmhol/SKILL.md`.
+- Needs Node 22 or later. Node 20 reached end of life in April 2026.
 - 4a62a9e: Name who may open a pipe with `--only ana@x.com,bo@y.com` (or `openPipe({ viewers })` in the
   SDK). They must be members of the token's org; a name that isn't is refused with the fix. Without
   `--only`, every member of the org may open it, as before.
