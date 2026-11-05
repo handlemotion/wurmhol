@@ -2,7 +2,7 @@
 // member's role, hand ownership over, leave, delete. Each goes through Better Auth's organization plugin, which
 // keeps its own checks (owners only; an org never loses its last owner). These routes add what
 // Wurmhol needs around them: only our two roles, nobody left without an org, no deleting an org
-// that is still paying, and its open pipes ended first.
+// that is still paying, its open pipes and machines ended, and a leaving member's tokens revoked.
 import { zValidator } from "@hono/zod-validator";
 import { APIError, ROLES } from "@wurmhol/auth";
 import { listOrgsForUser, orgSubscription } from "@wurmhol/db";
@@ -11,6 +11,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { type AppEnv, requireOwner } from "../context.ts";
 import { limitPerMember } from "../rate-limiter.ts";
+import { revokeTokensOfLeaver } from "../revoke.ts";
 
 /** Runs a plugin call, turning its refusals into ours: its 400s (a rule it holds) are 409s. */
 async function plugin<T>(call: Promise<T>): Promise<T> {
@@ -102,20 +103,25 @@ export const org = new Hono<AppEnv>()
     c.var.log.info("org.transferred", { orgId: c.var.member.orgId });
     return c.json({ ok: true });
   })
-  /** Any member may leave; the last owner may not (the plugin refuses). */
+  /**
+   * Any member may leave; the last owner may not (the plugin refuses). Their tokens there are
+   * revoked, ending their pipes and machines (ADR 0019).
+   */
   .post("/org/leave", limitPerMember("manage"), async (c) => {
+    const orgId = c.var.member.orgId;
     await refuseLastOrg(c, "leave");
     await plugin(
       c.var.auth.api.leaveOrganization({
         headers: c.req.raw.headers,
-        body: { organizationId: c.var.member.orgId },
+        body: { organizationId: orgId },
       }),
     );
+    await revokeTokensOfLeaver(c.env, c.var.db, orgId, c.var.user.id);
     return c.json({ ok: true });
   })
   /**
    * Deletes the org with its tokens, pipes and history. Its open pipes end first, so no CLI keeps
-   * serving an org that is gone. A paid plan must be cancelled first: Stripe would go on billing.
+   * serving an org that is gone, and its machines are disconnected. A paid plan must be cancelled first: Stripe would go on billing.
    */
   .delete("/org", requireOwner, limitPerMember("manage"), async (c) => {
     const orgId = c.var.member.orgId;
@@ -125,7 +131,8 @@ export const org = new Hono<AppEnv>()
         message: "Cancel the plan in Billing first, then delete the org.",
       });
     }
-    const open = await c.env.ORG.get(c.env.ORG.idFromName(orgId)).list();
+    const orgObject = c.env.ORG.get(c.env.ORG.idFromName(orgId));
+    const open = await orgObject.list();
     for (const share of open) {
       await c.env.SHARE.get(c.env.SHARE.idFromName(share.id)).terminate("terminated");
     }
@@ -135,6 +142,8 @@ export const org = new Hono<AppEnv>()
         body: { organizationId: orgId },
       }),
     );
+    // After the delete, so a machine that reconnects meanwhile finds its token gone.
+    await orgObject.dropAll();
     c.var.log.info("org.deleted", { orgId });
     return c.json({ ok: true });
   });

@@ -1,6 +1,6 @@
 // What the CLI and orchestrators present on the CLI's host: `Authorization: Bearer wh_…`.
 // Refusals are `{ error, fix }`: the CLI prints `fix`, one line that says what to do.
-import { useToken } from "@wurmhol/db";
+import { findMember, useToken } from "@wurmhol/db";
 import type { HonoRequest } from "hono";
 import type { AppEnv } from "./context.ts";
 import { checkRateLimit } from "./rate-limiter.ts";
@@ -44,6 +44,15 @@ export async function bearerToken(c: {
           "token revoked or unknown",
           `Create a new token at ${tokensPage} and set WURMHOL_TOKEN.`,
         );
+  }
+  // A token acts for whoever made it, so only while they are in its org. Leaving revokes their
+  // tokens (ADR 0019); this holds in the moment between the two, and for any token missed.
+  if (token.createdBy && !(await findMember(db, token.createdBy, token.orgId))) {
+    return refuse(
+      401,
+      "token owner left the org",
+      `Whoever made this token is no longer in its org. Create a new token at ${tokensPage} and set WURMHOL_TOKEN.`,
+    );
   }
   const wait = await checkRateLimit(c.env, config, "connect", token.id);
   if (wait) {
