@@ -1,9 +1,9 @@
 // Renders the link preview, public/og.png (1200x630), from the network-create `og` scene in the
 // site's light colors, with Inter loaded for the copy the scene sets. Run it after changing the
-// scene (`node apps/site/scripts/og.mjs`) and commit the PNG. It also writes the SVG to the temp
-// directory and prints its path, for network-create's check.mjs.
+// scene (`node apps/site/scripts/og.mjs`) and commit the PNG. It also writes the SVG to a new
+// private temp directory and prints its path, for network-create's check.mjs.
 /* oxlint-disable no-console -- a CLI: printing is its output */
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -25,7 +25,7 @@ const svg = scene({
 }).render();
 
 const out = process.argv[2] ?? join(site, "public", "og.png");
-const composite = join(tmpdir(), "wurmhol-og.svg");
+const composite = join(mkdtempSync(join(tmpdir(), "wurmhol-og-")), "og.svg");
 writeFileSync(composite, svg);
 
 const font = readFileSync(
