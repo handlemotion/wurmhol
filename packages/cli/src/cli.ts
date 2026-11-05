@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // wurmhol: share a local dev server at a private HTTPS URL (spec section 7).
 //
-//   npx wurmhol <port> [--json]   start a share; prints its URL first, then returns
+//   npx wurmhol <port> [--json] [--only <emails>]
+//                                 start a share; prints its URL first, then returns
 //   wurmhol ls [--json]           open shares on this machine
 //   wurmhol stop <port|id>        end one; `--all` ends every one
 //   wurmhol init                  tell the repo's agents how to share
@@ -20,6 +21,7 @@ const HELP = `wurmhol ${pkg.version}: a private HTTPS URL for a local dev server
 
 Usage:
   npx wurmhol <port> [--json]   Open a pipe to a port; prints the URL, then returns
+    --only a@x.com,b@y.com      Only these members of the org may open it
   wurmhol ls [--json]           List open pipes
   wurmhol stop <port|id>        End a pipe (--all ends every one)
   wurmhol init                  Add a line about wurmhol to AGENTS.md or CLAUDE.md
@@ -64,10 +66,11 @@ function token() {
 }
 
 /** Starts the detached daemon and waits for it to report the URL (or the reason it could not). */
-async function share(port: number, json: boolean) {
+async function share(port: number, json: boolean, only: string | undefined) {
   token();
   const entry = fileURLToPath(import.meta.url);
-  const child = spawn(process.execPath, [entry, "__daemon", String(port)], {
+  const args = [entry, "__daemon", String(port), ...(only ? ["--only", only] : [])];
+  const child = spawn(process.execPath, args, {
     detached: true,
     stdio: ["ignore", "ignore", "ignore", "ipc"],
     env: process.env,
@@ -90,7 +93,7 @@ async function share(port: number, json: boolean) {
 }
 
 /** The daemon: holds the share's pipe until it ends. Reports readiness over IPC. */
-async function daemon(port: number) {
+async function daemon(port: number, only: string | undefined) {
   const report = (message: ReadyMessage) => process.send?.(message);
   const log = (shareId: string | null, event: string, fields: Record<string, unknown>) => {
     try {
@@ -104,7 +107,11 @@ async function daemon(port: number) {
   };
   let pipe: Pipe;
   try {
-    pipe = await openPipe({ server: server(), token: token(), port }, { log });
+    const viewers = only
+      ?.split(",")
+      .map((email) => email.trim())
+      .filter(Boolean);
+    pipe = await openPipe({ server: server(), token: token(), port, viewers }, { log });
   } catch (error) {
     report({ type: "error", message: error instanceof FixError ? error.message : String(error) });
     process.exit(1);
@@ -207,6 +214,7 @@ async function main() {
     allowPositionals: true,
     options: {
       json: { type: "boolean", default: false },
+      only: { type: "string" },
       all: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", short: "v", default: false },
@@ -215,13 +223,13 @@ async function main() {
   const [command, argument] = positionals;
   if (values.version) return void process.stdout.write(`${pkg.version}\n`);
   if (values.help || !command) return void process.stdout.write(HELP);
-  if (command === "__daemon") return daemon(parsePort(argument) ?? fail("bad port"));
+  if (command === "__daemon") return daemon(parsePort(argument) ?? fail("bad port"), values.only);
   if (command === "ls") return ls(values.json);
   if (command === "stop") return stop(argument, values.all);
   if (command === "init") return init();
   const port = parsePort(command);
   if (port === null) fail(`Not a port or a command: ${command}. See: wurmhol --help`);
-  return share(port, values.json);
+  return share(port, values.json, values.only);
 }
 
 await main();

@@ -1,6 +1,7 @@
 // `GET /open?share=<id>&next=<path>` (spec section 6, step 2): a viewer arriving from a share
 // host. Signed in as a member of the share's org, they go back with a one-time code; otherwise
-// to the login page, never to the app or the share.
+// to the login page, never to the app or the share. A pipe opened with `--only` also needs them on
+// its list.
 import { findMember, findShare } from "@wurmhol/db";
 import { Hono } from "hono";
 import { type AppEnv, resolveSession } from "../context.ts";
@@ -26,8 +27,10 @@ export const open = new Hono<AppEnv>().get("/", async (c) => {
   if (!session) return login();
   // Any of the user's orgs may own it, not only the active one.
   if (!(await findMember(c.var.db, session.user.id, share.orgId))) return login("not-member");
-
   const stub = c.env.SHARE.get(c.env.SHARE.idFromName(shareId));
+  // Its starter named who may open it (`--only`), and this member is not one of them.
+  if (!(await stub.mayView(session.user.id))) return login("not-listed");
+
   const code = await stub.issueCode(session.user.id);
   const target = new URL(`${RESERVED_PREFIX}auth`, shareOrigin(c.var.config, shareId));
   target.searchParams.set("code", code);
