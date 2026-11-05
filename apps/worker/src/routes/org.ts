@@ -1,5 +1,5 @@
-// Org settings (spec section 3, header menu and Members dialog): rename, change a member's role,
-// hand ownership over, leave, delete. Each goes through Better Auth's organization plugin, which
+// Org settings (spec section 3, header menu and Members dialog): start a new org, rename, change a
+// member's role, hand ownership over, leave, delete. Each goes through Better Auth's organization plugin, which
 // keeps its own checks (owners only; an org never loses its last owner). These routes add what
 // Wurmhol needs around them: only our two roles, nobody left without an org, no deleting an org
 // that is still paying, and its open pipes ended first.
@@ -32,10 +32,26 @@ async function refuseLastOrg(c: { var: AppEnv["Variables"] }, verb: string) {
   }
 }
 
+/** An org's name, new or changed. */
 const renameBody = z.object({ name: z.string().trim().min(1).max(80) });
 const roleBody = z.object({ role: z.enum(ROLES) });
 
 export const org = new Hono<AppEnv>()
+  /**
+   * Starts another org with the caller as its owner, and makes it their active one. The slug is
+   * the plugin's unique key, not shown anywhere, so it is random rather than taken from the name.
+   */
+  .post("/orgs", limitPerMember("manage"), zValidator("json", renameBody), async (c) => {
+    const created = await plugin(
+      c.var.auth.api.createOrganization({
+        headers: c.req.raw.headers,
+        body: { name: c.req.valid("json").name, slug: `org-${crypto.randomUUID()}` },
+      }),
+    );
+    if (!created) throw new HTTPException(500, { message: "could not create the org" });
+    c.var.log.info("org.created", { orgId: created.id });
+    return c.json({ id: created.id });
+  })
   .patch("/org", requireOwner, limitPerMember("manage"), zValidator("json", renameBody), (c) =>
     plugin(
       c.var.auth.api.updateOrganization({

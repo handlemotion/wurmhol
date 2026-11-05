@@ -57,9 +57,18 @@ export async function findMember(
 }
 
 /** The orgs `userId` belongs to, oldest membership first: the org switcher. */
+/**
+ * `userId`'s orgs, oldest membership first. `personal` marks an org made at sign-up
+ * (`createPersonalOrg`), which the switcher shows with its owner's picture.
+ */
 export async function listOrgsForUser(db: Db, userId: string) {
   return db
-    .select({ id: organizations.id, name: organizations.name, role: members.role })
+    .select({
+      id: organizations.id,
+      name: organizations.name,
+      role: members.role,
+      personal: sql<boolean>`${organizations.slug} like 'personal-%'`.mapWith(Boolean),
+    })
     .from(members)
     .innerJoin(organizations, eq(organizations.id, members.organizationId))
     .where(eq(members.userId, userId))

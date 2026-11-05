@@ -146,6 +146,13 @@ function useOrgChange<T>(mutationFn: (input: T) => Promise<unknown>) {
   return useMutation({ mutationFn, onSuccess: () => client.invalidateQueries() });
 }
 
+/** Starts an org the caller owns; the Worker makes it their active one. */
+export function useCreateOrg() {
+  return useOrgChange((name: string) =>
+    api<{ id: string }>("/api/orgs", { method: "POST", body: { name } }),
+  );
+}
+
 export function useRenameOrg() {
   return useOrgChange((name: string) => api("/api/org", { method: "PATCH", body: { name } }));
 }
