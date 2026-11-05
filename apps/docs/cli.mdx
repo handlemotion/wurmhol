@@ -1,0 +1,32 @@
+---
+title: "CLI"
+description: "Every command and flag of `npx wurmhol`."
+---
+
+| Command                              | Does                                                             |
+| ------------------------------------ | ---------------------------------------------------------------- |
+| `wurmhol <port> [--ttl 8h] [--json]` | Open a pipe to a port. `--json` prints `{url, port, id, endsAt}` |
+| `wurmhol ls [--json]`                | List open pipes and when each ends                               |
+| `wurmhol stop <port\|id>`            | End one (`--all` ends every one)                                 |
+| `wurmhol init [--skill]`             | Tell this repo's agents how to share                             |
+| `wurmhol login`                      | Approve this computer; stores `~/.wurmhol/credentials.json`      |
+| `wurmhol logout`                     | Delete the stored token                                          |
+
+## Lifetime
+
+A pipe ends after 4 hours. `--ttl` asks for another lifetime, like `90m` or `8h`, up to 12 hours
+on wurmhol.com. The URL is never reused.
+
+## Who can open it
+
+By default every member of the token's org can open a pipe. `--only ana@x.com,bo@y.com` narrows
+it to those members. There are no public links.
+
+## Environment
+
+| Variable              | Does                                                      |
+| --------------------- | --------------------------------------------------------- |
+| `WURMHOL_TOKEN`       | A token from your org. Wins over one from `wurmhol login` |
+| `WURMHOL_URL`         | A self-hosted install                                     |
+| `HTTPS_PROXY`         | The proxy to dial through                                 |
+| `NODE_EXTRA_CA_CERTS` | Adds a proxy's CA                                         |

@@ -53,6 +53,8 @@ export interface TunnelOptions {
   ttl?: number;
   /** Emails of the org members who may open a new share (`--only`); empty: the whole org. */
   viewers: string[];
+  /** A named pipe's name (`--name`): the same host every time. */
+  name?: string;
   version: string;
   log: Logger;
   onRequest: (event: RequestEvent) => void;
@@ -164,6 +166,7 @@ export class Tunnel {
     else {
       url.searchParams.set("port", String(this.#options.port));
       if (this.#options.ttl !== undefined) url.searchParams.set("ttl", String(this.#options.ttl));
+      if (this.#options.name) url.searchParams.set("name", this.#options.name);
     }
     return url;
   }

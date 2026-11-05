@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // wurmhol: share a local dev server at a private HTTPS URL (spec section 7).
 //
-//   npx wurmhol <port> [--ttl 8h] [--json] [--only <emails>]
+//   npx wurmhol <port> [--ttl 8h] [--json] [--only <emails>] [--name <name>]
 //                                 start a share; prints its URL first, then returns
 //   wurmhol ls [--json]           open shares on this machine
-//   wurmhol stop <port|id>        end one; `--all` ends every one
+//   wurmhol stop <port|id|name>   end one; `--all` ends every one
 //   wurmhol init [--skill]        tell the repo's agents how to share
 import { spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -12,7 +12,7 @@ import { hostname } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { formatDuration, parseDuration } from "@wurmhol/protocol";
+import { formatDuration, parseDuration, PIPE_NAME_RULE, pipeName } from "@wurmhol/protocol";
 import pkg from "../package.json" with { type: "json" };
 import skill from "../../../plugins/wurmhol/skills/wurmhol/SKILL.md";
 import {
@@ -43,8 +43,10 @@ Usage:
   npx wurmhol <port> [--json]   Open a pipe to a port; prints the URL, then returns
     --ttl <duration>            How long it lasts, like 90m or 8h (default 4h, at most 12h)
     --only a@x.com,b@y.com      Only these members of the org may open it
+    --name <name>               Keep the same URL every time (https://<name>.<pipe domain>),
+                                e.g. for an OAuth redirect URI
   wurmhol ls [--json]           List open pipes
-  wurmhol stop <port|id>        End a pipe (--all ends every one)
+  wurmhol stop <port|id|name>   End a pipe (--all ends every one)
   wurmhol init [--skill]        Tell this repo's agents how to share (AGENTS.md or
                                 CLAUDE.md); --skill also writes .claude/skills/wurmhol
   wurmhol login                 Approve this computer in the browser; stores a token
@@ -133,6 +135,7 @@ async function share(
   ttl: number | undefined,
   json: boolean,
   only: string | undefined,
+  name: string | undefined,
 ) {
   token();
   const entry = fileURLToPath(import.meta.url);
@@ -142,6 +145,7 @@ async function share(
     String(port),
     ...(ttl === undefined ? [] : [String(ttl)]),
     ...(only ? ["--only", only] : []),
+    ...(name ? ["--name", name] : []),
   ];
   const child = spawn(process.execPath, args, {
     detached: true,
@@ -167,7 +171,12 @@ async function share(
 }
 
 /** The daemon: holds the share's pipe until it ends. Reports readiness over IPC. */
-async function daemon(port: number, ttl: number | undefined, only: string | undefined) {
+async function daemon(
+  port: number,
+  ttl: number | undefined,
+  only: string | undefined,
+  name: string | undefined,
+) {
   const report = (message: ReadyMessage) => process.send?.(message);
   const log = (shareId: string | null, event: string, fields: Record<string, unknown>) => {
     try {
@@ -185,7 +194,7 @@ async function daemon(port: number, ttl: number | undefined, only: string | unde
       ?.split(",")
       .map((email) => email.trim())
       .filter(Boolean);
-    pipe = await openPipe({ server: server(), token: token(), port, ttl, viewers }, { log });
+    pipe = await openPipe({ server: server(), token: token(), port, ttl, viewers, name }, { log });
   } catch (error) {
     report({ type: "error", message: error instanceof FixError ? error.message : String(error) });
     process.exit(1);
@@ -234,8 +243,14 @@ async function stop(target: string | undefined, all: boolean) {
   const port = parsePort(target);
   const chosen = all
     ? states
-    : states.filter((s) => s.id === target || (port !== null && s.port === port));
-  if (!all && !target) fail("Say which share: wurmhol stop <port|id>, or --all.");
+    : states.filter(
+        (s) =>
+          s.id === target ||
+          (port !== null && s.port === port) ||
+          // A named pipe, by the first label of its host.
+          new URL(s.url).hostname.split(".")[0] === target?.toLowerCase(),
+      );
+  if (!all && !target) fail("Say which share: wurmhol stop <port|id|name>, or --all.");
   if (!chosen.length) {
     if (all) return;
     fail(`No open pipe for ${target}. See: wurmhol ls`);
@@ -335,6 +350,7 @@ async function main() {
     options: {
       json: { type: "boolean", default: false },
       only: { type: "string" },
+      name: { type: "string" },
       all: { type: "boolean", default: false },
       skill: { type: "boolean", default: false },
       ttl: { type: "string" },
@@ -347,7 +363,7 @@ async function main() {
   if (values.help || !command) return void process.stdout.write(HELP);
   if (command === "__daemon") {
     const ttl = positionals[2] === undefined ? undefined : Number(positionals[2]);
-    return daemon(parsePort(argument) ?? fail("bad port"), ttl, values.only);
+    return daemon(parsePort(argument) ?? fail("bad port"), ttl, values.only, values.name);
   }
   if (command === "ls") return ls(values.json);
   if (command === "stop") return stop(argument, values.all);
@@ -362,7 +378,10 @@ async function main() {
       parseDuration(values.ttl) ??
       fail(`Not a lifetime: ${values.ttl}. Use --ttl 90m or --ttl 8h.`);
   }
-  return share(port, ttl, values.json, values.only);
+  if (values.name !== undefined && !pipeName(values.name)) {
+    fail(`Not a pipe name: ${values.name}. Use ${PIPE_NAME_RULE}.`);
+  }
+  return share(port, ttl, values.json, values.only, values.name);
 }
 
 await main();

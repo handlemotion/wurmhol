@@ -68,6 +68,12 @@ const kept = [
     kept: "Deleted when the pipe ends",
   },
   {
+    what: "Sign-in through the OAuth relay",
+    detail:
+      "When an app behind a pipe sends you to sign in with a provider through Wurmhol's relay, a SHA-256 hash of the sign-in's state value and which pipe it belongs to. Never the code the provider returns, and nothing from the page.",
+    kept: "Deleted when the provider sends you back; unused ones deleted within a day of expiring after 10 minutes",
+  },
+  {
     what: "Sign-in links",
     detail:
       "Magic links and the state of a Google or GitHub sign-in in progress, each valid for minutes.",

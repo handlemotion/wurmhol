@@ -5,6 +5,7 @@
 import { readCookie, sameOriginPath, SHARE_COOKIE } from "@wurmhol/protocol";
 import { loadConfig, shareOrigin } from "./env.ts";
 import { createLogger } from "./log.ts";
+import { noteOAuthRedirect } from "./oauth-relay.ts";
 import { errorPage } from "./pages.ts";
 import {
   clearShareCookieHeader,
@@ -76,6 +77,7 @@ export async function handleShareHost(request: Request, env: Env, shareId: strin
     out.headers.append("set-cookie", clearShareCookieHeader());
     return out;
   }
+  await noteOAuthRedirect(env, config, { id: shareId, orgId: status.orgId }, request, response);
   return response;
 }
 

@@ -18,14 +18,35 @@ that only reaches listed hosts, allow `api.wurmhol.com`: it is the only host the
 | Command                              | Does                                                             |
 | ------------------------------------ | ---------------------------------------------------------------- |
 | `wurmhol <port> [--ttl 8h] [--json]` | Open a pipe to a port. `--json` prints `{url, port, id, endsAt}` |
+| `wurmhol <port> --name my-app`       | Open it at `https://my-app.wurmhol.dev`, the same URL every time |
 | `wurmhol ls [--json]`                | List open pipes and when each ends                               |
-| `wurmhol stop <port\|id>`            | End one (`--all` ends every one)                                 |
+| `wurmhol stop <port\|id\|name>`      | End one (`--all` ends every one)                                 |
 | `wurmhol init [--skill]`             | Tell this repo's agents how to share (see below)                 |
 | `wurmhol login`                      | Approve this computer; stores `~/.wurmhol/credentials.json`      |
 | `wurmhol logout`                     | Delete the stored token                                          |
 
 A pipe ends after 4 hours. `--ttl` asks for another lifetime, like `90m` or `8h`, up to 12 hours
 on wurmhol.com.
+
+`--name` keeps the URL, so an app that signs in with Google or GitHub can be tried through a pipe:
+register `https://my-app.wurmhol.dev/<your callback path>` with the provider once. The first org to
+use a name keeps it, and one pipe per name is open at a time.
+
+### OAuth with many pipes
+
+To run several pipes of one app at once (parallel agents, one per branch) without registering a
+redirect URI for each name, sign in through the relay at `https://oauth.wurmhol.dev`:
+
+1. Register `https://oauth.wurmhol.dev/<your callback path>` with the provider, once. For a GitHub
+   OAuth App, register `https://oauth.wurmhol.dev`: any callback path under it is accepted.
+2. Configure the app with that redirect URI (in Better Auth, the provider's `redirectURI`).
+3. Open as many pipes as you like, named or not. When the app sends a viewer to the provider, the
+   relay notes which pipe the sign-in's `state` came from, and sends the provider's callback back
+   to that pipe, at the same path and query.
+
+The relay reads only the redirect's `Location` header, keeps a hash of the `state` for at most 10
+minutes, and lets each one through once. The app must send the viewer off with a redirect or a
+`Location` header (Better Auth does both); `response_mode=form_post` is not supported.
 
 By default every member of the token's org can open a pipe. `--only ana@x.com,bo@y.com` narrows it
 to those members.
@@ -48,7 +69,8 @@ await pipe.close();
 
 Options: `server` (a self-hosted install), `host` (where the dev server listens, default
 `127.0.0.1`), `ttl` (seconds, or a duration like `"8h"`; `pipe.endsAt` says when it ends),
-`viewers` (emails of the org members who may open it, like `--only`), `signal` (an `AbortSignal`
+`viewers` (emails of the org members who may open it, like `--only`), `name` (a URL that stays
+the same, like `--name`), `signal` (an `AbortSignal`
 that closes the pipe) and `log` (`(event, fields) => {}`, the connection's connects, drops and
 reconnects; never request contents). `openPipe` rejects with a `FixError` whose message is the
 one-line fix the CLI prints. ESM only.

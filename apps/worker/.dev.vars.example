@@ -16,15 +16,23 @@ APP_ALIASES=
 # Public Suffix List with a wildcard certificate, such as example-pipes.dev (its own registrable
 # domain, docs/self-hosting.md).
 SHARE_DOMAIN=pipe.localhost
+# Optional (ADR 0010). The OAuth callback relay's host, same scheme and port as BETTER_AUTH_URL:
+# an app behind any number of pipes registers one redirect URI per provider on it, like
+# http://oauth.pipe.localhost:8787/api/auth/callback/google. Under SHARE_DOMAIN (one label, as
+# oauth.example-pipes.dev) the pipes' wildcard route and certificate already cover it, and no pipe
+# may take that label as its name. Empty: no relay.
+OAUTH_RELAY_HOST=
 # production (default), development or test. development turns on magic-link sign-in with the
-# link printed to the wrangler console ({"event":"auth.dev_link",...}), with or without MAIL_FROM.
+# link printed to the wrangler console ({"event":"auth.dev_link",...}) and shown on the login page,
+# with or without MAIL_FROM.
 # Never set it in production: those links sign you in.
 ENVIRONMENT=development
 
 # --- Auth (Better Auth) ---
 # Secret. At least 32 random characters: openssl rand -base64 32
 BETTER_AUTH_SECRET=
-# Comma-separated extra origins allowed to call auth endpoints (Vite's dev server).
+# Comma-separated extra origins allowed to call auth endpoints (Vite's dev server). Wildcards
+# match subdomains: add https://*.wurmhol.dev to sign in to this stack through any pipe to it.
 AUTH_TRUSTED_ORIGINS=http://localhost:5173
 # Optional. WebAuthn relying party ID; defaults to the BETTER_AUTH_URL host.
 AUTH_PASSKEY_RP_ID=

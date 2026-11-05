@@ -29,6 +29,20 @@
       "when": 1793856675534,
       "tag": "0003_easy_steve_rogers",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1793893044046,
+      "tag": "0004_sharp_scarlet_spider",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793893854951,
+      "tag": "0005_steady_war_machine",
+      "breakpoints": true
     }
   ]
 }

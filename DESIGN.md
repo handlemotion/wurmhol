@@ -72,9 +72,9 @@ it. It holds no values: colors, sizes, and radii live in code, so they cannot dr
   (`.claude/skills/tactile-design`), layered on the Figma look without restyling it: cards keep
   their border and add the crisp `--shadow-raised` drop; buttons are flat: a simple border
   in `border`, no highlight and no drop (depth fights the sharp corners); overlays use
-  `--shadow-overlay`, never a big soft blur; buttons squeeze to `scale(.97)` on native `:active`
-  (not React Aria's `pressed`), except menu triggers; menus
-  grow from their trigger; motion uses the `ease-out` curve and has a reduced-motion path. The
+  `--shadow-overlay`, never a big soft blur; buttons answer a press with colour only, never a
+  squeeze or offset (a moving box pulls its edge out from under the pointer and drops the click,
+  overriding the skill's press `scale`); menus grow from their trigger; motion uses the `ease-out` curve and has a reduced-motion path. The
   skill's colours, wells and grounds don't apply: Figma and the tokens decide the look.
 - **Loading.** Data that's on its way renders with `skullet` (`import { Skeleton } from "skullet/react"`),
   never a spinner or a skeleton div. An action in progress is `<Button isPending>`: it dims like a

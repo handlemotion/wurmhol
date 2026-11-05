@@ -1,0 +1,27 @@
+---
+title: "From your own process"
+description: "Open pipes from an orchestrator with `openPipe`."
+---
+
+For orchestrators that open pipes for many agents. No daemon: the pipe lives in your process.
+
+```ts
+import { openPipe } from "wurmhol";
+
+const pipe = await openPipe({ port: 5173, token: process.env.WURMHOL_TOKEN! });
+pipe.url; // send it to the humans
+pipe.on("request", ({ method, path, status, durationMs }) => {}); // stays in this process
+pipe.on("close", (reason) => {}); // "stopped", "terminated", "expired", "revoked", ...
+await pipe.close();
+```
+
+| Option    | Does                                                                            |
+| --------- | ------------------------------------------------------------------------------- |
+| `server`  | A self-hosted install                                                           |
+| `host`    | Where the dev server listens. Default `127.0.0.1`                               |
+| `ttl`     | Seconds, or a duration like `"8h"`. `pipe.endsAt` says when it ends             |
+| `viewers` | Emails of the org members who may open it, like `--only`                        |
+| `signal`  | An `AbortSignal` that closes the pipe                                           |
+| `log`     | `(event, fields) => {}`: connects, drops and reconnects; never request contents |
+
+`openPipe` rejects with a `FixError` whose message is the one-line fix the CLI prints. ESM only.

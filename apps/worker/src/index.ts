@@ -1,7 +1,8 @@
-import { createDb, pruneExpired } from "@wurmhol/db";
+import { createDb, findOpenShareByName, pruneExpired } from "@wurmhol/db";
 import { app } from "./app.ts";
-import { hostRole, loadConfig } from "./env.ts";
+import { hostRole, loadConfig, SHARE_ID } from "./env.ts";
 import { createLogger } from "./log.ts";
+import { handleRelay } from "./oauth-relay.ts";
 import { handleShareHost } from "./viewer.ts";
 
 export type { AppType } from "./app.ts";
@@ -14,9 +15,10 @@ const CLI_PATHS = new Set(["/connect", "/device/code", "/device/token", "/health
 
 export default {
   /**
-   * One Worker, four kinds of host (ADR 0006): pipes (`<id>.wurmhol.dev`), the CLI's
+   * One Worker, five kinds of host (ADR 0006, ADR 0010): pipes (`<id>.wurmhol.dev`, or `<name>.wurmhol.dev`), the CLI's
    * endpoint (`api.wurmhol.com`: `/connect`, `/device/*`, the `/v1/pipes` API and `/health`), aliases that redirect to the app
-   * (`app.wurmhol.com`), and the app itself (`dirt.wurmhol.com`: console, API, sign-in).
+   * (`app.wurmhol.com`), the app itself (`dirt.wurmhol.com`: console, API, sign-in), and the OAuth callback relay
+   * (`oauth.wurmhol.dev`).
    */
   async fetch(request, env, ctx) {
     const config = loadConfig(env);
@@ -40,10 +42,16 @@ export default {
       );
     }
     if (host.role === "app") return app.fetch(request, env, ctx);
+    if (host.role === "oauth") return handleRelay(request, env, config);
+    let shareId = host.label;
     try {
-      return await handleShareHost(request, env, host.shareId);
+      // A named pipe (ADR 0009): its host serves whichever of the name's pipes is open.
+      if (shareId && !SHARE_ID.test(shareId)) {
+        shareId = (await findOpenShareByName(createDb(env.DB), shareId))?.id ?? "";
+      }
+      return await handleShareHost(request, env, shareId);
     } catch (error) {
-      createLogger({ component: "viewer" }).error("viewer.error", { error, shareId: host.shareId });
+      createLogger({ component: "viewer" }).error("viewer.error", { error, shareId });
       return new Response("internal error", { status: 500 });
     }
   },
