@@ -1,3 +1,4 @@
+import { createDb, pruneExpired } from "@wurmhol/db";
 import { app } from "./app.ts";
 import { hostRole, loadConfig } from "./env.ts";
 import { createLogger } from "./log.ts";
@@ -45,5 +46,19 @@ export default {
       createLogger({ component: "viewer" }).error("viewer.error", { error, shareId: host.shareId });
       return new Response("internal error", { status: 500 });
     }
+  },
+
+  /** The daily retention job (`triggers.crons`, ADR 0008), as of the time it was scheduled. */
+  async scheduled(controller, env) {
+    const config = loadConfig(env);
+    const now = new Date(controller.scheduledTime);
+    const pruned = await pruneExpired(createDb(env.DB), {
+      now,
+      retentionDays: config.RETENTION_DAYS,
+    });
+    createLogger({ component: "retention" }).info("retention.pruned", {
+      asOf: now.toISOString(),
+      ...pruned,
+    });
   },
 } satisfies ExportedHandler<Env>;
