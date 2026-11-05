@@ -180,7 +180,6 @@ export function DialogCloseIcon({
       slot="close"
       intent={filled ? "secondary" : "plain"}
       size="sq-xs"
-      isCircle={filled}
       aria-label="Close"
       className={cn("absolute top-2.5 right-2.5", filled && "border-0", className)}
     >

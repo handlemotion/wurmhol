@@ -29,6 +29,14 @@
   --outline-hover: color-mix(in oklab, var(--foreground) 4%, var(--background));
   --primary: #0d3eef;
   --primary-button: #1a4bff;
+  /* Buttons: each filled intent has an edge a step darker than its fill and a hover a step
+     lighter. Mixed from the fills, so they follow the theme. */
+  --primary-button-border: color-mix(in oklab, var(--primary-button) 85%, black);
+  --primary-button-hover: color-mix(in oklab, var(--primary-foreground) 10%, var(--primary-button));
+  --secondary-border: color-mix(in oklab, var(--secondary) 88%, black);
+  --secondary-hover: color-mix(in oklab, var(--secondary-foreground) 4%, var(--secondary));
+  --danger-border: color-mix(in oklab, var(--danger) 80%, black);
+  --danger-hover: color-mix(in oklab, white 10%, var(--danger));
   /* What dims the app under a dialog: flat black, no blur. */
   --scrim: oklch(0 0 0 / 7%);
   --primary-foreground: #ffffff;
@@ -144,6 +152,12 @@
   --color-ring: var(--ring);
   --color-primary: var(--primary);
   --color-primary-button: var(--primary-button);
+  --color-primary-button-border: var(--primary-button-border);
+  --color-primary-button-hover: var(--primary-button-hover);
+  --color-secondary-border: var(--secondary-border);
+  --color-secondary-hover: var(--secondary-hover);
+  --color-danger-border: var(--danger-border);
+  --color-danger-hover: var(--danger-hover);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary-subtle: var(--primary-subtle);
   --color-primary-subtle-foreground: var(--primary-subtle-foreground);
@@ -213,22 +227,6 @@
 }
 
 /* Intent UI: a 44px hit area around small controls on touch screens. */
-@utility touch-target {
-  position: relative;
-  &::before {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 100%;
-    height: 100%;
-    min-height: 44px;
-    min-width: 44px;
-    z-index: 9999;
-  }
-}
-
 /* Loading text: a highlight sweeps across the text in its own color. */
 @utility shimmer {
   background: linear-gradient(
