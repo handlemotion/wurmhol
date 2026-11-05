@@ -52,5 +52,5 @@ The PSL maintainers expect, before they accept a private entry:
 ## Small things
 
 - [ ] Marketing site: an `og:image` for link previews.
-- [ ] `packages/cli/package.json`: `bin` as `dist/cli.js` (no `./`), which silences npm's
+- [x] `packages/cli/package.json`: `bin` as `dist/cli.js` (no `./`), which silences npm's
       "script name was invalid" publish warning. Ride along with the next CLI change.

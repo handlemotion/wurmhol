@@ -12,12 +12,8 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import pkg from "../package.json" with { type: "json" };
 import { FixError } from "./errors.ts";
+import { DEFAULT_CONSOLE, DEFAULT_SERVER, openPipe, type Pipe } from "./pipe.ts";
 import { alive, listStates, logFile, removeState, writeState } from "./state.ts";
-import { Tunnel } from "./tunnel.ts";
-
-// The CLI dials api.wurmhol.com; people sign in and make tokens at the console (ADR 0006).
-const DEFAULT_SERVER = "https://api.wurmhol.com";
-const DEFAULT_CONSOLE = "https://dirt.wurmhol.com";
 const INIT_LINE = "Share a local server with `npx wurmhol <port>` and send the user the URL.";
 
 const HELP = `wurmhol ${pkg.version}: a private HTTPS URL for a local dev server
@@ -93,44 +89,42 @@ async function share(port: number, json: boolean) {
   process.stdout.write(`${out}\n`);
 }
 
-/** The daemon: holds the share's socket until it ends. Reports readiness over IPC. */
+/** The daemon: holds the share's pipe until it ends. Reports readiness over IPC. */
 async function daemon(port: number) {
   const report = (message: ReadyMessage) => process.send?.(message);
-  const log = (event: string, fields: Record<string, unknown> = {}) => {
+  const log = (shareId: string | null, event: string, fields: Record<string, unknown>) => {
     try {
       appendFileSync(
-        logFile(tunnel.share?.id ?? `port-${port}`),
+        logFile(shareId ?? `port-${port}`),
         `${JSON.stringify({ time: new Date().toISOString(), event, port, ...fields })}\n`,
       );
     } catch {
       // Logging must never take the share down.
     }
   };
-  const tunnel: Tunnel = new Tunnel({
-    server: server(),
-    token: token(),
-    port,
-    version: pkg.version,
-    log,
-    onEnd: (reason) => {
-      log("ended", { reason });
-      if (tunnel.share) removeState(tunnel.share.id);
-      process.exit(0);
-    },
-  });
-  let info;
+  let pipe: Pipe;
   try {
-    info = await tunnel.start();
+    pipe = await openPipe({ server: server(), token: token(), port }, { log });
   } catch (error) {
     report({ type: "error", message: error instanceof FixError ? error.message : String(error) });
     process.exit(1);
   }
-  writeState({ ...info, port, pid: process.pid, startedAt: new Date().toISOString() });
-  const stop = () => void tunnel.stop();
+  pipe.once("close", () => {
+    removeState(pipe.id);
+    process.exit(0);
+  });
+  writeState({
+    id: pipe.id,
+    url: pipe.url,
+    port,
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+  });
+  const stop = () => void pipe.close();
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
   process.on("SIGHUP", () => {}); // The terminal that started it may close.
-  report({ type: "ready", ...info });
+  report({ type: "ready", id: pipe.id, url: pipe.url });
   process.disconnect?.();
 }
 
