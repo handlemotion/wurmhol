@@ -259,20 +259,26 @@
   color: var(--selection-foreground);
 }
 
-/* The login backdrop's dashed lines march along their paths (components/auth/wormhole*.tsx).
-   A cycle is one dash period (6 on, 5 off), so it loops without a seam. */
+/* The login backdrop's dashed lines march along their paths: `--march` is set by its frame loop
+   (components/auth/wormhole-chain.tsx). */
 [data-wormhole] [stroke-dasharray] {
-  animation: wormhole-march 4s linear infinite;
+  stroke-dashoffset: var(--march, 0);
 }
 
-@keyframes wormhole-march {
+/* The login backdrop's bezel turns once every five minutes, against the chain. A transform
+   animation on its own element, so the compositor runs it without the main thread. */
+[data-bezel] {
+  animation: wormhole-turn 300s linear infinite;
+}
+
+@keyframes wormhole-turn {
   to {
-    stroke-dashoffset: -11;
+    rotate: -360deg;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-wormhole] [stroke-dasharray] {
+  [data-bezel] {
     animation: none;
   }
 }

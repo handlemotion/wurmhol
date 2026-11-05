@@ -39,7 +39,8 @@ import { bearerToken, refuse } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
 import { reservedPipeName, shareOrigin } from "../env.ts";
 import { orgStub } from "../org-do.ts";
-import { shareGone, type ShareInit, shareStub, toShare } from "../share-do.ts";
+import { shareGone, shareStub, toShare } from "../share-do.ts";
+import type { ShareInit } from "../share-meta.ts";
 
 const MAX_VIEWERS = 50;
 /** Bigger than any source within `SOURCE_LIMITS`, URI-encoded. */
