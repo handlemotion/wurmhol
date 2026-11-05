@@ -1,0 +1,59 @@
+---
+title: "MCP server"
+description: "Let an agent open, list and stop pipes as MCP tools with `wurmhol mcp`."
+---
+
+`wurmhol mcp` is a local MCP server on stdio. It gives an agent three tools that do what
+`npx wurmhol <port>`, `wurmhol ls` and `wurmhol stop` do, with structured results.
+
+## Add it to Claude Code
+
+```bash
+claude mcp add wurmhol -- npx -y wurmhol mcp
+```
+
+To set it up for everyone who works in a repository, commit a `.mcp.json` at its root:
+
+```json .mcp.json
+{
+  "mcpServers": {
+    "wurmhol": { "command": "npx", "args": ["-y", "wurmhol", "mcp"] }
+  }
+}
+```
+
+Other agent hosts take the same command: `npx -y wurmhol mcp`, over stdio.
+
+## Token
+
+The server finds its token the way the CLI does:
+
+1. `WURMHOL_TOKEN` in the environment the agent host starts it with. Claude Code passes its own
+   environment on, so a cloud environment's `WURMHOL_TOKEN` reaches it (see
+   [Cloud environments](/cloud-environments)).
+2. Otherwise the token `wurmhol login` stored on this computer.
+
+Without either, a tool call fails with the fix: run `npx wurmhol login`, or set `WURMHOL_TOKEN`.
+The next call picks the token up; there is nothing to restart. Never put a token in a committed
+`.mcp.json`. `WURMHOL_URL` points the server at a self-hosted install.
+
+## Tools
+
+| Tool         | Takes                                                                       | Returns                                      |
+| ------------ | --------------------------------------------------------------------------- | -------------------------------------------- |
+| `open_pipe`  | `port`; optional `ttl` (`"90m"`, `"8h"`), `name`, `only` (a list of emails) | `{ id, url, port, name, startedAt, endsAt }` |
+| `list_pipes` | nothing                                                                     | `{ pipes: [...] }`                           |
+| `stop_pipe`  | `target` (a port, id or name), or `all: true`                               | `{ stopped: [{ id, url }] }`                 |
+
+`ttl`, `name` and `only` work like the CLI's `--ttl`, `--name` and `--only`: a pipe lasts 4 hours
+unless you ask for another lifetime, up to 12 hours on wurmhol.com.
+
+Errors come back as tool errors whose text is the one-line fix the CLI would print, such as a
+revoked token, a lifetime over the limit or an email outside the org.
+
+## How long pipes last
+
+Pipes live in the MCP server's process, like pipes from the [SDK](/sdk). They end when the
+agent's session ends and the host stops the server, or earlier at their `ttl`, from the wall, or
+with `stop_pipe`. They are separate from pipes started with `npx wurmhol` in a terminal: `wurmhol
+ls` does not list them, and `list_pipes` lists only the pipes this server opened.

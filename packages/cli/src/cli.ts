@@ -6,6 +6,7 @@
 //   wurmhol ls [--json]           open shares on this machine
 //   wurmhol stop <port|id|name>   end one; `--all` ends every one
 //   wurmhol init [--skill]        tell the repo's agents how to share
+//   wurmhol mcp                   a stdio MCP server with the same tools, for agents
 import { spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
@@ -51,6 +52,8 @@ Usage:
                                 CLAUDE.md); --skill also writes .claude/skills/wurmhol
   wurmhol login                 Approve this computer in the browser; stores a token
   wurmhol logout                Delete the stored token
+  wurmhol mcp                   Run an MCP server on stdio (open_pipe, list_pipes,
+                                stop_pipe); pipes end when the MCP session ends
 
 Environment:
   WURMHOL_TOKEN   A token from your org (${DEFAULT_CONSOLE}, menu → Tokens); wins over login
@@ -370,6 +373,7 @@ async function main() {
   if (command === "init") return init(values.skill);
   if (command === "login") return login();
   if (command === "logout") return logout();
+  if (command === "mcp") return (await import("./mcp.ts")).serve();
   const port = parsePort(command);
   if (port === null) fail(`Not a port or a command: ${command}. See: wurmhol --help`);
   let ttl: number | undefined;

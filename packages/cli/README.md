@@ -24,6 +24,7 @@ that only reaches listed hosts, allow `api.wurmhol.com`: it is the only host the
 | `wurmhol init [--skill]`             | Tell this repo's agents how to share (see below)                 |
 | `wurmhol login`                      | Approve this computer; stores `~/.wurmhol/credentials.json`      |
 | `wurmhol logout`                     | Delete the stored token                                          |
+| `wurmhol mcp`                        | Run an MCP server on stdio for agents (see below)                |
 
 A pipe ends after 4 hours. `--ttl` asks for another lifetime, like `90m` or `8h`, up to 12 hours
 on wurmhol.com.
@@ -74,6 +75,40 @@ the same, like `--name`), `signal` (an `AbortSignal`
 that closes the pipe) and `log` (`(event, fields) => {}`, the connection's connects, drops and
 reconnects; never request contents). `openPipe` rejects with a `FixError` whose message is the
 one-line fix the CLI prints. ESM only.
+
+## As an MCP server
+
+`wurmhol mcp` serves the same actions as MCP tools over stdio, for agents that call tools rather
+than run commands. In Claude Code:
+
+```bash
+claude mcp add wurmhol -- npx -y wurmhol mcp
+```
+
+or, for everyone working in a repository, in its `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "wurmhol": { "command": "npx", "args": ["-y", "wurmhol", "mcp"] }
+  }
+}
+```
+
+| Tool         | Takes                                                           | Returns                                         |
+| ------------ | --------------------------------------------------------------- | ----------------------------------------------- |
+| `open_pipe`  | `port`, and optionally `ttl` (`"90m"`), `name`, `only` (emails) | `{ id, url, port, name, startedAt, endsAt }`    |
+| `list_pipes` | nothing                                                         | `{ pipes: [...] }`, the ones this server opened |
+| `stop_pipe`  | `target` (a port, id or name), or `all: true`                   | `{ stopped: [{ id, url }] }`                    |
+
+It finds its token the way the CLI does: `WURMHOL_TOKEN` from the environment the agent host
+starts it with (a cloud environment's variables reach it), else the one `wurmhol login` stored.
+Without either, a tool call fails with that fix in one line, and works once you have done it; no
+restart needed. `WURMHOL_URL` points it at a self-hosted install. Keep tokens out of a committed
+`.mcp.json`.
+
+Pipes live in the MCP server's process: they end when the agent's session ends, and `wurmhol ls`
+does not show them (nor do the tools show pipes started with `npx wurmhol`).
 
 ## Teach your agent
 
