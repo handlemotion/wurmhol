@@ -80,8 +80,8 @@ export function Login() {
       <Wormhole className="w-full max-w-88 lg:col-span-2 lg:col-start-2">
         <div className="flex flex-col gap-6">
           <div className="flex flex-col gap-2">
-            <Heading>Welcome to the Wurmhol</Heading>
-            <Text>{reason ?? "Sign in to see what your agents are building."}</Text>
+            <Heading size="sm">Sign in to Wurmhol</Heading>
+            {reason && <Text>{reason}</Text>}
           </div>
           <div className="flex flex-col gap-2">
             {passkeyButton}
