@@ -1,10 +1,12 @@
 // The ports this computer serves web pages on, for `wurmhol host` (ADR 0018). Listening TCP
 // ports come from the OS (Linux's /proc, `lsof` on macOS, `netstat` on Windows); each new one is
-// asked for `/` once, and offered with its page's <title> when it answers like a dev server.
+// asked for `/` once, on 127.0.0.1 or else ::1, and offered with its page's <title> when it
+// answers like a dev server.
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import http from "node:http";
 import { promisify } from "node:util";
+import { Loopback } from "./loopback.ts";
 
 const run = promisify(execFile);
 
@@ -70,14 +72,24 @@ function titleOf(html: string) {
   return text.slice(0, 200) || null;
 }
 
-/** `GET path` on the port, or null when nothing answers HTTP in time. */
+/** Remembers which loopback address each port answered on, as a pipe does. */
+const loopback = new Loopback();
+
+/** `GET path` on the port (127.0.0.1, else ::1), or null when nothing answers HTTP in time. */
 function get(port: number, path: string): Promise<http.IncomingMessage | null> {
   return new Promise((resolve) => {
     const req = http.get(
-      // A `localhost` Host passes dev servers' host checks (Vite's, webpack's).
-      { host: "127.0.0.1", port, path, headers: { host: `localhost:${port}` }, timeout: PROBE_MS },
+      {
+        ...loopback.target(port, undefined),
+        port,
+        path,
+        // A `localhost` Host passes dev servers' host checks (Vite's, webpack's).
+        headers: { host: `localhost:${port}` },
+        timeout: PROBE_MS,
+      },
       resolve,
     );
+    req.on("socket", (socket) => loopback.watch(port, socket));
     req.on("timeout", () => req.destroy());
     // After a response this is only its body cut short, which `read` ends on.
     req.on("error", () => resolve(null));

@@ -79,7 +79,10 @@ export interface OpenPipeOptions {
   token: string;
   /** A self-hosted install's origin. Default `https://api.wurmhol.com`. */
   server?: string;
-  /** Where the dev server listens. Default `127.0.0.1`; it still sees `Host: localhost:<port>`. */
+  /**
+   * Where the dev server listens. Default: `127.0.0.1`, or `::1` when only that answers (Vite on
+   * Node 17+). Either way it sees `Host: localhost:<port>`.
+   */
   host?: string;
   /**
    * How long the pipe lasts: seconds, or a duration like `"90m"` or `"8h"`. Default 4 hours on
@@ -235,7 +238,7 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
     server,
     token,
     port: options.port,
-    host: options.host ?? "127.0.0.1",
+    host: options.host,
     ttl,
     viewers: options.viewers ?? [],
     name,
