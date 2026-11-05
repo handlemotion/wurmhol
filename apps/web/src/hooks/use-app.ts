@@ -111,7 +111,7 @@ export function useMachines(enabled: boolean) {
 }
 
 /**
- * A setup code for `wurmhol host --code` (ADR 0019): already approved for the signed-in person in
+ * A setup code for `wurmhol host --code` (ADR 0020): already approved for the signed-in person in
  * the active org, so the computer that runs the command logs in without asking. Minted while
  * `enabled`, fresh each time the steps open, and again before it expires; dropped once unused.
  */

@@ -2,7 +2,7 @@
 // the human approves it in the console on any device, and the CLI polls until it gets an org
 // token. Both calls go to the host the CLI already dials, through HTTPS_PROXY like the pipe.
 // `wurmhol host --code` skips the approval: Create pipe hands it a code already approved by the
-// signed-in member (ADR 0019), redeemed once on the same token endpoint.
+// signed-in member (ADR 0020), redeemed once on the same token endpoint.
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { HttpsProxyAgent } from "https-proxy-agent";

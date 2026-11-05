@@ -416,7 +416,7 @@ function Swap(props: {
   );
 }
 
-/** The command Create from this computer copies, with its setup code (ADR 0019). */
+/** The command Create from this computer copies, with its setup code (ADR 0020). */
 const host = (code: string) => `npx wurmhol host --code ${code}`;
 
 /** npm's mark (svgl) at 13px inside the rows' 15px icon slot, as the design draws it. */
@@ -529,7 +529,7 @@ function StepMark({ n, done }: { n: number; done: boolean }) {
 }
 
 /**
- * Create from this computer (ADR 0018, 0019): run the command here, then pick a port it found.
+ * Create from this computer (ADR 0018, 0020): run the command here, then pick a port it found.
  * The command carries a setup code for the signed-in person, so the CLI needs no approval. The
  * first step collapses to its answer once a computer connects; picking a port opens its pipe and
  * its card.

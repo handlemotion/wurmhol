@@ -7,7 +7,7 @@
 //   is returned instead.
 // - The console's three calls under `/api/device`, for a signed-in member: look a code up, approve
 //   it for the active org, or deny it. The org is recorded on the code's scope as `org:<id>`.
-// - A setup code (ADR 0019): `POST /api/device/setup` issues a code already approved by the
+// - A setup code (ADR 0020): `POST /api/device/setup` issues a code already approved by the
 //   caller for the active org and hands back its device code, which Create pipe puts in
 //   `wurmhol host --code`. The CLI redeems it on `/device/token` like any other, once.
 //
@@ -235,7 +235,7 @@ export const deviceApproval = new Hono<AppEnv>()
     return c.json({ ok: true });
   })
   /**
-   * A setup code for Create pipe's command (ADR 0019): issued, claimed and approved for the
+   * A setup code for Create pipe's command (ADR 0020): issued, claimed and approved for the
    * caller and the active org in one call, so the computer that redeems it needs no approval.
    */
   .post("/setup", limitPerMember("manage"), async (c) => {
