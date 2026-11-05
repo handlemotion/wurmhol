@@ -1,0 +1,25 @@
+---
+title: "Domains"
+description: "Hostnames, certificates and why pipes get a domain of their own."
+---
+
+| Host                     | What it is                                  | Var               |
+| ------------------------ | ------------------------------------------- | ----------------- |
+| `dirt.example.com`       | dirt, a custom domain on the Worker         | `BETTER_AUTH_URL` |
+| `api.example.com`        | What the CLI talks to, optional             | `CONNECT_HOST`    |
+| `app.example.com`        | Redirects to dirt, optional                 | `APP_ALIASES`     |
+| `<id>.example-pipes.dev` | Pipes, on a second zone in the same account | `SHARE_DOMAIN`    |
+
+## A domain for pipes
+
+Pipes go on their own domain so every pipe is a different site from dirt. The zone needs a proxied wildcard record `*` (an `AAAA` to `100::`, the Worker answers) and the route `*.example-pipes.dev/*` to the Worker. Its free Universal SSL certificate covers `*.example-pipes.dev`.
+
+You can put pipes one level down on your main domain instead, like `<id>.pipe.example.com`, but that two-level wildcard needs Cloudflare's paid Advanced Certificate Manager, and pipes are the same site as dirt until the Public Suffix List entry below lands.
+
+## Public Suffix List
+
+Submit your pipe domain to the [Public Suffix List](https://github.com/publicsuffix/list) so browsers treat each pipe as its own site, then one pipe's JavaScript can't read or set cookies for another. Wurmhol's own cookies are `__Host-` cookies either way. The list asks for more than two years of registration left on the domain.
+
+## Sign-in for apps behind pipes
+
+To give your users the [OAuth relay](/pipes#apps-with-sign-in), set `OAUTH_RELAY_HOST` to a host under your pipe domain, like `oauth.example-pipes.dev`. The wildcard record, route and certificate already cover it, and `--name oauth` is then reserved.

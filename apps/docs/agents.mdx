@@ -1,0 +1,38 @@
+---
+title: "With your agent"
+description: "Let a coding agent share its own dev server and send you the link."
+---
+
+Wurmhol is made for the agent to run, you just open the link it sends. It needs a token and, in a sandbox, one host on its allowed list.
+
+## Cloud environments
+
+In a cloud sandbox like Claude Code on the web, put the token in the environment's settings. When you create a token, dirt shows the values below, each copied in one click.
+
+| Setting                         | Value                |
+| ------------------------------- | -------------------- |
+| Environment variables           | `WURMHOL_TOKEN=wh_…` |
+| Network access, allowed domains | `api.wurmhol.com`    |
+
+`api.wurmhol.com` is the only host the CLI talks to, the people opening pipes do that from their own browsers. New sessions pick both up. Use `WURMHOL_TOKEN` here and skip `wurmhol login`, a saved token dies with the container.
+
+If the sandbox goes through a proxy, the CLI uses `HTTPS_PROXY` and trusts the proxy's certificate from `NODE_EXTRA_CA_CERTS`. Claude Code's cloud sets both for you. It needs Node 22 or later.
+
+## Teach it when to share
+
+In Claude Code, install the `wurmhol` plugin. It tells the agent to share when you want to see something running, to send you the link, to stop the pipe when it's done and to keep the token out of its output.
+
+```text
+/plugin marketplace add handlemotion/wurmhol
+/plugin install wurmhol@wurmhol
+```
+
+For any other agent, run this in the project.
+
+```bash
+npx wurmhol init
+```
+
+It adds one line to `AGENTS.md` (or `CLAUDE.md`) with your dev server's port, read from `package.json`, and tells you if a token is missing. `--skill` also writes the skill to `.claude/skills/wurmhol`.
+
+Agents that prefer tools over commands can use the [MCP server](/mcp), and orchestrators can open pipes from their own code with the [SDK](/sdk).

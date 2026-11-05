@@ -1,0 +1,20 @@
+---
+title: "Glossary"
+description: "What we call things, and why."
+---
+
+**Pipe**, one private link to one port. You open one with `npx wurmhol <port>` and it ends when it's stopped or out of time.
+
+**dirt**, the console at [dirt.wurmhol.com](https://dirt.wurmhol.com), where you sign in, see the wall and manage tokens and members. Worms live in it. `app.wurmhol.com` takes you there too.
+
+**Wall**, dirt's main page, every open pipe in your org around the Create pipe button. Press one to see its link, who started it and when, and to open or end it.
+
+**Org**, who a pipe belongs to and who can open it. You can be in more than one and switch between them in dirt.
+
+**Owner** and **member**, owners invite people with an invite link, remove them and pay. Members open, see and end pipes.
+
+**Token**, a `wh_…` key that lets a machine or an agent open pipes for an org. Tokens belong to the org, not to a person.
+
+**Named pipe**, a pipe opened with `--name`, so its URL stays the same every time.
+
+**Relay**, the part of Wurmhol in between, it checks who you are and forwards requests to the machine running the dev server. Also the [OAuth relay](/pipes#apps-with-sign-in), which sends sign-in callbacks back to the right pipe.

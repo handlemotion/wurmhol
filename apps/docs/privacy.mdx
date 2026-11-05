@@ -1,0 +1,12 @@
+---
+title: "Privacy"
+description: "What the relay can see, what we keep and what never leaves the pipe."
+---
+
+TLS ends at our relay, so it could technically read what goes through a pipe. We never log or store request or response bodies. The only things we keep from your app are the page's `<title>` and its favicon, so the pipe looks like itself on the wall, and they're deleted when the pipe ends.
+
+Your dev server never sees Wurmhol's cookies, the relay strips them before forwarding. Sign-in uses `__Host-` cookies, bound to one host, and every request is checked against the org before it gets anywhere near your app.
+
+For each pipe we keep its history for 90 days, who started it, the port, when it ran and how many bytes it moved, and which members opened it and how often, never which pages. The [OAuth relay](/pipes#apps-with-sign-in) keeps a hash of a sign-in's `state` and its pipe for up to 10 minutes.
+
+The full list, with how long each thing is kept, is on [wurmhol.com/privacy](https://wurmhol.com/privacy). If none of this works for you, [host it yourself](/self-hosting).

@@ -12,22 +12,46 @@
     "family": "Inter"
   },
   "navbar": {
-    "links": [{ "label": "GitHub", "href": "https://github.com/handlemotion/wurmhol" }],
-    "primary": { "type": "button", "label": "Sign in", "href": "https://dirt.wurmhol.com/login" }
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/handlemotion/wurmhol"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Sign in",
+      "href": "https://dirt.wurmhol.com/login"
+    }
   },
   "navigation": {
     "groups": [
       {
         "group": "Get started",
-        "pages": ["index", "quickstart", "cloud-environments"]
+        "pages": ["index", "quickstart", "agents"]
       },
       {
-        "group": "Reference",
-        "pages": ["cli", "mcp", "sdk", "self-hosting"]
+        "group": "Using it",
+        "pages": ["pipes", "cli", "mcp", "sdk"]
+      },
+      {
+        "group": "Self-hosting",
+        "pages": [
+          "self-hosting/index",
+          "self-hosting/domains",
+          "self-hosting/configuration",
+          "self-hosting/manual"
+        ]
+      },
+      {
+        "group": "More",
+        "pages": ["pricing", "privacy", "glossary"]
       }
     ]
   },
   "footer": {
-    "socials": { "github": "https://github.com/handlemotion/wurmhol" }
+    "socials": {
+      "github": "https://github.com/handlemotion/wurmhol"
+    }
   }
 }

@@ -1,0 +1,45 @@
+---
+title: "Pipes"
+description: "How long a pipe lasts, keeping its URL, who can open it and apps that sign in."
+---
+
+A pipe is one link to one port on one machine. It stays open after the command returns, until it's stopped, ended from the wall or out of time.
+
+## How long it lasts
+
+A pipe lasts 4 hours. `--ttl` asks for another lifetime, up to 12 hours.
+
+```bash
+npx wurmhol 5173 --ttl 8h
+```
+
+`npx wurmhol ls` shows what's open and when each one ends. Once a pipe ends, its random link never works again.
+
+## A URL that stays
+
+A random link is fine to look at something once, but some apps need the same URL every time, mostly ones that sign in with Google or GitHub, since those only send you back to a URL you registered. `--name` keeps it.
+
+```bash
+npx wurmhol 5173 --name my-app
+# https://my-app.wurmhol.dev
+```
+
+The first org to use a name keeps it, and only one pipe per name is open at a time.
+
+## Who can open it
+
+Everyone in the org, by default. `--only` narrows it down to some members, and anyone else gets a page saying to ask whoever started it.
+
+```bash
+npx wurmhol 5173 --only ana@example.com,bo@example.com
+```
+
+## Apps with sign-in
+
+If you run several pipes of the same app at once, one per agent or per branch, registering a callback for each name gets old fast, and a GitHub OAuth App only takes one callback anyway. Register our relay with the provider once instead.
+
+1. Register `https://oauth.wurmhol.dev/<your callback path>`, or just `https://oauth.wurmhol.dev` for a GitHub OAuth App.
+2. Point your app's redirect URI at it (in Better Auth, the provider's `redirectURI`).
+3. Open as many pipes as you want, named or not.
+
+When your app sends someone to the provider, the relay remembers which pipe the sign-in came from and sends the provider's callback back to that pipe, same path and query. The app has to send people off with a redirect or a `Location` header, `response_mode=form_post` doesn't work. [Privacy](/privacy) has what the relay keeps.

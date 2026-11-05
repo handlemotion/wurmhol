@@ -14,7 +14,7 @@ APP_ALIASES=
 # Shares live at <id>.<SHARE_DOMAIN>, same scheme and port as BETTER_AUTH_URL. Locally
 # `pipe.localhost` (browsers resolve *.localhost to this machine); in production a domain on the
 # Public Suffix List with a wildcard certificate, such as example-pipes.dev (its own registrable
-# domain, docs/self-hosting.md).
+# domain, apps/docs/self-hosting/domains.mdx).
 SHARE_DOMAIN=pipe.localhost
 # Optional (ADR 0010). The OAuth callback relay's host, same scheme and port as BETTER_AUTH_URL:
 # an app behind any number of pipes registers one redirect URI per provider on it, like
@@ -53,7 +53,7 @@ GITHUB_CLIENT_ID=
 # Secret.
 GITHUB_CLIENT_SECRET=
 
-# --- Billing (optional; docs/self-hosting.md "Billing") ---
+# --- Billing (optional; apps/docs/self-hosting/configuration.mdx) ---
 # Leave STRIPE_SECRET_KEY empty for no billing: pipes never need a plan.
 # Secret. Stripe secret key (sk_test_... in a sandbox).
 STRIPE_SECRET_KEY=

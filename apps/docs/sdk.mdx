@@ -1,27 +1,43 @@
 ---
-title: "From your own process"
-description: "Open pipes from an orchestrator with `openPipe`."
+title: "SDK and API"
+description: "Open pipes from your own code, and list or close your org's pipes over HTTP."
 ---
 
-For orchestrators that open pipes for many agents. No daemon: the pipe lives in your process.
+For orchestrators that run lots of agents and want to hand people links without going through a terminal. There's no daemon, the pipe lives in your process and closes with it.
 
 ```ts
 import { openPipe } from "wurmhol";
 
-const pipe = await openPipe({ port: 5173, token: process.env.WURMHOL_TOKEN! });
+const pipe = await openPipe({ port: 5173, token: process.env.WURMHOL_TOKEN });
 pipe.url; // send it to the humans
-pipe.on("request", ({ method, path, status, durationMs }) => {}); // stays in this process
-pipe.on("close", (reason) => {}); // "stopped", "terminated", "expired", "revoked", ...
+pipe.on("request", ({ method, path, status, durationMs }) => {});
+pipe.on("close", (reason) => {}); // "stopped", "expired", "terminated", "revoked", ...
 await pipe.close();
 ```
 
-| Option    | Does                                                                            |
-| --------- | ------------------------------------------------------------------------------- |
-| `server`  | A self-hosted install                                                           |
-| `host`    | Where the dev server listens. Default `127.0.0.1`                               |
-| `ttl`     | Seconds, or a duration like `"8h"`. `pipe.endsAt` says when it ends             |
-| `viewers` | Emails of the org members who may open it, like `--only`                        |
-| `signal`  | An `AbortSignal` that closes the pipe                                           |
-| `log`     | `(event, fields) => {}`: connects, drops and reconnects; never request contents |
+The `request` events stay in your process, we never see them.
 
-`openPipe` rejects with a `FixError` whose message is the one-line fix the CLI prints. ESM only.
+| Option    | Does                                                                               |
+| --------- | ---------------------------------------------------------------------------------- |
+| `port`    | The dev server's port                                                              |
+| `token`   | Your org's token                                                                   |
+| `host`    | Where the dev server listens, `127.0.0.1` by default                               |
+| `ttl`     | Seconds, or a duration like `"8h"`. `pipe.endsAt` says when it ends                |
+| `name`    | A URL that stays the same, like `--name`                                           |
+| `viewers` | The org members who can open it, like `--only`                                     |
+| `signal`  | An `AbortSignal` that closes the pipe                                              |
+| `server`  | Your own install, if you self-host                                                 |
+| `log`     | `(event, fields) => {}` for connects, drops and reconnects, never request contents |
+
+`openPipe` rejects with a `FixError` whose message is the same one-line fix the CLI prints. It's ESM only.
+
+## Pipes API
+
+To see or close pipes you didn't open yourself, create a token with "Can list and close every pipe in the org" ticked, and call the CLI's host with it.
+
+```bash
+curl -H "Authorization: Bearer $WURMHOL_TOKEN" https://api.wurmhol.com/v1/pipes
+curl -X DELETE -H "Authorization: Bearer $WURMHOL_TOKEN" https://api.wurmhol.com/v1/pipes/<id>
+```
+
+The first lists the org's open pipes, the same ones on the wall, and the second ends one like Terminate does.
