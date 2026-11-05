@@ -7,10 +7,12 @@
 //   wurmhol ls [--json]           open shares on this machine
 //   wurmhol stop <port|id|name>   end one; `--all` ends every one
 //   wurmhol init [--skill]        tell the repo's agents how to share
+//   wurmhol host                  connect this computer to the wall; open pipes from the browser
+//                                 (--install runs it at login, --uninstall removes that)
 //   wurmhol mcp                   a stdio MCP server with the same tools, for agents
 import { spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { hostname } from "node:os";
+import { homedir, hostname } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -31,7 +33,9 @@ import {
   writeCredentials,
 } from "./credentials.ts";
 import { FixError } from "./errors.ts";
-import { login as deviceLogin } from "./login.ts";
+import { host as runHost } from "./host.ts";
+import { login as deviceLogin, redeem } from "./login.ts";
+import { checkService, installService, stableEntry, uninstallService } from "./service.ts";
 import { DEFAULT_CONSOLE, DEFAULT_SERVER, openPipe, type Pipe } from "./pipe.ts";
 import { detectSource } from "./source.ts";
 import { alive, listStates, logFile, removeState, writeState } from "./state.ts";
@@ -61,6 +65,12 @@ Usage:
   wurmhol stop <port|id|name>   End a pipe (--all ends every one)
   wurmhol init [--skill]        Tell this repo's agents how to share (AGENTS.md or
                                 CLAUDE.md); --skill also writes .claude/skills/wurmhol
+  wurmhol host                  Connect this computer to the wall, to open pipes to its
+                                ports from Create pipe in the browser; logs in first if needed
+    --code <code>               Log in with the setup code in Create pipe's command
+    --install                   Run it at login and keep it running (macOS, Linux with
+                                systemd); needs npm install -g wurmhol
+    --uninstall                 Stop running it at login
   wurmhol login                 Approve this computer in the browser; stores a token
   wurmhol logout                Delete the stored token
   wurmhol mcp                   Run an MCP server on stdio (open_pipe, list_pipes,
@@ -70,6 +80,7 @@ Environment:
   WURMHOL_TOKEN   A token from your org (${DEFAULT_CONSOLE}, menu → Tokens); wins over login
   WURMHOL_HOME    Where wurmhol keeps its state (default ~/.wurmhol)
   WURMHOL_URL     A self-hosted install (default ${DEFAULT_SERVER})
+  WURMHOL_HOST_IGNORE  Ports wurmhol host never lists, like 9229,5555
 
 The wall shows where each pipe came from: the git repo, branch and commit of the
 directory it was opened in, and the agent session, when the environment names one.
@@ -105,13 +116,30 @@ function server() {
   }
 }
 
-/** WURMHOL_TOKEN when set, else the token `wurmhol login` stored for this server. */
-function token() {
+/** WURMHOL_TOKEN when set, else the token `wurmhol login` stored for this server, else null. */
+function findToken() {
   const value = process.env.WURMHOL_TOKEN?.trim();
   if (value) return value;
   const stored = readCredentials();
-  if (stored && stored.server === server()) return stored.token;
+  return stored && stored.server === server() ? stored.token : null;
+}
+
+function token() {
+  const found = findToken();
+  if (found) return found;
   fail(`Run wurmhol login, or set WURMHOL_TOKEN to a token from ${consoleUrl()} (menu → Tokens).`);
+}
+
+/** Stores a granted token as this server's login and says so. */
+function saveLogin(granted: { token: string; org: { name: string | null }; name: string }) {
+  writeCredentials({
+    server: server(),
+    token: granted.token,
+    org: granted.org.name,
+    name: granted.name,
+  });
+  const org = granted.org.name ? ` to ${granted.org.name}` : "";
+  process.stdout.write(`Logged in${org} as ${granted.name}. Token saved in ${credentialsFile()}\n`);
 }
 
 async function login() {
@@ -123,16 +151,7 @@ async function login() {
       prompt: (code) =>
         process.stdout.write(`Open ${code.verification_uri} and enter ${code.user_code}\n`),
     });
-    writeCredentials({
-      server: server(),
-      token: granted.token,
-      org: granted.org.name,
-      name: granted.name,
-    });
-    const org = granted.org.name ? ` to ${granted.org.name}` : "";
-    process.stdout.write(
-      `Logged in${org} as ${granted.name}. Token saved in ${credentialsFile()}\n`,
-    );
+    saveLogin(granted);
     if (process.env.WURMHOL_TOKEN?.trim()) {
       process.stdout.write("WURMHOL_TOKEN is set and wins over the saved token.\n");
     }
@@ -147,30 +166,33 @@ function logout() {
 }
 
 /** Starts the detached daemon and waits for it to report the URL (or the reason it could not). */
-async function share(
+async function startDaemon(
   port: number,
-  ttl: number | undefined,
-  json: boolean,
-  only: string | undefined,
-  name: string | undefined,
-  extra: { link?: string; note?: string },
-) {
-  token();
+  options: {
+    ttl?: number;
+    only?: string;
+    name?: string;
+    link?: string;
+    note?: string;
+    cwd?: string;
+  } = {},
+): Promise<ReadyMessage> {
   const entry = fileURLToPath(import.meta.url);
   const args = [
     entry,
     "__daemon",
     String(port),
-    ...(ttl === undefined ? [] : [String(ttl)]),
-    ...(only ? ["--only", only] : []),
-    ...(name ? ["--name", name] : []),
-    ...(extra.link ? ["--link", extra.link] : []),
-    ...(extra.note ? ["--note", extra.note] : []),
+    ...(options.ttl === undefined ? [] : [String(options.ttl)]),
+    ...(options.only ? ["--only", options.only] : []),
+    ...(options.name ? ["--name", options.name] : []),
+    ...(options.link ? ["--link", options.link] : []),
+    ...(options.note ? ["--note", options.note] : []),
   ];
   const child = spawn(process.execPath, args, {
     detached: true,
     stdio: ["ignore", "ignore", "ignore", "ipc"],
     env: process.env,
+    cwd: options.cwd,
   });
   const message = await new Promise<ReadyMessage>((resolve) => {
     child.once("message", (m) => resolve(m as ReadyMessage));
@@ -182,12 +204,107 @@ async function share(
     );
   });
   child.removeAllListeners("exit");
+  if (message.type === "ready") {
+    child.disconnect();
+    child.unref();
+  }
+  return message;
+}
+
+async function share(
+  port: number,
+  ttl: number | undefined,
+  json: boolean,
+  only: string | undefined,
+  name: string | undefined,
+  extra: { link?: string; note?: string },
+) {
+  token();
+  const message = await startDaemon(port, { ttl, only, name, ...extra });
   if (message.type === "error") fail(message.message);
-  child.disconnect();
-  child.unref();
   const { url, id, endsAt } = message;
   const out = json ? JSON.stringify({ url, port, id, endsAt }) : url;
   process.stdout.write(`${out}\n`);
+}
+
+/**
+ * `wurmhol host`: logs in with Create pipe's setup code when given one (ADR 0020), else if there
+ * is no token yet, then keeps this computer connected to the wall. A port picked there opens as
+ * `wurmhol <port>` would, from the home directory (its git repo is not this one's to tell), and
+ * keeps running if this process ends.
+ */
+async function serveHost(code: string | undefined) {
+  const say = (line: string) => process.stdout.write(`${line}\n`);
+  let granted: string | null = null;
+  if (code) {
+    try {
+      const redeemed = await redeem({
+        server: server(),
+        code,
+        name: hostname(),
+        version: pkg.version,
+      });
+      saveLogin(redeemed);
+      granted = redeemed.token;
+    } catch (error) {
+      fail(error instanceof FixError ? error.message : String(error));
+    }
+  } else if (!findToken()) {
+    await login();
+  }
+  try {
+    await runHost({
+      server: server(),
+      // The card's code names the org the person is looking at, so it wins over WURMHOL_TOKEN.
+      token: granted ?? token(),
+      name: hostname(),
+      version: pkg.version,
+      say,
+      open: async (port) => {
+        const open = listStates().find((s) => s.port === port);
+        if (open) return open.url;
+        const message = await startDaemon(port, { cwd: homedir() });
+        if (message.type === "error") throw new FixError(message.message);
+        return message.url;
+      },
+    });
+  } catch (error) {
+    fail(error instanceof FixError ? error.message : String(error));
+  }
+}
+
+/**
+ * `wurmhol host --install`: logs in if this computer has no saved token (the service reads that
+ * file, never WURMHOL_TOKEN), then runs this installed CLI's `host` at login.
+ */
+async function installHost() {
+  try {
+    const entry = stableEntry(fileURLToPath(import.meta.url));
+    checkService();
+    const stored = readCredentials();
+    if (!stored || stored.server !== server()) await login();
+    const env: Record<string, string> = {};
+    for (const name of ["WURMHOL_HOME", "WURMHOL_URL"] as const) {
+      const value = process.env[name];
+      if (value) env[name] = value;
+    }
+    const log = logFile("host");
+    const file = installService({ node: process.execPath, entry, env, log });
+    process.stdout.write(
+      `Installed ${file}: wurmhol host is running and starts at login. Logs: ${log}\n`,
+    );
+  } catch (error) {
+    fail(error instanceof FixError ? error.message : String(error));
+  }
+}
+
+function uninstallHost() {
+  try {
+    const file = uninstallService();
+    process.stdout.write(file ? `Removed ${file}\n` : "wurmhol host is not installed.\n");
+  } catch (error) {
+    fail(error instanceof FixError ? error.message : String(error));
+  }
 }
 
 /** The daemon: holds the share's pipe until it ends. Reports readiness over IPC. */
@@ -409,7 +526,10 @@ function parseCommandLine(args = process.argv.slice(2)) {
         note: { type: "string" },
         all: { type: "boolean", default: false },
         skill: { type: "boolean", default: false },
+        install: { type: "boolean", default: false },
+        uninstall: { type: "boolean", default: false },
         ttl: { type: "string" },
+        code: { type: "string" },
         help: { type: "boolean", short: "h", default: false },
         version: { type: "boolean", short: "v", default: false },
       },
@@ -435,6 +555,9 @@ async function main() {
   if (command === "stop") return stop(argument, values.all);
   if (command === "init") return init(values.skill);
   if (command === "login") return login();
+  if (command === "host" && values.install) return installHost();
+  if (command === "host" && values.uninstall) return uninstallHost();
+  if (command === "host") return serveHost(values.code?.trim() || undefined);
   if (command === "logout") return logout();
   if (command === "mcp") return (await import("./mcp.ts")).serve();
   const port = parsePort(command);

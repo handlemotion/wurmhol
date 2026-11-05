@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import {
   api,
   type AppConfig,
+  type Machine,
   type Member,
   type Share,
   type SignInMethods,
@@ -74,6 +75,66 @@ export function useWall(orgId: string | null) {
     return () => wall.close();
   }, [orgId]);
   return shares;
+}
+
+/**
+ * The signed-in person's computers running `wurmhol host`, live while `enabled` (ADR 0018):
+ * undefined until the first answer, then every change as the Org object pushes it.
+ */
+export function useMachines(enabled: boolean) {
+  const [machines, setMachines] = useState<Machine[] | undefined>(undefined);
+  useEffect(() => {
+    if (!enabled) return;
+    let socket: WebSocket | null = null;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const connect = () => {
+      const url = new URL("/api/machines/live", location.href);
+      url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      socket = new WebSocket(url);
+      socket.onmessage = (message) => {
+        const event = JSON.parse(String(message.data)) as { type: string; machines: Machine[] };
+        if (event.type === "machines") setMachines(event.machines);
+      };
+      socket.onclose = () => {
+        if (!stopped) timer = setTimeout(connect, 2000);
+      };
+    };
+    connect();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      socket?.close();
+    };
+  }, [enabled]);
+  return machines;
+}
+
+/**
+ * A setup code for `wurmhol host --code` (ADR 0020): already approved for the signed-in person in
+ * the active org, so the computer that runs the command logs in without asking. Minted while
+ * `enabled`, fresh each time the steps open, and again before it expires; dropped once unused.
+ */
+export function useSetupCode(enabled: boolean) {
+  return useQuery({
+    queryKey: ["setup-code"],
+    queryFn: () =>
+      api<{ code: string; expires_in: number }>("/api/device/setup", { method: "POST" }),
+    enabled,
+    gcTime: 0,
+    staleTime: 20 * 60_000,
+    refetchInterval: 20 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+}
+
+/** Opens a pipe on one of the person's computers, to a port it reported. */
+export function useOpenPort() {
+  return useMutation({
+    mutationFn: ({ machine, port }: { machine: string; port: number }) =>
+      api<{ url: string }>(`/api/machines/${machine}/open`, { method: "POST", body: { port } }),
+  });
 }
 
 export function useTerminate() {

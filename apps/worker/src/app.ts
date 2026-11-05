@@ -11,6 +11,7 @@ import { connect } from "./routes/connect.ts";
 import { deviceApproval, deviceFlow } from "./routes/device.ts";
 import { open } from "./routes/open.ts";
 import { githubRoutes } from "./routes/github.ts";
+import { machineConnect } from "./routes/machines.ts";
 import { serveMcp } from "./routes/mcp.ts";
 import { pipes } from "./routes/pipes.ts";
 import { securityHeaders } from "./security-headers.ts";
@@ -111,7 +112,7 @@ const OAUTH_ROUTES = new Set([
   "GET /api/auth/jwks",
 ]);
 
-/** The app's host: the console, its API, `/connect`, `/device/*` and `/v1`. Share hosts never reach this (index.ts). */
+/** The app's host: the console, its API, `/connect`, `/host`, `/device/*` and `/v1`. Share hosts never reach this (index.ts). */
 export const app = new Hono<AppEnv>()
   .use(trace)
   .get("/health", (c) => c.json({ ok: true }))
@@ -153,6 +154,8 @@ export const app = new Hono<AppEnv>()
   })
   .use("/connect", requestScope)
   .route("/connect", connect)
+  .use("/host", requestScope)
+  .route("/host", machineConnect)
   .use("/device/*", requestScope)
   .route("/device", deviceFlow)
   .use("/v1/*", requestScope, securityHeaders)

@@ -1,10 +1,15 @@
 // The wall in a real browser (ADR 0011): Chromium through Playwright, signed in to the real stack,
 // with pipes opened by the real CLI to real local HTTP servers. The network runs its reduced-motion
 // path (nodes hold still), so a press lands where the pill is rather than where it drifted from.
+import { spawn } from "node:child_process";
+import { hostname } from "node:os";
 import { type Browser, type BrowserContext, chromium, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  api,
+  cli,
   cliEnv,
+  cliPath,
   createToken,
   localServer,
   type Person,
@@ -102,7 +107,6 @@ describe("the wall in a browser", () => {
         "Start the dev server, then run `npx wurmhol <port>` with its port and send me the URL it prints.",
       ],
       ["Copy npx command", "npx wurmhol <port>"],
-      ["Copy setup for this computer", "npx wurmhol login && npx wurmhol <port>"],
     ];
     for (const [label, text] of rows) {
       await page.getByRole("menuitem", { name: label }).click();
@@ -207,5 +211,82 @@ describe("the wall in a browser", () => {
         return Math.hypot(back.x - before.x, back.y - before.y) < 1.5;
       })
       .toBe(true);
+  });
+
+  it("creates a pipe from this computer: one copied command, no token, no approval, then its ports and the picked one opens", async () => {
+    const local = await localServer((_req, res) =>
+      res.writeHead(200, { "content-type": "text/html" }).end("<title>From this computer</title>"),
+    );
+    servers.push(local);
+    await page.locator("[data-create]").click();
+    await page.getByRole("menuitem", { name: "Create from this computer" }).click();
+    const card = page.locator("section[data-open]");
+    const run = card.getByRole("button", { name: /^Copy run: npx wurmhol host --code \S+$/ });
+    // Catches: the steps opening without the command to run, or in a card of another size.
+    await expect.poll(() => run.count()).toBe(1);
+    expect((await card.boundingBox())!.width).toBe((await card.boundingBox())!.height);
+    // Catches: a card still asking to approve a link in the terminal.
+    expect(await card.textContent()).not.toContain("Approve");
+    await run.click();
+    const command = await page.evaluate(() => navigator.clipboard.readText());
+    const [npx, binary, ...args] = command.split(" ");
+    expect([npx, binary, args[0], args[1]]).toEqual(["npx", "wurmhol", "host", "--code"]);
+
+    // A computer that has never logged in: no WURMHOL_TOKEN, nothing saved.
+    const fresh: Record<string, string> = cliEnv(stack, "");
+    delete fresh.WURMHOL_TOKEN;
+    let said = "";
+    const host = spawn(process.execPath, [cliPath, ...args], {
+      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...fresh },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    host.stdout!.on("data", (chunk: Buffer) => (said += chunk));
+    host.stderr!.on("data", (chunk: Buffer) => (said += chunk));
+    try {
+      const row = card.getByRole("menuitem", { name: new RegExp(`:${local.port}`) });
+      // Catches: the card not hearing that the computer connected, or its ports.
+      await expect.poll(() => row.isVisible(), { timeout: 15_000 }).toBe(true);
+      expect(await row.textContent()).toContain("From this computer");
+      await row.click();
+      // Catches: a pick that opens nothing, or a pipe whose card never opens on the wall in
+      // place of Create pipe.
+      await expect
+        .poll(async () => (await card.count()) === 1 && (await card.textContent()), {
+          timeout: 15_000,
+        })
+        .toContain("Terminate");
+      expect(await card.textContent()).toContain("From this computer");
+
+      await page.keyboard.press("Escape");
+      await page.locator("[data-create]").click();
+      await page.getByRole("menuitem", { name: "Create from this computer" }).click();
+      await card.getByRole("button", { name: "Back" }).click();
+      // Catches: Back leaving the steps on screen instead of the ways to start a pipe.
+      await expect
+        .poll(() => page.getByRole("menuitem", { name: "Copy agent prompt" }).isVisible())
+        .toBe(true);
+      await page.keyboard.press("Escape");
+      // Catches: the CLI printing a device-code prompt to approve instead of logging straight in.
+      expect(said).not.toContain("and enter");
+      expect(said).toContain(`as ${hostname()}`);
+      await stopAll(fresh);
+    } finally {
+      host.kill();
+    }
+
+    // Catches: a setup code that logs in a second computer (it is single use), or a refusal that
+    // does not say where to get a new one.
+    const reused = await cli(args, fresh);
+    expect(reused.code).toBe(1);
+    expect(reused.stderr).toContain("Copy the command again from Create pipe");
+    // Catches: the token named after something other than the computer, or owned by no one.
+    const { body } = await api<{ tokens: { name: string; source: string }[] }>(
+      stack,
+      ada,
+      "/api/tokens",
+    );
+    expect(body.tokens.filter((t) => t.name === hostname() && t.source === "login")).toHaveLength(
+      1,
+    );
   });
 });

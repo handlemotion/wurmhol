@@ -4,6 +4,7 @@ import { cn } from "cn";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Skeleton } from "skullet/react";
 import {
+  IconArrowLeft,
   IconChevronsUpDown,
   IconCreditCard,
   IconEllipsis,
@@ -25,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { CopyField } from "@/components/ui/copy-field";
 import { SkeletonProvider } from "@/components/ui/skeleton-provider";
 import { Link } from "@/components/ui/link";
+import { Loader } from "@/components/ui/loader";
 import {
   Menu,
   MenuDescription,
@@ -39,8 +41,11 @@ import {
   useAppConfig,
   useMe,
   useNow,
+  useMachines,
   useOpenBilling,
+  useOpenPort,
   usePrefetchDialogs,
+  useSetupCode,
   useSignOut,
   useSwitchOrg,
   useTerminate,
@@ -48,7 +53,7 @@ import {
 } from "@/hooks/use-app";
 import { useClipboard } from "@/hooks/use-clipboard";
 import { useGithub } from "@/hooks/use-github";
-import type { Me, PipeSource, Share } from "@/lib/api";
+import type { Machine, Me, PipeSource, Share } from "@/lib/api";
 import { initials } from "@/lib/initials";
 import { ago } from "@/lib/time";
 import { MembersDialog } from "./members-dialog";
@@ -279,6 +284,14 @@ const PROMPT =
  */
 function Network({ shares }: { shares: Share[] }) {
   const [open, setOpen] = useState<string | null>(null);
+  // A pipe opened from this computer: its card opens once the wall has it.
+  const [opened, setOpened] = useState<string | null>(null);
+  useEffect(() => {
+    const share = opened && shares.find((s) => s.url === opened);
+    if (!share) return;
+    setOpened(null);
+    setOpen(share.id);
+  }, [opened, shares]);
   const current = open === ANCHOR || shares.some((share) => share.id === open) ? open : null;
   // The pill to focus once its card has gone.
   const restore = useRef<string | null>(null);
@@ -331,8 +344,9 @@ function Network({ shares }: { shares: Share[] }) {
           {shares.length === 0 && <span className="sr-only">No open pipes yet.</span>}
           <Swap
             open={current === ANCHOR}
+            edge="border-border"
             onClosed={onClosed}
-            card={<CreateCard />}
+            card={<CreateCard onOpened={setOpened} />}
             pill={
               <Button
                 intent="secondary"
@@ -352,6 +366,7 @@ function Network({ shares }: { shares: Share[] }) {
         render: (
           <Swap
             open={share.id === current}
+            edge="border-primary"
             onClosed={onClosed}
             card={<PipeCard share={share} />}
             pill={<PipePill share={share} onPress={() => setOpen(share.id)} />}
@@ -363,47 +378,89 @@ function Network({ shares }: { shares: Share[] }) {
 }
 
 /**
- * A node's pill or its card. The card grows out of the spot its pill stood on (`--grow-origin`,
- * which the constellation sets) and shrinks back into it on close, both fast; the pill steps
- * aside at once and returns once the card has gone.
+ * The card's box, at `--open` from 0 (the pill's rect inside it, from `--pill-*`, which the
+ * constellation sets) to 1 (the whole card). Inset clipping, so the content unfolds unscaled.
+ */
+const unfold = (edge: "x" | "y", side: "start" | "end") => {
+  const at = `var(--pill-${edge})`;
+  const half = `var(--pill-${edge === "x" ? "w" : "h"}) / 2`;
+  const inset = side === "start" ? `(${at} - ${half})` : `(100% - ${at} - ${half})`;
+  return `calc(${inset} * (1 - var(--open)))`;
+};
+const TOP = unfold("y", "start");
+const RIGHT = unfold("x", "end");
+const BOTTOM = unfold("y", "end");
+const LEFT = unfold("x", "start");
+
+/**
+ * A still copy of the pill at its own rect inside the card: opaque while the card is nearly
+ * folded and gone by halfway, so on close the pill's fill and label fade in as the card folds
+ * into it, and the real pill takes over without a fade.
+ */
+const GHOST = {
+  left: "calc(var(--pill-x) - var(--pill-w) / 2)",
+  top: "calc(var(--pill-y) - var(--pill-h) / 2)",
+  opacity: "clamp(0, calc(1 - var(--open) * 2), 1)",
+};
+
+/** The unfold's spring: interrupted (a press mid-open), it turns back from where it stands. */
+const UNFOLD = { type: "spring", stiffness: 380, damping: 36, mass: 1 } as const;
+
+const morph = {
+  closed: { "--open": 0 },
+  open: { "--open": 1 },
+} as const;
+const content = {
+  closed: { opacity: 0, transition: { duration: 0.08, ease: "easeIn" } },
+  open: { opacity: 1, transition: { duration: 0.18, delay: 0.06, ease: "easeOut" } },
+} as const;
+
+/**
+ * A node's pill or its card. The card unfolds out of its pill's rect (its border drawn on the
+ * unfolding edge) while its content fades in, and folds back into it on close, the pill fading
+ * in over the fold's second half; the real pill returns once the card has gone.
  */
 function Swap(props: {
   open: boolean;
   pill: React.ReactNode;
   card: React.ReactNode;
+  /** The card's border colour, drawn on the edge that unfolds. */
+  edge: string;
   onClosed: () => void;
 }) {
-  // Reduced motion keeps the fades and drops the scale.
-  const scale = useReducedMotion() ? 1 : undefined;
+  const reduce = useReducedMotion();
   return (
     <AnimatePresence mode="wait" initial={false} onExitComplete={props.onClosed}>
       {props.open ? (
         <m.div
           key="card"
-          className="origin-(--grow-origin)"
-          initial={{ opacity: 0, scale: scale ?? 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: scale ?? 0.94, transition: { duration: 0.1, ease: "easeIn" } }}
-          transition={{ type: "spring", duration: 0.22, bounce: 0, opacity: { duration: 0.12 } }}
+          className="relative"
+          variants={morph}
+          initial="closed"
+          animate="open"
+          exit="closed"
+          transition={reduce ? { duration: 0 } : UNFOLD}
+          style={{ clipPath: `inset(${TOP} ${RIGHT} ${BOTTOM} ${LEFT})` }}
         >
-          {props.card}
+          <m.div variants={content}>{props.card}</m.div>
+          <span
+            aria-hidden
+            className={cn("pointer-events-none absolute border", props.edge)}
+            style={{ top: TOP, right: RIGHT, bottom: BOTTOM, left: LEFT }}
+          />
+          <div aria-hidden inert className="pointer-events-none absolute" style={GHOST}>
+            {props.pill}
+          </div>
         </m.div>
       ) : (
-        <m.div
-          key="pill"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0, transition: { duration: 0 } }}
-          transition={{ duration: 0.12, ease: "easeOut" }}
-        >
-          {props.pill}
-        </m.div>
+        <div key="pill">{props.pill}</div>
       )}
     </AnimatePresence>
   );
 }
 
-const LOGIN = "npx wurmhol login && npx wurmhol <port>";
+/** The command Create from this computer copies, with its setup code (ADR 0020). */
+const host = (code: string) => `npx wurmhol host --code ${code}`;
 
 /** npm's mark (svgl) at 13px inside the rows' 15px icon slot, as the design draws it. */
 function NpmMark() {
@@ -415,8 +472,8 @@ function NpmMark() {
 }
 
 /**
- * The ways to start a pipe, each copied in one press. Every label is the verb and what it
- * copies; once copied, the row names what is on the clipboard.
+ * The ways to start a pipe. Every copy row's label is the verb and what it copies; once copied,
+ * the row names what is on the clipboard. The last row opens this computer's steps in place.
  */
 const CREATE = [
   {
@@ -433,23 +490,24 @@ const CREATE = [
     value: COMMAND,
     Icon: NpmMark,
   },
-  // Approves this computer in the browser first, then shares the port from it.
   {
     id: "machine",
-    label: "Copy setup for this computer",
-    done: "Setup copied",
-    value: LOGIN,
+    label: "Create from this computer",
+    done: null,
+    value: null,
     Icon: IconLaptop,
   },
 ] as const;
 
 /**
  * Create pipe, open: a muted label over the ways to start one. A fixed square, so options can be
- * added without the card changing shape. A row says "Copied" for a moment after its press.
+ * added, and this computer's steps shown in its place, without the card changing shape. A row
+ * says "Copied" for a moment after its press.
  */
-function CreateCard() {
+function CreateCard({ onOpened }: { onOpened: (url: string) => void }) {
   const { copy, copied } = useClipboard();
   const [last, setLast] = useState<string | null>(null);
+  const [view, setView] = useState<"ways" | "machine">("ways");
   const docs = useAppConfig().data?.docsUrl;
   return (
     <section
@@ -457,40 +515,190 @@ function CreateCard() {
       aria-label="Create pipe"
       className="flex size-72 flex-col gap-0.5 border border-border bg-background p-2"
     >
-      <span aria-hidden className="flex h-8 items-center px-2 text-xs text-subtle-foreground">
-        Create pipe
+      {view === "machine" ? (
+        <MachineSteps onBack={() => setView("ways")} onOpened={onOpened} />
+      ) : (
+        <>
+          <span aria-hidden className="flex h-8 items-center px-2 text-xs text-subtle-foreground">
+            Create pipe
+          </span>
+          {/* Focus lands on the first row, so arrows, Enter and Escape work from the start. */}
+          <ActionList
+            aria-label="Create pipe"
+            autoFocus="first"
+            onAction={(key) => {
+              const option = CREATE.find((item) => item.id === key);
+              if (!option) return;
+              if (option.value === null) return setView("machine");
+              setLast(option.id);
+              void copy(option.value);
+            }}
+          >
+            {CREATE.map(({ id, label, done, Icon }) => (
+              <ActionItem key={id} id={id} textValue={label}>
+                {copied && last === id ? <IconCheck /> : <Icon aria-hidden />}
+                <span className="truncate">{copied && last === id ? done : label}</span>
+              </ActionItem>
+            ))}
+          </ActionList>
+          {/* The footer mirrors the label above: same row, same muted type, pinned to the bottom. */}
+          {docs && (
+            <Link
+              href={docs}
+              target="_blank"
+              rel="noopener"
+              className="mt-auto flex h-8 items-center gap-1 px-2 text-xs text-subtle-foreground hover:text-foreground"
+            >
+              Docs
+              <IconArrowUpRight className="size-3" />
+            </Link>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+/** A step's mark: its number while ahead or open, a check once done. In the rows' icon slot. */
+function StepMark({ n, done }: { n: number; done: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className="flex size-icon shrink-0 items-center justify-center text-xs text-muted-foreground tabular-nums"
+    >
+      {done ? <IconCheck className="size-icon" /> : n}
+    </span>
+  );
+}
+
+/**
+ * Create from this computer (ADR 0018, 0020): run the command here, then pick a port it found.
+ * The command carries a setup code for the signed-in person, so the CLI needs no approval. The
+ * first step collapses to its answer once a computer connects; picking a port opens its pipe and
+ * its card.
+ */
+function MachineSteps({
+  onBack,
+  onOpened,
+}: {
+  onBack: () => void;
+  onOpened: (url: string) => void;
+}) {
+  const machines = useMachines(true);
+  const openPort = useOpenPort();
+  const [picked, setPicked] = useState<string | null>(null);
+  const connected = machines?.length ? machines : null;
+  const setup = useSetupCode(!connected);
+  const row = "flex h-8 items-center gap-2.5 px-2 text-sm";
+  return (
+    <>
+      <div className="flex h-8 items-center gap-1">
+        <Button intent="plain" size="sq-xs" aria-label="Back" autoFocus onPress={onBack}>
+          <IconArrowLeft />
+        </Button>
+        <span className="text-xs text-subtle-foreground">Create from this computer</span>
+      </div>
+      <ol className="flex min-h-0 flex-1 flex-col gap-0.5">
+        <li className="flex flex-col gap-1">
+          <span className={cn(row, connected ? "text-muted-foreground" : "text-foreground")}>
+            <StepMark n={1} done={Boolean(connected)} />
+            <span className="truncate">
+              {connected
+                ? `Running on ${connected.map((m) => m.name).join(", ")}`
+                : "Run the CLI here"}
+            </span>
+          </span>
+          {!connected && (
+            <div className="ps-8.25 pe-2">
+              {setup.isError ? (
+                <span role="alert" className="text-xs text-danger-subtle-foreground">
+                  {setup.error.message}
+                </span>
+              ) : (
+                <Skeleton
+                  id="setup-code"
+                  data={setup.data}
+                  sample={{ code: "x".repeat(40), expires_in: 1800 }}
+                  label="Loading the command"
+                >
+                  {({ code }) => <CopyField label="Run" value={host(code)} />}
+                </Skeleton>
+              )}
+            </div>
+          )}
+        </li>
+        <li className="flex min-h-0 flex-1 flex-col">
+          <span className={cn(row, connected ? "text-foreground" : "text-subtle-foreground")}>
+            <StepMark n={2} done={false} />
+            <span className="truncate">Pick a port</span>
+          </span>
+          {connected && (
+            <Ports
+              machines={connected}
+              pending={openPort.isPending ? picked : null}
+              onPick={(machine, port) => {
+                setPicked(`${machine}:${port}`);
+                openPort.mutate({ machine, port }, { onSuccess: ({ url }) => onOpened(url) });
+              }}
+            />
+          )}
+        </li>
+      </ol>
+      {openPort.error && (
+        <span
+          role="alert"
+          className="flex h-8 items-center px-2 text-xs text-danger-subtle-foreground"
+        >
+          <span className="truncate">{openPort.error.message}</span>
+        </span>
+      )}
+    </>
+  );
+}
+
+/** The web servers a connected computer found, one row each; with two computers, under each name. */
+function Ports(props: {
+  machines: Machine[];
+  pending: string | null;
+  onPick: (machine: string, port: number) => void;
+}) {
+  const several = props.machines.length > 1;
+  const items = props.machines.flatMap((machine) =>
+    machine.ports.map((p) => ({ key: `${machine.id}:${p.port}`, machine, ...p })),
+  );
+  if (!items.length) {
+    return (
+      <span className="flex min-h-8 items-center gap-2.5 px-2 text-xs text-muted-foreground">
+        <span aria-hidden className="size-icon shrink-0" />
+        No web server is running there yet. Start one and it shows up here.
       </span>
-      {/* Focus lands on the first row, so arrows, Enter and Escape work from the start. */}
+    );
+  }
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
       <ActionList
-        aria-label="Create pipe"
-        autoFocus="first"
+        aria-label="Ports"
         onAction={(key) => {
-          const option = CREATE.find((item) => item.id === key);
-          if (!option) return;
-          setLast(option.id);
-          void copy(option.value);
+          const item = items.find((i) => i.key === key);
+          if (item && !props.pending) props.onPick(item.machine.id, item.port);
         }}
       >
-        {CREATE.map(({ id, label, done, Icon }) => (
-          <ActionItem key={id} id={id} textValue={label}>
-            {copied && last === id ? <IconCheck /> : <Icon aria-hidden />}
-            <span className="truncate">{copied && last === id ? done : label}</span>
+        {items.map(({ key, machine, port, title }) => (
+          <ActionItem key={key} id={key} textValue={`${port} ${title ?? ""}`}>
+            {/* The steps' mark slot, so ports line up under "Pick a port". */}
+            {props.pending === key ? (
+              <Loader className="size-icon" />
+            ) : (
+              <span aria-hidden className="size-icon shrink-0" />
+            )}
+            <span className="shrink-0 tabular-nums">:{port}</span>
+            <span className="truncate text-muted-foreground">
+              {[title, several ? machine.name : null].filter(Boolean).join(" · ")}
+            </span>
           </ActionItem>
         ))}
       </ActionList>
-      {/* The footer mirrors the label above: same row, same muted type, pinned to the bottom. */}
-      {docs && (
-        <Link
-          href={docs}
-          target="_blank"
-          rel="noopener"
-          className="mt-auto flex h-8 items-center gap-1 px-2 text-xs text-subtle-foreground hover:text-foreground"
-        >
-          Docs
-          <IconArrowUpRight className="size-3" />
-        </Link>
-      )}
-    </section>
+    </div>
   );
 }
 
