@@ -5,16 +5,7 @@ import { CopyField } from "@/components/ui/copy-field";
 import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useCreateInvite, useMembers, useRemoveMember } from "@/hooks/use-app";
 import type { Me } from "@/lib/api";
-
-function initials(name: string, email: string) {
-  const source = name.trim() || email;
-  return source
-    .split(/[\s@.]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]!.toUpperCase())
-    .join("");
-}
+import { initials } from "@/lib/initials";
 
 /** Members (spec section 3): list, invite by copyable link, remove. Owners invite and remove. */
 export function MembersDialog({

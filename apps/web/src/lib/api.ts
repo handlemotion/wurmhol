@@ -25,7 +25,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
 }
 
 export interface Me {
-  user: { id: string; email: string; name: string };
+  user: { id: string; email: string; name: string; image: string | null };
   orgs: { id: string; name: string; role: string }[];
   activeOrgId: string | null;
   role: "owner" | "member" | null;

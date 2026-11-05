@@ -18,11 +18,21 @@ import {
   IconUsers,
 } from "@/components/icons/lucide";
 import { ActionItem, ActionList } from "@/components/ui/action-list";
+import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { CopyField } from "@/components/ui/copy-field";
 import { SkeletonProvider } from "@/components/ui/skeleton-provider";
 import { Link } from "@/components/ui/link";
-import { Menu, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
+import {
+  Menu,
+  MenuDescription,
+  MenuHeader,
+  MenuItem,
+  MenuLabel,
+  MenuSection,
+  MenuSeparator,
+  MenuTrigger,
+} from "@/components/ui/menu";
 import { Text } from "@/components/ui/text";
 import {
   useMe,
@@ -36,6 +46,7 @@ import {
 } from "@/hooks/use-app";
 import { useClipboard } from "@/hooks/use-clipboard";
 import type { Me, Share } from "@/lib/api";
+import { initials } from "@/lib/initials";
 import { ago } from "@/lib/time";
 import { MembersDialog } from "./members-dialog";
 import { Constellation } from "./constellation";
@@ -110,12 +121,37 @@ function Header({ me, onOpen }: { me: Me; onOpen: (dialog: "members" | "tokens")
           selectionMode="single"
           selectedKeys={me.activeOrgId ? [me.activeOrgId] : []}
           onAction={(key) => switchOrg.mutate(String(key))}
+          popover={{ className: "max-w-72" }}
         >
-          {me.orgs.map((org) => (
-            <MenuItem key={org.id} id={org.id} textValue={org.name}>
-              <MenuLabel>{org.name}</MenuLabel>
-            </MenuItem>
-          ))}
+          <MenuSection aria-label="Signed in as">
+            <MenuHeader className="flex items-center gap-3 p-2.5">
+              <Avatar
+                size="md"
+                src={me.user.image}
+                initials={initials(me.user.name, me.user.email)}
+                alt=""
+              />
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate text-sm text-foreground">
+                  {me.user.name || me.user.email}
+                </span>
+                {me.user.name && (
+                  <span className="truncate text-xs text-muted-foreground">{me.user.email}</span>
+                )}
+              </span>
+            </MenuHeader>
+          </MenuSection>
+          <MenuSeparator />
+          <MenuSection aria-label="Orgs" items={me.orgs}>
+            {(org) => (
+              <MenuItem id={org.id} textValue={org.name}>
+                {/* One letter: two would be specks at 20px. */}
+                <Avatar initials={initials(org.name).slice(0, 1)} alt="" />
+                <MenuLabel>{org.name}</MenuLabel>
+                <MenuDescription>{org.role === "owner" ? "Owner" : "Member"}</MenuDescription>
+              </MenuItem>
+            )}
+          </MenuSection>
         </Menu>
       </MenuTrigger>
       <nav
