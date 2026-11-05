@@ -165,7 +165,8 @@ Or `WURMHOL_URL=https://api.example.com npx wurmhol login`: it prints a code to 
 calls go to the CLI's host, so nothing else needs allowlisting.
 
 In a sandbox with a Limited network policy, allowlist `api.example.com` (the only host the CLI
-dials).
+dials). The console's Tokens dialog shows all three after you create a token: `WURMHOL_TOKEN`,
+`WURMHOL_URL` and the host, each copied in one click.
 
 ## 8. Marketing site (optional)
 
