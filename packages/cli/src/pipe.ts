@@ -1,4 +1,4 @@
-// A pipe in the caller's process: `openPipe` behind `wurmhol/sdk`, and the CLI's daemon, which
+// A pipe in the caller's process: `openPipe`, the `wurmhol` package's export, and the CLI's daemon, which
 // adds only its state file and log on top (ADR 0008, section 3).
 import { EventEmitter } from "node:events";
 import { parseDuration } from "@wurmhol/protocol";
@@ -48,22 +48,28 @@ export interface OpenPipeOptions {
   ttl?: number | string;
   /** Aborting rejects a pending `openPipe`, or closes an open pipe. */
   signal?: AbortSignal;
+  /**
+   * The connection's own events, for diagnosing a pipe: `connected`, `disconnected` (`code`,
+   * `reason`), `reconnected`, `reconnect.failed` (`message`), `heartbeat.missed`, `socket.error`,
+   * `protocol.error` and `ended` (`reason`). Never request contents. A throw here is ignored.
+   */
+  log?: (event: string, fields: Record<string, unknown>) => void;
 }
 
-/** The CLI's daemon logs to a file; the SDK logs nothing. */
+/** The CLI's daemon logs to a file named after the share, so it also needs the share id. */
 export interface Internals {
   log?: (shareId: string | null, event: string, fields: Record<string, unknown>) => void;
 }
 
-interface PipeEvents {
+export interface PipeEvents {
   /** A viewer request the dev server answered. Never sent anywhere: it stays in this process. */
-  request: [event: RequestEvent];
+  request: (event: RequestEvent) => void;
   /** The pipe ended for good. Emitted once. */
-  close: [reason: CloseReason];
+  close: (reason: CloseReason) => void;
 }
 
 /** An open pipe. Emits `request` per answered viewer request and `close` once when it ends. */
-export interface Pipe extends EventEmitter<PipeEvents> {
+export interface Pipe {
   /** The share id, as on the wall and in `wurmhol ls`. */
   readonly id: string;
   /** The private URL to send the humans. */
@@ -71,15 +77,19 @@ export interface Pipe extends EventEmitter<PipeEvents> {
   readonly port: number;
   /** When the relay ends the pipe (reason `expired`). */
   readonly endsAt: Date;
+  on<E extends keyof PipeEvents>(event: E, listener: PipeEvents[E]): this;
+  once<E extends keyof PipeEvents>(event: E, listener: PipeEvents[E]): this;
+  off<E extends keyof PipeEvents>(event: E, listener: PipeEvents[E]): this;
   /** Ends the pipe on purpose; resolves once it has ended (the relay ends it at once). */
   close(): Promise<void>;
 }
 
-class OpenPipe extends EventEmitter<PipeEvents> implements Pipe {
+class OpenPipe implements Pipe {
   readonly id: string;
   readonly url: string;
   readonly port: number;
   readonly endsAt: Date;
+  readonly #events = new EventEmitter();
   readonly #tunnel: Tunnel;
   readonly #closed: Promise<CloseReason>;
 
@@ -88,13 +98,31 @@ class OpenPipe extends EventEmitter<PipeEvents> implements Pipe {
     tunnel: Tunnel,
     closed: Promise<CloseReason>,
   ) {
-    super();
     this.id = info.id;
     this.url = info.url;
     this.port = info.port;
     this.endsAt = new Date(info.endsAt);
     this.#tunnel = tunnel;
     this.#closed = closed;
+  }
+
+  on<E extends keyof PipeEvents>(event: E, listener: PipeEvents[E]) {
+    this.#events.on(event, listener);
+    return this;
+  }
+
+  once<E extends keyof PipeEvents>(event: E, listener: PipeEvents[E]) {
+    this.#events.once(event, listener);
+    return this;
+  }
+
+  off<E extends keyof PipeEvents>(event: E, listener: PipeEvents[E]) {
+    this.#events.off(event, listener);
+    return this;
+  }
+
+  emit<E extends keyof PipeEvents>(event: E, ...args: Parameters<PipeEvents[E]>) {
+    this.#events.emit(event, ...args);
   }
 
   async close() {
@@ -132,8 +160,14 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
   let pipe: OpenPipe | null = null;
   let markClosed!: (reason: CloseReason) => void;
   const closed = new Promise<CloseReason>((resolve) => (markClosed = resolve));
-  const log = (event: string, fields: Record<string, unknown> = {}) =>
+  const log = (event: string, fields: Record<string, unknown> = {}) => {
     internals.log?.(tunnel.share?.id ?? null, event, fields);
+    try {
+      options.log?.(event, fields);
+    } catch {
+      // The caller's logging must never take the pipe down.
+    }
+  };
   const tunnel: Tunnel = new Tunnel({
     server,
     token,

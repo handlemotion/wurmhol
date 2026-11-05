@@ -1,10 +1,10 @@
-// `wurmhol/sdk` in this process, against the real stack: the package's own export, as an
-// orchestrator imports it (built `packages/cli/dist/sdk.js`).
+// `openPipe` in this process, against the real stack: the `wurmhol` package's export, as an
+// orchestrator imports it (built `packages/cli/dist/index.js`).
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
-import { FixError, openPipe, type CloseReason, type Pipe, type RequestEvent } from "wurmhol/sdk";
+import { FixError, openPipe, type CloseReason, type Pipe, type RequestEvent } from "wurmhol";
 import {
   api,
   browserFetch,
@@ -62,7 +62,14 @@ describe("openPipe", () => {
     const local = await localServer((_req, res) =>
       res.writeHead(201, { "content-type": "text/html" }).end("<title>SDK</title>hello"),
     );
-    const pipe = await openPipe({ port: local.port, token, server: stack.url });
+    // `log` must reach the caller, or an orchestrator cannot tell why a pipe dropped.
+    const logged: string[] = [];
+    const pipe = await openPipe({
+      port: local.port,
+      token,
+      server: stack.url,
+      log: (event) => logged.push(event),
+    });
     const requests: RequestEvent[] = [];
     const closes: CloseReason[] = [];
     pipe.on("request", (event) => requests.push(event));
@@ -83,6 +90,7 @@ describe("openPipe", () => {
     expect(await wall()).toContain(pipe.id);
     await pipe.close();
     expect(closes).toEqual(["stopped"]);
+    expect(logged).toEqual(expect.arrayContaining(["connected", "ended"]));
     await waitFor(async () => !(await wall()).includes(pipe.id), {
       what: "the pipe to leave the wall",
     });

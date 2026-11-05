@@ -68,6 +68,12 @@ LIMIT_SHARE_SECONDS=43200
 # Default 4 hours.
 DEFAULT_SHARE_SECONDS=14400
 
+# --- Retention (ADR 0008); the daily cron in wrangler.jsonc `triggers.crons` ---
+# Days a pipe's history (its `shares` row) is kept. Default 90. Expired sessions, sign-in links,
+# invite links and device logins are deleted by the same job whatever this is. Locally, run it
+# with `curl http://localhost:8787/cdn-cgi/local/scheduled`.
+RETENTION_DAYS=90
+
 # --- Rate limits as "<count>/<seconds>" or "off"; empty uses the default in wrangler.jsonc ---
 RATE_LIMIT_AUTH=
 RATE_LIMIT_MAGIC_LINK=
