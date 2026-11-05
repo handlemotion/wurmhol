@@ -26,7 +26,7 @@ const faq = [
   },
   {
     q: "What does the sandbox need to allow?",
-    a: "Outbound HTTPS on port 443 to Wurmhol. The CLI dials through HTTPS_PROXY and trusts the proxy's CA from NODE_EXTRA_CA_CERTS. If the sandbox only allows listed hosts, the CLI's error names the hosts to add.",
+    a: "Outbound HTTPS on port 443 to api.wurmhol.com, the one host the CLI dials. It goes through HTTPS_PROXY and trusts the proxy's CA from NODE_EXTRA_CA_CERTS. Viewers open pipes in their own browsers, so the sandbox needs nothing else.",
   },
   {
     q: "Does hot reload work?",
@@ -68,7 +68,7 @@ const faq = [
         an HTTPS link that you open in your own browser, on any device. Only your org gets in.
       </p>
       <div class="hero-command">
-        <Command command="npx wurmhol 8787" output="https://k3x9p2.pipe.wurmhol.com" />
+        <Command command="npx wurmhol 8787" output="https://k3x9p2m7qa.pipe.wurmhol.com" />
       </div>
       <div class="actions">
         <a class="button button-primary" href={SIGN_IN}>Get started</a>
