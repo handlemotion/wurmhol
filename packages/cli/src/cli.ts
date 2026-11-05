@@ -6,7 +6,7 @@
 //   wurmhol stop <port|id>        end one; `--all` ends every one
 //   wurmhol init                  tell the repo's agents how to share
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -169,18 +169,35 @@ async function stop(target: string | undefined, all: boolean) {
   for (const s of chosen) process.stdout.write(`stopped ${s.url}\n`);
 }
 
+/** A file's text, or null when it does not exist. */
+function readIfExists(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 function init() {
   const cwd = process.cwd();
-  const target =
-    ["AGENTS.md", "CLAUDE.md"].map((f) => join(cwd, f)).find((f) => existsSync(f)) ??
-    join(cwd, "AGENTS.md");
-  const current = existsSync(target) ? readFileSync(target, "utf8") : "";
+  // Read instead of checking existence first, then append: no window where the file can change
+  // between a check and the write.
+  let target = join(cwd, "AGENTS.md");
+  let current = "";
+  for (const name of ["AGENTS.md", "CLAUDE.md"]) {
+    const text = readIfExists(join(cwd, name));
+    if (text === null) continue;
+    target = join(cwd, name);
+    current = text;
+    break;
+  }
   if (current.includes("npx wurmhol")) {
     process.stdout.write(`${target} already mentions wurmhol\n`);
     return;
   }
   const separator = current && !current.endsWith("\n") ? "\n\n" : current ? "\n" : "";
-  writeFileSync(target, `${current}${separator}${INIT_LINE}\n`);
+  appendFileSync(target, `${separator}${INIT_LINE}\n`);
   process.stdout.write(`added a line to ${target}\n`);
 }
 
