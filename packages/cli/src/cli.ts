@@ -25,14 +25,20 @@ import {
 import pkg from "../package.json" with { type: "json" };
 import { consoleUrl, envToken, findToken, savedLogin, server } from "./config.ts";
 import { credentialsFile, removeCredentials, writeCredentials } from "./credentials.ts";
-import { DAEMON_COMMAND, runDaemon, type ShareOptions, startDaemon } from "./daemon.ts";
+import {
+  DAEMON_COMMAND,
+  runDaemon,
+  type ShareOptions,
+  shareRequest,
+  startDaemon,
+} from "./daemon.ts";
 import { FixError } from "./errors.ts";
 import { host as runHost } from "./host.ts";
 import { init } from "./init.ts";
 import { login as deviceLogin, redeem } from "./login.ts";
 import { checkService, installService, stableEntry, uninstallService } from "./service.ts";
 import { DEFAULT_CONSOLE, DEFAULT_SERVER } from "./pipe.ts";
-import { alive, listStates, logFile, removeState } from "./state.ts";
+import { alive, listStates, logFile, removeState, type ShareState } from "./state.ts";
 
 /** This file: the daemon and the login service run it again. */
 const entry = fileURLToPath(import.meta.url);
@@ -40,7 +46,10 @@ const entry = fileURLToPath(import.meta.url);
 const HELP = `wurmhol ${pkg.version}: a private HTTPS URL for a local dev server
 
 Usage:
-  npx wurmhol <port> [--json]   Open a pipe to a port; prints the URL, then returns
+  npx wurmhol <port> [--json]   Open a pipe to a port; prints the URL, then returns.
+                                Run again with the same flags, it prints the open pipe's
+                                URL; wurmhol stop <port> first for a new one (--ttl always
+                                opens a new one)
     --ttl <duration>            How long it lasts, like 90m or 8h (default 4h, at most 12h)
     --only a@x.com,b@y.com      Only these members of the org may open it
     --name <name>               Keep the same URL every time (https://<name>.<pipe domain>),
@@ -127,12 +136,36 @@ function logout() {
   process.stdout.write(removed ? `Deleted ${credentialsFile()}\n` : "Not logged in.\n");
 }
 
+/**
+ * The live pipe this machine already has for the same command, if any: same port, name, `--only`,
+ * link and note, and no `--ttl` (asking for a lifetime asks for a new pipe).
+ */
+function reusable(options: ShareOptions): ShareState | undefined {
+  if (options.ttl !== undefined) return undefined;
+  const wanted = JSON.stringify(shareRequest(options));
+  return listStates().find(
+    (s) => s.port === options.port && s.request && JSON.stringify(s.request) === wanted,
+  );
+}
+
 async function share(options: ShareOptions, json: boolean) {
   token();
+  const { port } = options;
+  // Agents re-run commands: the same command again prints the same pipe, not a second one.
+  const open = reusable(options);
+  if (open) {
+    const { url, id, endsAt } = open;
+    process.stdout.write(`${json ? JSON.stringify({ url, port, id, endsAt }) : url}\n`);
+    if (!json) {
+      process.stderr.write(
+        `Already open. For a new URL: wurmhol stop ${port}, then run this again.\n`,
+      );
+    }
+    return;
+  }
   const message = await startDaemon(entry, options);
   if (message.type === "error") fail(message.message);
   const { url, id, endsAt } = message;
-  const { port } = options;
   const out = json ? JSON.stringify({ url, port, id, endsAt }) : url;
   process.stdout.write(`${out}\n`);
 }

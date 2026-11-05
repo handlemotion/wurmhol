@@ -7,7 +7,8 @@ import { appendFileSync } from "node:fs";
 import { FixError } from "./errors.ts";
 import { openPipe, type Pipe } from "./pipe.ts";
 import { detectSource } from "./source.ts";
-import { logFile, removeState, writeState } from "./state.ts";
+import { pipeName } from "@wurmhol/protocol";
+import { logFile, removeState, type ShareRequest, writeState } from "./state.ts";
 
 /** The hidden command the CLI's entry runs as the daemon. */
 export const DAEMON_COMMAND = "__daemon";
@@ -22,6 +23,20 @@ export interface ShareOptions {
   name?: string;
   link?: string;
   note?: string;
+}
+
+/** The parts of `options` a reused pipe must match. */
+export function shareRequest(options: ShareOptions): ShareRequest {
+  const only = (options.only ?? "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+  return {
+    name: options.name === undefined ? null : pipeName(options.name),
+    only: [...new Set(only)].toSorted(),
+    link: options.link ?? null,
+    note: options.note ?? null,
+  };
 }
 
 export type ReadyMessage =
@@ -62,7 +77,8 @@ export async function startDaemon(
 
 /** The daemon: holds the share's pipe until it ends. `argument` is what `startDaemon` passed. */
 export async function runDaemon(argument: string, connection: { server: string; token: string }) {
-  const { port, ttl, only, name, link, note } = JSON.parse(argument) as ShareOptions;
+  const options = JSON.parse(argument) as ShareOptions;
+  const { port, ttl, only, name, link, note } = options;
   const report = (message: ReadyMessage) => process.send?.(message);
   const log = (shareId: string | null, event: string, fields: Record<string, unknown>) => {
     try {
@@ -97,6 +113,7 @@ export async function runDaemon(argument: string, connection: { server: string; 
     pid: process.pid,
     startedAt: new Date().toISOString(),
     endsAt: pipe.endsAt.toISOString(),
+    request: shareRequest(options),
   });
   const stop = () => void pipe.close();
   process.on("SIGTERM", stop);
