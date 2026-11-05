@@ -28,8 +28,9 @@ about 2 s per page load, or 0.25 GB-s, which is $0.000003.
 | Typical: 20 page loads a day × ~300 requests (unbundled Vite) | ~130 k           | ~$0.09       |
 | Heavy: 5 pipes, agents and people all day                     | ~1 M             | ~$0.66       |
 
-Fixed: Workers Paid $5, Advanced Certificate Manager $10 (ADR 0003), the domain ~$1, so about
-**$16 a month** whatever the number of orgs.
+Fixed: Workers Paid $5 and the two domains, `wurmhol.com` and `wurmhol.dev`, about $1.50 a month
+together, so about **$6.50 a month** whatever the number of orgs. Pipes on their own domain need no
+Advanced Certificate Manager (ADR 0007).
 
 ## What a charge costs
 
@@ -48,7 +49,7 @@ The $0.30 floor makes any cheap monthly price mostly fees.
 
 - **One plan: $12 a year per org, yearly only.** It is the cheapest price where fees stay small,
   it covers a heavy org's usage about 1.4 times, and a typical org's about 10 times.
-  Break-even on the fixed costs is about 19 paying orgs.
+  Break-even on the fixed costs is about 8 paying orgs.
 - **Per org, not per member.** Cost follows traffic, not seats, and one charge per org keeps
   the $0.30 floor paid once.
 - **No trial and no free tier in v1.** A new org subscribes before its first pipe; until then

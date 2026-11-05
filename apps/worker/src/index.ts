@@ -10,7 +10,7 @@ export { Share } from "./share-do.ts";
 
 export default {
   /**
-   * One Worker, four kinds of host (ADR 0006): pipes (`<id>.pipe.wurmhol.com`), the CLI's
+   * One Worker, four kinds of host (ADR 0006): pipes (`<id>.wurmhol.dev`), the CLI's
    * endpoint (`api.wurmhol.com`, `/connect` only), aliases that redirect to the app
    * (`app.wurmhol.com`), and the app itself (`dirt.wurmhol.com`: console, API, sign-in).
    */

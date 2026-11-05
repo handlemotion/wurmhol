@@ -5,7 +5,7 @@ cloud and similar) where ngrok and Cloudflare Tunnel can't connect.
 
 ```bash
 export WURMHOL_TOKEN=wh_…        # from https://dirt.wurmhol.com (menu → Tokens)
-npx wurmhol 8787                 # prints https://<id>.pipe.wurmhol.com, then returns
+npx wurmhol 8787                 # prints https://<id>.wurmhol.dev, then returns
 ```
 
 Only signed-in members of the token's org can open the URL. One outbound WebSocket on 443,

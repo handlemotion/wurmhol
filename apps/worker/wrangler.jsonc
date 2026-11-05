@@ -11,7 +11,7 @@
   "observability": { "enabled": true },
   "upload_source_maps": true,
   // The web app (apps/web) is served from here, on the app's host. The Worker runs first for
-  // every request: share hosts (`*.pipe.<domain>`) must never fall through to the app's files.
+  // every request: share hosts (`*.<SHARE_DOMAIN>`) must never fall through to the app's files.
   "build": { "command": "pnpm --filter @wurmhol/web build", "watch_dir": "../web/src" },
   "assets": {
     "directory": "../web/dist",

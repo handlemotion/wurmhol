@@ -20,21 +20,34 @@ Billing stays off until `STRIPE_SECRET_KEY` is set, so every org can open pipes 
 - [ ] Google Cloud project `wurmhol-513804` → Branding: add the privacy policy URL, then publish
       the app. Until then it is in Testing, and only listed test users can sign in with Google.
 
+## Pipe domain (ADR 0007)
+
+Pipes moved to `<id>.wurmhol.dev`. Once they are verified there:
+
+- [ ] Cancel Advanced Certificate Manager: wurmhol.com → SSL/TLS → Edge Certificates.
+- [ ] Remove the `*.pipe` DNS record on wurmhol.com and the Worker route `*.pipe.wurmhol.com/*`.
+
 ## Public Suffix List
 
-Puts `pipe.wurmhol.com` on the PSL so browsers treat every pipe as its own site. Wurmhol's own
-cookies are `__Host-` cookies and don't need it, but until it lands, a page served through one
-pipe can set a cookie for `pipe.wurmhol.com` that other pipes receive.
+Puts `wurmhol.dev` (the pipe domain, ADR 0007) on the PSL so browsers treat every pipe as its own
+site. Wurmhol's own cookies are `__Host-` cookies and don't need it, but until it lands, a page
+served through one pipe can set a cookie for `wurmhol.dev` that other pipes receive.
 
 The entry is committed on `handlemotion/list`, branch `add-wurmhol`, and the pull request is
-held. The PSL maintainers expect, before they accept a private entry:
+held.
 
+- [ ] Change the entry on `add-wurmhol` from `pipe.wurmhol.com` to `wurmhol.dev`.
+
+The PSL maintainers expect, before they accept a private entry:
+
+- [ ] More than two years of registration left: renew `wurmhol.dev` (Cloudflare Registrar) for
+      several years before filing. It is registered for one.
 - [ ] An established user base (their guidelines say roughly 2,000–3,000 distinct users).
 - [ ] A role contact address, such as `security@wurmhol.com` (Cloudflare Email Routing can forward
       it). Update the "Submitted by" line on the branch to match.
 - [ ] A public abuse and security contact page on wurmhol.com (`SECURITY.md` has the content).
 - [ ] Then open the pull request from `add-wurmhol` with their template, and add the TXT record
-      `_psl.pipe.wurmhol.com` with the pull request's URL as its value.
+      `_psl.wurmhol.dev` with the pull request's URL as its value.
 
 ## Small things
 
