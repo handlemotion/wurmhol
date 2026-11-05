@@ -109,8 +109,8 @@ change keeps that path working:
 - No Handlemotion-specific values in code: account ids, domains and database ids are config or
   `wrangler.jsonc` vars with neutral defaults.
 - One Cloudflare account, two hostnames and `wrangler deploy` must be enough to run Wurmhol.
-  Self-hosting steps live in `docs/self-hosting.md`; update it when you add a required binding or
-  variable.
+  Self-hosting steps live in `apps/docs/self-hosting/` (served at wurmhol.com/docs); update them
+  when you add a required binding or variable.
 
 ## Database
 
@@ -163,7 +163,7 @@ Several agents may work in this repository at once.
   it. Each layer is one reviewable PR with one owner. Stacks merge bottom-first.
 - **Parallel agents.** Independent work gets its own stack rooted on `main`. Before starting, an
   agent names the packages it owns; two stacks never edit the same package. Shared touch points
-  (`pnpm-lock.yaml`, root config, `docs/self-hosting.md`) are resolved by the later layer: merge
+  (`pnpm-lock.yaml`, root config, `apps/docs/self-hosting/`) are resolved by the later layer: merge
   `main`, reinstall to regenerate the lockfile (`pnpm install`), never hand-merge it.
 - Before each push run `pnpm check`, `pnpm check-types`, and the tests your change touches. Batch
   fixes into one push; CI minutes cost money.

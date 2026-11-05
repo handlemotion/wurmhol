@@ -1,4 +1,4 @@
-// The Deploy to Cloudflare button's config (docs/self-hosting.md, ADR 0008). The button needs a
+// The Deploy to Cloudflare button's config (wurmhol.com/docs/self-hosting, ADR 0008). The button needs a
 // self-contained directory and apps/worker depends on workspace packages, so it deploys from the
 // repository root with this file. It is apps/worker/wrangler.jsonc with root-relative paths and
 // deploy defaults for the vars; `scripts/check-wrangler.mjs` fails when the two drift apart.
@@ -26,7 +26,7 @@
     "run_worker_first": true,
   },
   // The button shows these on its setup page. Set BETTER_AUTH_URL and SHARE_DOMAIN to your
-  // hostnames there or afterwards (docs/self-hosting.md); every var is in apps/worker/.dev.vars.example.
+  // hostnames there or afterwards (wurmhol.com/docs/self-hosting); every var is in apps/worker/.dev.vars.example.
   "vars": {
     "ENVIRONMENT": "production",
     // The app's public origin: the login page, the wall, the API and `/connect`.

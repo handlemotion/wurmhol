@@ -1,0 +1,51 @@
+---
+title: "Self-hosting"
+description: "Run Wurmhol on your own Cloudflare account."
+---
+
+The code is open source, AGPL-3.0 for the app and MIT for the CLI. You need one Cloudflare account and two domains, and nothing else, D1 holds the data, Durable Objects hold the pipes and billing stays off unless you add Stripe keys.
+
+The examples below use `dirt.example.com` for dirt, `api.example.com` for the host the CLI talks to and `example-pipes.dev` for the domain pipes live under. One host for dirt and the CLI works too.
+
+## Deploy to Cloudflare
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/handlemotion/wurmhol)
+
+The button copies the repository into your GitHub or GitLab account, creates the database and the Durable Objects and connects your copy to Workers Builds, so every push to it redeploys. On its setup page, set `BETTER_AUTH_SECRET` to the output of `openssl rand -base64 32`, the build command to `pnpm run build` and the deploy command to `pnpm run deploy` (not `pnpm deploy`, that one is a pnpm built-in). The rest can stay as it is.
+
+Then do the three things the button can't.
+
+<Steps>
+  <Step title="Add the domains">
+    Add both zones to the account, a proxied wildcard record `*` on the pipe zone (an `AAAA` to `100::` is enough) and the Worker's routes, in your copy's root `wrangler.jsonc` so every deploy keeps them.
+
+    ```jsonc
+    "routes": [
+      { "pattern": "dirt.example.com", "custom_domain": true },
+      { "pattern": "*.example-pipes.dev/*", "zone_name": "example-pipes.dev" },
+    ],
+    ```
+
+    [Domains](/self-hosting/domains) has the details.
+
+  </Step>
+  <Step title="Set the hostnames">
+    In the same file, set `BETTER_AUTH_URL` to `https://dirt.example.com`, `SHARE_DOMAIN` to `example-pipes.dev` and, if the CLI gets its own host, `CONNECT_HOST`. Set them in the file and not the dashboard, every deploy writes the file's vars over the dashboard's. Commit and push.
+  </Step>
+  <Step title="Add sign-in and billing">
+    Optional. OAuth and Stripe secrets go in the dashboard or through `wrangler secret put <NAME>`, and secrets survive deploys. [Sign-in and billing](/self-hosting/configuration) walks through them.
+  </Step>
+</Steps>
+
+Database migrations need nothing from you, the deploy command applies new ones on every push.
+
+## Point the CLI at it
+
+Set `WURMHOL_URL` to the host the CLI talks to, next to a token from your dirt.
+
+```bash
+export WURMHOL_URL=https://api.example.com
+export WURMHOL_TOKEN=wh_…
+```
+
+From there it works like wurmhol.com, `npx wurmhol 8787` opens a pipe. On your own computer you can skip the token, with `WURMHOL_URL` set `npx wurmhol login` prints a code to approve at `https://dirt.example.com/device`. In a sandbox, allowlist `api.example.com`, the only host the CLI talks to. Your dirt's Tokens dialog shows all three values after you create a token.

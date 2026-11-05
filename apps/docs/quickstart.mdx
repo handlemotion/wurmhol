@@ -1,35 +1,40 @@
 ---
 title: "Quickstart"
-description: "Share a dev server in two commands."
+description: "Share a dev server in a couple of minutes."
 ---
 
 <Steps>
   <Step title="Get a token">
-    Sign in at [dirt.wurmhol.com](https://dirt.wurmhol.com), subscribe your org, and create a
-    token (menu → Tokens). On your own computer, `npx wurmhol login` does this for you: it prints
-    a code to approve in the browser and stores the token in `~/.wurmhol/credentials.json`.
+    Sign in at [dirt.wurmhol.com](https://dirt.wurmhol.com), subscribe your org and create a token under Tokens. On your own computer you can skip that part, `npx wurmhol login` prints a code, you approve it in the browser and it saves the token for you.
+
+    Anywhere else, put the token in the environment.
+
+    ```bash
+    export WURMHOL_TOKEN=wh_…
+    ```
+
   </Step>
   <Step title="Open a pipe">
     ```bash
     npx wurmhol 8787
     ```
 
-    It prints `https://<id>.wurmhol.dev` and returns. The URL is new every time.
+    It prints the pipe's link and returns, so the agent can keep working. The link is new every time unless you [give the pipe a name](/pipes#a-url-that-stays). The wall's Create pipe button copies this command for you, or a prompt to paste to your agent.
+
+    <img className="shot" src="/images/create-light.webp" alt="The Create pipe card on the wall, with Copy agent prompt, Copy npx command and Copy setup for this computer" width="1680" height="1050" />
 
   </Step>
-  <Step title="Open it">
-    Tap the link on your phone or laptop and sign in once. Every open pipe is also on your org's
-    wall, by page title.
+  <Step title="Open the link">
+    Tap it on your phone or laptop and sign in once. Hot reload works too, browser WebSockets go through the pipe and the CLI sends `Host: localhost:<port>`, so Vite and most dev servers need no config.
   </Step>
   <Step title="Stop it">
     ```bash
     npx wurmhol stop 8787
     ```
 
-    A pipe also ends when anyone in the org ends it from the wall, or after 4 hours.
+    Or end it from the wall. If nobody does, it ends on its own after 4 hours.
 
   </Step>
 </Steps>
 
-Hot reload works: browser WebSockets pass through the pipe, and the CLI sends
-`Host: localhost:<port>`, so Vite and most dev servers need no config.
+To have your agent do all of this by itself, set it up once in [With your agent](/agents).

@@ -1,28 +1,41 @@
 ---
 title: "Introduction"
-description: "A private HTTPS URL for a coding agent's dev server."
+description: "A private link to your agent's dev server, from inside its cloud sandbox."
 ---
 
-Coding agents in cloud sandboxes build web apps you can't open. Wurmhol gives the dev server an
-HTTPS link (a pipe) that you open in your own browser, on any device.
+Wurmhol gives your coding agent's dev server a private HTTPS link that you open in your own browser, on your phone or your laptop. Only people in your org get in.
 
 ```bash
 npx wurmhol 8787
-# https://k3x9p2m7qa.wurmhol.dev
 ```
 
-Only signed-in members of the org that owns the token get through. Everyone else gets the
-sign-in page, never your app.
+It prints a link like `https://k3x9p2m7qa.wurmhol.dev` and returns.
 
-## Why not a tunnel?
+## Why it exists
 
-Cloud sandboxes, like Claude Code on the web, reach the internet only through an HTTPS proxy on
-port 443. There is no DNS and no other port, so Cloudflare quick tunnels and ngrok can't get out.
-The CLI needs one outbound WebSocket on 443 to `api.wurmhol.com`, and goes through
-`HTTPS_PROXY` like any other HTTPS request.
+Everyone is building agent orchestrators and cloud sandboxes right now, and most of them have no way to show you what the agent built. The agent spins up a web app you can't open. Sandboxes like Claude Code on the web only reach the internet through an HTTPS proxy on port 443, with no DNS and no other ports, so ngrok and Cloudflare Tunnel can't get out. We tried them from a Claude Code cloud session, quick tunnels and ngrok never connected, and the ones that did needed a login every session or an app on every viewer's device.
 
-## What the relay keeps
+Wurmhol needs one outbound WebSocket on 443, the one thing every sandbox allows, and it goes through the proxy like any other request.
 
-TLS ends at the relay, so it can read the traffic it carries. It never logs or stores request or
-response bodies. It keeps only each page's `<title>` and favicon, to show the pipe on your org's
-wall. If that is not acceptable for your work, [host Wurmhol yourself](/self-hosting).
+It also means you don't wait on preview builds. A pipe is the dev server itself, so every save shows up on refresh, hot reload included. We review these docs the same way.
+
+<img
+  className="shot"
+  src="/images/wall-dark.webp"
+  alt="The wall, four open pipes with their titles and ports around the Create pipe button"
+  width="2280"
+  height="1086"
+/>
+
+## Who can open a pipe
+
+Only signed-in members of the org that owns the token. Everyone else lands on the sign-in page and never sees your app, there are no public links. Every open pipe also shows up on your org's [wall](/glossary#wall).
+
+<Columns cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Share a dev server in a couple of minutes.
+  </Card>
+  <Card title="With your agent" icon="robot" href="/agents">
+    Set up Claude Code, cloud environments and other agents.
+  </Card>
+</Columns>

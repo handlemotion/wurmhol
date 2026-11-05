@@ -1,0 +1,58 @@
+---
+title: "Deploy by hand"
+description: "Create the database and deploy with wrangler, without the button."
+---
+
+From a clone of the repository.
+
+<Steps>
+  <Step title="Create the database">
+    ```bash
+    pnpm install
+    cd apps/worker
+    pnpm exec wrangler d1 create wurmhol
+    ```
+
+    It prints the database's id. Keep it in the environment for the rest of the steps.
+
+    ```bash
+    export D1_DATABASE_ID=<id>
+    ```
+
+    Then write the deploy config and run the migrations.
+
+    ```bash
+    node scripts/deploy-cloudflare.mjs --config-only
+    pnpm exec wrangler d1 migrations apply DB --remote --config wrangler.deploy.jsonc
+    ```
+
+  </Step>
+  <Step title="Set your hostnames">
+    ```bash
+    export WORKER_DOMAIN=dirt.example.com,api.example.com,app.example.com
+    export WORKER_ROUTE='*.example-pipes.dev/*'
+    export WORKER_VAR_BETTER_AUTH_URL=https://dirt.example.com
+    export WORKER_VAR_SHARE_DOMAIN=example-pipes.dev
+    export WORKER_VAR_CONNECT_HOST=api.example.com
+    export WORKER_VAR_APP_ALIASES=app.example.com
+    ```
+
+    Any other var goes in the same way, as `WORKER_VAR_<NAME>`.
+
+  </Step>
+  <Step title="Deploy">
+    ```bash
+    pnpm --filter @wurmhol/worker deploy:cloudflare
+    ```
+  </Step>
+  <Step title="Add the secret">
+    ```bash
+    pnpm exec wrangler secret put BETTER_AUTH_SECRET
+    ```
+
+    When it asks, paste the output of `openssl rand -base64 32`. It's the only secret Wurmhol needs.
+
+  </Step>
+</Steps>
+
+For deploys on every push, connect the repository to Workers Builds with the build command `pnpm --filter @wurmhol/web build`, the deploy command `pnpm --filter @wurmhol/worker deploy:cloudflare` and the variables above as build variables. The rest of the setup is in [Domains](/self-hosting/domains) and [Sign-in and billing](/self-hosting/configuration).

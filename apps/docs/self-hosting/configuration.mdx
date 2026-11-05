@@ -1,0 +1,51 @@
+---
+title: "Sign-in and billing"
+description: "OAuth, magic links, Stripe, limits and what gets cleaned up."
+---
+
+## Sign-in
+
+Passkeys work with no setup. For Google or GitHub, create OAuth clients with these callbacks and set `GOOGLE_CLIENT_ID` or `GITHUB_CLIENT_ID`, plus the matching `_SECRET` as a secret.
+
+- Google, `https://dirt.example.com/api/auth/callback/google`
+- GitHub, `https://dirt.example.com/api/auth/callback/github`
+
+Magic links go out through Cloudflare Email Service. Onboard your domain under Email Service, Email Sending, and set `MAIL_FROM`, like `sign-in@example.com`. There's no API key, the `EMAIL` binding in `wrangler.jsonc` is the credential. Without `MAIL_FROM`, sign in with OAuth and add a passkey.
+
+## Billing
+
+Leave `STRIPE_SECRET_KEY` empty and every org opens pipes without a plan. To charge, set up Stripe like this.
+
+1. One product with a yearly price and, if you want, a monthly one. Their ids go in `STRIPE_PRICE_YEARLY` and `STRIPE_PRICE_MONTHLY`.
+2. A webhook to `https://dirt.example.com/api/auth/stripe/webhook` for `checkout.session.completed` and `customer.subscription.created`, `.updated` and `.deleted`, with its signing secret as `STRIPE_WEBHOOK_SECRET`.
+3. The customer portal turned on in Stripe's settings.
+
+There's no trial, an org subscribes before its first pipe.
+
+## Preview links on pull requests
+
+Optional. With a GitHub App set up, every open pipe shows up on the open pull request of its branch as a `wurmhol-preview` deployment, with a button to the pipe. Leave `GITHUB_APP_ID` empty and nothing talks to GitHub.
+
+1. Create a GitHub App with the callback URL `https://dirt.example.com/api/github/callback`, the setup URL `https://dirt.example.com/api/github/setup` (with Redirect on update on) and the webhook URL `https://dirt.example.com/api/github/webhook` with a random secret. It needs Deployments read and write, Pull requests read and Metadata read, and the Pull request event.
+2. Generate a private key and a client secret.
+3. Set `GITHUB_APP_ID`, `GITHUB_APP_SLUG` (from `github.com/apps/<slug>`) and `GITHUB_APP_CLIENT_ID`, and the secrets `GITHUB_APP_PRIVATE_KEY` (the `.pem` as GitHub gives it), `GITHUB_APP_CLIENT_SECRET` and `GITHUB_APP_WEBHOOK_SECRET`. On GitHub Enterprise Server, also `GITHUB_API_URL` and `GITHUB_WEB_URL`.
+4. An org owner links the org from a pipe's card on the wall, under Pull request, Connect GitHub.
+
+## Limits
+
+| Var                     | Default | What it limits, per org               |
+| ----------------------- | ------- | ------------------------------------- |
+| `LIMIT_ACTIVE_SHARES`   | 5       | Pipes open at once                    |
+| `LIMIT_MONTHLY_BYTES`   | 100 GB  | Traffic a month                       |
+| `LIMIT_SHARE_SECONDS`   | 12 h    | The longest `--ttl`                   |
+| `DEFAULT_SHARE_SECONDS` | 4 h     | A pipe's lifetime when it doesn't ask |
+
+`RATE_LIMIT_AUTH`, `RATE_LIMIT_MAGIC_LINK`, `RATE_LIMIT_CONNECT` and `RATE_LIMIT_MANAGE` take `<count>/<seconds>`, or `off`.
+
+## Docs link
+
+The wall's Docs links go to `https://wurmhol.com/docs`. Set `DOCS_URL` to send them to your own docs instead.
+
+## Cleanup
+
+Once a day the Worker deletes pipe history older than `RETENTION_DAYS` (90), plus expired sessions, sign-in links, invite links and device logins. `wrangler deploy` sets that up. It only writes its own log lines, Cloudflare's invocation logs are off so request URLs aren't recorded. Every var is in [`apps/worker/.dev.vars.example`](https://github.com/handlemotion/wurmhol/blob/main/apps/worker/.dev.vars.example).

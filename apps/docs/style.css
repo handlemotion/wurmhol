@@ -1,0 +1,9 @@
+/* Screenshots get a hairline so their edges read against the page in both themes. */
+img.shot {
+  border: 1px solid rgb(0 0 0 / 0.1);
+  border-radius: 0;
+}
+
+.dark img.shot {
+  border-color: rgb(255 255 255 / 0.12);
+}

@@ -27,13 +27,14 @@ It keeps only each page's `<title>` and favicon, for the wall.
 
 ## Repo
 
-`docs/spec/v1.md` is the spec; `AGENTS.md` the rules; `docs/self-hosting.md` runs your own.
+`docs/spec/v1.md` is the spec; `AGENTS.md` the rules. Docs, self-hosting included, are at
+https://wurmhol.com/docs (source in `apps/docs`).
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/handlemotion/wurmhol)
 
 The button creates the Worker, D1 and Durable Objects in your Cloudflare account. The pipe
 domain's wildcard route and the hostname vars are yours to set afterwards: see
-[Deploy to Cloudflare](docs/self-hosting.md#deploy-to-cloudflare).
+[Self-hosting](https://wurmhol.com/docs/self-hosting).
 
 | Unit                | Package             |
 | ------------------- | ------------------- |
@@ -43,5 +44,23 @@ domain's wildcard route and the hostname vars are yours to set afterwards: see
 | `packages/protocol` | `@wurmhol/protocol` |
 | `packages/auth`     | `@wurmhol/auth`     |
 | `packages/db`       | `@wurmhol/db`       |
+
+## Local
+
+```bash
+pnpm stack:serve        # http://localhost:8787, pipes at http://<id>.pipe.localhost:8787
+```
+
+It copies `apps/worker/.dev.vars.example` to `apps/worker/.dev.vars` if there is none. Sign in
+with the magic link printed in `.local/serve/worker.log` (`auth.dev_link`), and run the daily
+retention job with `curl "http://127.0.0.1:8787/cdn-cgi/local/scheduled"`.
+
+## Marketing site and docs
+
+`apps/site` is hosted Wurmhol's landing page, a static Astro build served by its own Worker
+(`wurmhol-site`); nothing in the app depends on it. Its Worker also serves `/docs` by proxying
+to the Mintlify deployment named by `DOCS_HOST` in `apps/site/wrangler.jsonc` (Mintlify builds
+`apps/docs`; turn on **Host at** `/docs` in its custom domain settings). Empty `DOCS_HOST` makes
+`/docs` the 404 page.
 
 License: AGPL-3.0 for the app, MIT for the CLI (`packages/cli/LICENSE`).

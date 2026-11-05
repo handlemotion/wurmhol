@@ -1,5 +1,5 @@
 // The one Wurmhol Worker. Every value here is a neutral default; self-hosters change names and
-// ids in this file and set secrets with `wrangler secret put` (see docs/self-hosting.md).
+// ids in this file and set secrets with `wrangler secret put` (see apps/docs/self-hosting).
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "wurmhol",

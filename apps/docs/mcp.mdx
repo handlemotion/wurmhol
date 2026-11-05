@@ -30,7 +30,7 @@ The server finds its token the way the CLI does:
 
 1. `WURMHOL_TOKEN` in the environment the agent host starts it with. Claude Code passes its own
    environment on, so a cloud environment's `WURMHOL_TOKEN` reaches it (see
-   [Cloud environments](/cloud-environments)).
+   [With your agent](/agents#cloud-environments)).
 2. Otherwise the token `wurmhol login` stored on this computer.
 
 Without either, a tool call fails with the fix: run `npx wurmhol login`, or set `WURMHOL_TOKEN`.

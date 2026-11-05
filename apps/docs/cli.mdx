@@ -1,33 +1,36 @@
 ---
 title: "CLI"
-description: "Every command and flag of `npx wurmhol`."
+description: "Every command, flag and variable of `npx wurmhol`."
 ---
 
-| Command                              | Does                                                             |
-| ------------------------------------ | ---------------------------------------------------------------- |
-| `wurmhol <port> [--ttl 8h] [--json]` | Open a pipe to a port. `--json` prints `{url, port, id, endsAt}` |
-| `wurmhol ls [--json]`                | List open pipes and when each ends                               |
-| `wurmhol stop <port\|id>`            | End one (`--all` ends every one)                                 |
-| `wurmhol init [--skill]`             | Tell this repo's agents how to share                             |
-| `wurmhol login`                      | Approve this computer; stores `~/.wurmhol/credentials.json`      |
-| `wurmhol logout`                     | Delete the stored token                                          |
-| `wurmhol mcp`                        | Run an MCP server on stdio for agents ([MCP](/mcp))              |
+| Command                         | Does                                                           |
+| ------------------------------- | -------------------------------------------------------------- |
+| `wurmhol <port>`                | Open a pipe to a port, print its link and return               |
+| `wurmhol ls`                    | List open pipes and when each one ends                         |
+| `wurmhol stop <port\|id\|name>` | End one, or every one with `--all`                             |
+| `wurmhol init`                  | Tell this repo's agents how to share, `--skill` adds the skill |
+| `wurmhol login`                 | Approve this computer in the browser and save a token          |
+| `wurmhol logout`                | Delete the saved token                                         |
+| `wurmhol mcp`                   | Run the [MCP server](/mcp) on stdio                            |
 
-## Lifetime
+## Flags
 
-A pipe ends after 4 hours. `--ttl` asks for another lifetime, like `90m` or `8h`, up to 12 hours
-on wurmhol.com. The URL is never reused.
+| Flag                     | Does                                                                        |
+| ------------------------ | --------------------------------------------------------------------------- |
+| `--ttl 8h`               | How long the pipe lasts, like `90m` or `8h`. 4 hours by default, 12 at most |
+| `--name my-app`          | Open it at `https://my-app.wurmhol.dev`, the same URL every time            |
+| `--only a@x.com,b@y.com` | Only these org members can open it                                          |
+| `--note "text"`          | A line of text on the pipe's card, up to 280 characters                     |
+| `--link <url>`           | A link on the pipe's card                                                   |
+| `--json`                 | Print JSON, `{url, port, id, endsAt}` for a pipe                            |
 
-## Who can open it
+## Variables
 
-By default every member of the token's org can open a pipe. `--only ana@x.com,bo@y.com` narrows
-it to those members. There are no public links.
+| Variable              | Does                                                     |
+| --------------------- | -------------------------------------------------------- |
+| `WURMHOL_TOKEN`       | Your org's token. Wins over one saved by `wurmhol login` |
+| `WURMHOL_URL`         | Your own install, if you [self-host](/self-hosting)      |
+| `HTTPS_PROXY`         | The proxy to go through                                  |
+| `NODE_EXTRA_CA_CERTS` | Your proxy's certificate                                 |
 
-## Environment
-
-| Variable              | Does                                                      |
-| --------------------- | --------------------------------------------------------- |
-| `WURMHOL_TOKEN`       | A token from your org. Wins over one from `wurmhol login` |
-| `WURMHOL_URL`         | A self-hosted install                                     |
-| `HTTPS_PROXY`         | The proxy to dial through                                 |
-| `NODE_EXTRA_CA_CERTS` | Adds a proxy's CA                                         |
+When something fails, the error is one line with what to do about it. Node 22 or later.
