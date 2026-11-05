@@ -15,6 +15,7 @@ declare global {
       GITHUB_APP_PRIVATE_KEY?: string;
       GITHUB_APP_CLIENT_SECRET?: string;
       GITHUB_APP_WEBHOOK_SECRET?: string;
+      OPERATOR_TOKEN?: string;
     }
   }
 }
@@ -197,6 +198,13 @@ const configSchema = z
     RATE_LIMIT_MANAGE: rateLimit("60/60"),
     /** Per person (OAuth) or token (`wh_`): calls to the hosted MCP server (ADR 0014). */
     RATE_LIMIT_MCP: rateLimit("120/60"),
+    /**
+     * Secret. The bearer token of the operator's takedown route, `/operator/*` on the app's host
+     * (ADR 0022). Empty: the route answers 404.
+     */
+    OPERATOR_TOKEN: optional.pipe(
+      z.string().min(32, "use at least 32 random characters (openssl rand -base64 32)").optional(),
+    ),
     /**
      * The hosted MCP server at `/mcp` on the CLI's host (ADR 0014). On by default; `false` turns
      * it off, and `/mcp` and its OAuth routes answer 404.

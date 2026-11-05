@@ -25,21 +25,27 @@ export async function endShare(
   c: Scope,
   share: { id: string; orgId: string },
   reason: "terminated" | "revoked",
-  via: "wall" | "api" | "mcp" | "org deleted" | "token revoked",
+  via: "wall" | "api" | "mcp" | "org deleted" | "token revoked" | "takedown",
 ) {
   await shareStub(c.env, share.id).terminate(reason);
   c.var.log.info("share.terminated", { shareId: share.id, orgId: share.orgId, reason, via });
 }
 
-/** Ends what already-revoked tokens of `orgId` still run: their shares and machines. */
+/**
+ * Ends what already-revoked tokens of `orgId` still run: their shares and machines. Returns the
+ * ids of the shares it ended.
+ */
 export async function endTokens(c: Scope, orgId: string, tokenIds: string[]) {
   const org = orgStub(c.env, orgId);
+  const ended: string[] = [];
   for (const tokenId of tokenIds) {
     for (const share of await openSharesOfToken(c.var.db, tokenId)) {
       await endShare(c, { id: share.id, orgId }, "revoked", "token revoked");
+      ended.push(share.id);
     }
     await org.dropToken(tokenId);
   }
+  return ended;
 }
 
 /** Someone left `orgId` (removed, or by choice): every token they made there is revoked. */
