@@ -62,8 +62,11 @@ STRIPE_PRICE_MONTHLY=
 LIMIT_ACTIVE_SHARES=5
 # Bytes relayed per calendar month (UTC), both directions. Default 100 GB.
 LIMIT_MONTHLY_BYTES=100000000000
-# Longest a share stays open, in seconds. Default 12 hours.
+# Longest a share stays open, in seconds; `wurmhol --ttl` may ask for up to this. Default 12 hours.
 LIMIT_SHARE_SECONDS=43200
+# How long a share stays open without `--ttl`, in seconds, capped at LIMIT_SHARE_SECONDS.
+# Default 4 hours.
+DEFAULT_SHARE_SECONDS=14400
 
 # --- Rate limits as "<count>/<seconds>" or "off"; empty uses the default in wrangler.jsonc ---
 RATE_LIMIT_AUTH=
