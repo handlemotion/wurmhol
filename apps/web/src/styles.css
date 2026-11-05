@@ -4,7 +4,8 @@
 
 @plugin "tailwindcss-react-aria-components";
 
-@custom-variant dark (&:is(.dark *));
+/* Dark follows the system setting, the same switch the tokens below use. */
+@custom-variant dark (@media (prefers-color-scheme: dark));
 
 /* Design tokens (from Omni). Raw values live here and nowhere else; DESIGN.md says how to use
    them. Light by default; the dark block below swaps the raw values, never the class names. */
@@ -71,7 +72,8 @@
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --background: #0e0e0e;
+    /* Pitch black: the brand's void. */
+    --background: #000000;
     --surface: #141414;
     --foreground: #ededed;
     --muted-foreground: #8f8f8f;

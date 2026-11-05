@@ -3,7 +3,6 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { IconKey, IconMail } from "@/components/icons/lucide";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Heading } from "@/components/ui/heading";
 import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
@@ -45,77 +44,75 @@ export function Login() {
   const failure = passkey.error ?? social.error ?? magicLink.error;
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-surface px-4">
-      {/* The bottom padding lifts the card a little above center, where it looks centered. */}
-      <div className="flex w-full max-w-100 flex-col pb-12">
-        <Card className="gap-6 p-6">
-          <div className="flex flex-col gap-2">
-            <Heading>Sign in to Wurmhol</Heading>
-            <Text>{reason ?? "Open the pipes your agents start, on any device."}</Text>
-          </div>
-          <div className="flex flex-col gap-2">
+    <main className="min-h-dvh bg-background px-4 py-8 sm:px-12 sm:py-12">
+      {/* The form sits raw on the canvas, pinned to the top left; the rest of the screen stays empty. */}
+      <div className="flex w-full max-w-88 flex-col gap-6">
+        <div className="flex flex-col gap-2">
+          <Heading>Hol&rsquo; up, wanderer.</Heading>
+          <Text>{reason ?? "The Wurm holt what your agents dig up. Who asks?"}</Text>
+        </div>
+        <div className="flex flex-col gap-2">
+          <Button
+            intent="outline"
+            size="lg"
+            className="justify-start"
+            isPending={passkey.isPending}
+            onPress={() => passkey.mutate()}
+          >
+            <IconKey />
+            Using a passkey
+          </Button>
+          {methods.data?.google && (
             <Button
               intent="outline"
               size="lg"
               className="justify-start"
-              isPending={passkey.isPending}
-              onPress={() => passkey.mutate()}
+              isPending={social.isPending && social.variables === "google"}
+              onPress={() => social.mutate("google")}
             >
-              <IconKey />
-              Using a passkey
+              <Google aria-hidden />
+              Using Google
             </Button>
-            {methods.data?.google && (
-              <Button
-                intent="outline"
-                size="lg"
-                className="justify-start"
-                isPending={social.isPending && social.variables === "google"}
-                onPress={() => social.mutate("google")}
-              >
-                <Google aria-hidden />
-                Using Google
-              </Button>
-            )}
-            {methods.data?.github && (
-              <Button
-                intent="outline"
-                size="lg"
-                className="justify-start"
-                isPending={social.isPending && social.variables === "github"}
-                onPress={() => social.mutate("github")}
-              >
-                <GitHubLight aria-hidden className="dark:hidden" />
-                <GitHubDark aria-hidden className="hidden dark:block" />
-                Using GitHub
-              </Button>
-            )}
-          </div>
-          {methods.data?.magicLink && (
-            <form
-              className="flex flex-col gap-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                magicLink.mutate();
-              }}
-            >
-              <TextField
-                type="email"
-                aria-label="Email"
-                autoComplete="username webauthn"
-                isRequired
-                value={email}
-                onChange={setEmail}
-              >
-                <Input size="lg" placeholder="you@example.com" />
-              </TextField>
-              <Button type="submit" intent="secondary" size="lg" isPending={magicLink.isPending}>
-                <IconMail />
-                {sent ? "Check your email" : "Email me a link"}
-              </Button>
-            </form>
           )}
-          {failure && <Text className="text-danger-subtle-foreground">{failure.message}</Text>}
-        </Card>
+          {methods.data?.github && (
+            <Button
+              intent="outline"
+              size="lg"
+              className="justify-start"
+              isPending={social.isPending && social.variables === "github"}
+              onPress={() => social.mutate("github")}
+            >
+              <GitHubLight aria-hidden className="dark:hidden" />
+              <GitHubDark aria-hidden className="hidden dark:block" />
+              Using GitHub
+            </Button>
+          )}
+        </div>
+        {methods.data?.magicLink && (
+          <form
+            className="flex flex-col gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              magicLink.mutate();
+            }}
+          >
+            <TextField
+              type="email"
+              aria-label="Email"
+              autoComplete="username webauthn"
+              isRequired
+              value={email}
+              onChange={setEmail}
+            >
+              <Input size="lg" placeholder="you@example.com" />
+            </TextField>
+            <Button type="submit" intent="secondary" size="lg" isPending={magicLink.isPending}>
+              <IconMail />
+              {sent ? "Check your email" : "Email me a link"}
+            </Button>
+          </form>
+        )}
+        {failure && <Text className="text-danger-subtle-foreground">{failure.message}</Text>}
       </div>
     </main>
   );
