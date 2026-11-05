@@ -1,4 +1,4 @@
-// A pipe as a GitHub Deployment on its pull request (ADR 0013). When an open pipe's repo and
+// A pipe as a GitHub Deployment on its pull request (ADR 0016). When an open pipe's repo and
 // branch match an open pull request in a repo the org's GitHub App installation covers, the pipe
 // URL is posted there as a deployment to `wurmhol-preview` (state success, environment_url the
 // pipe), and marked inactive when the pipe ends. Without a GitHub App configured, or with no

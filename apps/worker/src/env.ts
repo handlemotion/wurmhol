@@ -44,7 +44,7 @@ const optional = z
   .transform((value) => value?.trim() || undefined);
 
 /**
- * The GitHub App that posts pipes to pull requests as deployments (ADR 0013). All of it or none
+ * The GitHub App that posts pipes to pull requests as deployments (ADR 0016). All of it or none
  * of it: with no `GITHUB_APP_ID`, nothing talks to GitHub.
  */
 const githubSchema = z

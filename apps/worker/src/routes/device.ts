@@ -148,6 +148,7 @@ export const deviceFlow = new Hono<AppEnv>()
       orgId: member.orgId,
       name,
       scope: "pipes",
+      source: "login",
       expiresAt: new Date(Date.now() + LOGIN_TOKEN_MS),
       createdBy: session.user.id,
     });

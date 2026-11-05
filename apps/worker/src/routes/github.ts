@@ -1,4 +1,4 @@
-// `/api/github`: linking the org to a GitHub App installation, and the App's webhook (ADR 0013).
+// `/api/github`: linking the org to a GitHub App installation, and the App's webhook (ADR 0016).
 //
 // Linking proves the person may see the installation: after GitHub's install page sends them to
 // `/setup`, they authorize the App as themselves and `/callback` asks GitHub which installations

@@ -1,0 +1,1 @@
+ALTER TABLE `tokens` ADD `source` text DEFAULT 'console' NOT NULL;

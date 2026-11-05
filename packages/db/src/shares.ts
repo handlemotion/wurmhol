@@ -5,7 +5,7 @@ import type { Db } from "./client.ts";
 import { randomShareId } from "./crypto.ts";
 import { pipeNames, shares, shareViews, users } from "./schema/index.ts";
 
-/** Where a pipe came from (ADR 0012): `@wurmhol/protocol`'s `PipeSource`, already checked. */
+/** Where a pipe came from (ADR 0015): `@wurmhol/protocol`'s `PipeSource`, already checked. */
 export interface ShareSource {
   repoHost: string | null;
   repo: string | null;
@@ -32,7 +32,7 @@ export async function recordShareStart(
     startedBy: string | null;
     port: number;
     name?: string | null;
-    /** Where the pipe came from (ADR 0012), already checked with `parsePipeSource`. */
+    /** Where the pipe came from (ADR 0015), already checked with `parsePipeSource`. */
     source?: ShareSource | null;
   },
 ): Promise<

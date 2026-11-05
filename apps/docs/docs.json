@@ -23,7 +23,7 @@
       },
       {
         "group": "Reference",
-        "pages": ["cli", "sdk", "self-hosting"]
+        "pages": ["cli", "mcp", "sdk", "self-hosting"]
       }
     ]
   },

@@ -1,6 +1,6 @@
-# 0013: Pipes post themselves to their pull request, through a GitHub App
+# 0016: Pipes post themselves to their pull request, through a GitHub App
 
-Status: accepted. Builds on ADR 0012 (a pipe's source). New: Wurmhol calls GitHub's API, only
+Status: accepted. Builds on ADR 0015 (a pipe's source). New: Wurmhol calls GitHub's API, only
 for orgs that link a GitHub account, and only when an install sets up a GitHub App.
 
 ## Context

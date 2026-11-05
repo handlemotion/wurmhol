@@ -9,7 +9,7 @@ import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useCreateToken, useNow, useRevokeToken, useTokens } from "@/hooks/use-app";
-import type { TokenExpiry } from "@/lib/api";
+import type { Token, TokenExpiry } from "@/lib/api";
 import { ago, expiry } from "@/lib/time";
 
 const EXPIRIES: { key: string; days: TokenExpiry; label: string }[] = [
@@ -20,7 +20,9 @@ const EXPIRIES: { key: string; days: TokenExpiry; label: string }[] = [
 
 /**
  * Tokens (spec section 3, ADR 0008): create one (shown once) with an expiry and a scope; list
- * by name, scope, expiry and last use; revoke.
+ * by name, scope, expiry and last use; revoke. Computers approved with `wurmhol login` hold a
+ * token too: they are listed apart, by when they were approved and last used, and signing one
+ * out revokes its token, which also ends its open pipes.
  */
 export function TokensDialog({
   isOpen,
@@ -143,6 +145,7 @@ export function TokensDialog({
               id: "a",
               name: "cloud sessions",
               scope: "pipes",
+              source: "console",
               createdAt: "",
               expiresAt: null,
               lastUsedAt: null,
@@ -151,36 +154,91 @@ export function TokensDialog({
           ]}
           label="Loading tokens"
         >
-          {(list) =>
-            list.length === 0 ? null : (
-              <ul className="flex flex-col divide-y divide-border">
-                {list.map((token) => (
-                  <li key={token.id} className="flex items-center justify-between gap-3 py-2.5">
-                    <div className="flex min-w-0 flex-col">
-                      <span className="truncate text-sm text-foreground">{token.name}</span>
-                      <span className="text-xs text-muted-foreground tabular-nums">
-                        {[
+          {(list) => {
+            const computers = list.filter((token) => token.source === "login");
+            const made = list.filter((token) => token.source !== "login");
+            const pending = (token: Token) => revoke.isPending && revoke.variables === token.id;
+            return (
+              <>
+                {made.length > 0 && (
+                  <ul className="flex flex-col divide-y divide-border">
+                    {made.map((token) => (
+                      <Row
+                        key={token.id}
+                        name={token.name}
+                        detail={[
                           token.scope === "org" ? "All org pipes" : "Opens pipes",
                           expiry(token.expiresAt, now),
-                          token.lastUsedAt ? `Used ${ago(token.lastUsedAt, now)}` : "Never used",
-                        ].join(" · ")}
-                      </span>
-                    </div>
-                    <Button
-                      intent="danger"
-                      size="xs"
-                      isPending={revoke.isPending && revoke.variables === token.id}
-                      onPress={() => revoke.mutate(token.id)}
-                    >
-                      Revoke
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )
-          }
+                          used(token, now),
+                        ]}
+                        action="Revoke"
+                        isPending={pending(token)}
+                        onPress={() => revoke.mutate(token.id)}
+                      />
+                    ))}
+                  </ul>
+                )}
+                {computers.length > 0 && (
+                  // A label belongs to the rows under it: more room above than below.
+                  <section aria-label="Signed-in computers" className="flex flex-col gap-1 pt-3">
+                    <span aria-hidden className="text-xs text-subtle-foreground">
+                      Signed-in computers
+                    </span>
+                    <ul className="flex flex-col divide-y divide-border">
+                      {computers.map((token) => (
+                        <Row
+                          key={token.id}
+                          name={token.name}
+                          detail={[
+                            `Signed in ${ago(token.createdAt, now)}${token.createdBy ? ` by ${token.createdBy}` : ""}`,
+                            used(token, now),
+                          ]}
+                          action="Sign out"
+                          isPending={pending(token)}
+                          onPress={() => revoke.mutate(token.id)}
+                        />
+                      ))}
+                    </ul>
+                  </section>
+                )}
+              </>
+            );
+          }}
         </Skeleton>
       </DialogBody>
     </Dialog>
+  );
+}
+
+function used(token: Token, now: number) {
+  return token.lastUsedAt ? `Used ${ago(token.lastUsedAt, now)}` : "Never used";
+}
+
+/** One token or computer: its name, a quiet line of detail, and the button that ends it. */
+function Row({
+  name,
+  detail,
+  action,
+  isPending,
+  onPress,
+}: {
+  name: string;
+  detail: (string | null)[];
+  action: string;
+  isPending: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <li className="flex items-center justify-between gap-3 py-2.5">
+      <div className="flex min-w-0 flex-col">
+        <span className="truncate text-sm text-foreground">{name}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {detail.filter(Boolean).join(" · ")}
+        </span>
+      </div>
+      <Button intent="danger" size="xs" isPending={isPending} onPress={onPress}>
+        {action}
+      </Button>
+    </li>
   );
 }

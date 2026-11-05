@@ -102,6 +102,8 @@ export interface SessionUser {
   id: string;
   email: string;
   name: string;
+  /** The picture Google or GitHub gave at sign-in, or null. */
+  image: string | null;
 }
 
 /**
@@ -120,7 +122,7 @@ export async function resolveSession(c: {
     (activeOrgId ? await findMember(c.var.db, session.user.id, activeOrgId) : null) ??
     (await findMember(c.var.db, session.user.id));
   const { id, email, name } = session.user;
-  return { user: { id, email, name }, member, activeOrgId };
+  return { user: { id, email, name, image: session.user.image ?? null }, member, activeOrgId };
 }
 
 /** Resolves the session to a member of its active org. 401 signed out, 403 in no org. */

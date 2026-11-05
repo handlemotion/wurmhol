@@ -3,10 +3,11 @@
 # Permissions-Policy) in step. From Omni.
 #
 # CSP: everything from our own origin only, including the wall's WebSocket and the favicons it
-# shows (served by /api). Billing leaves for Stripe's own pages, so no Stripe.js here.
+# shows (served by /api). Images also load from the two sign-in providers' avatar hosts: the
+# picture Google or GitHub gave each member (`users.image`). Billing leaves for Stripe's own pages, so no Stripe.js here.
 # Styles allow 'unsafe-inline': React Aria sets style attributes and UI libraries inject <style>.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.googleusercontent.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
   Strict-Transport-Security: max-age=63072000; includeSubDomains
   X-Content-Type-Options: nosniff
   Referrer-Policy: same-origin

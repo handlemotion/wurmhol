@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "118a9769-b341-4b65-92df-6fa5017e4501",
-  "prevId": "3824a152-7b7c-447f-bddc-9591e3ec3985",
+  "id": "5d17717e-c9eb-4a87-b512-65929524ce0d",
+  "prevId": "5f9ce9a1-249c-488d-ae55-f2a2a7d36512",
   "tables": {
     "accounts": {
       "name": "accounts",
@@ -977,95 +977,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "github_installations": {
-      "name": "github_installations",
-      "columns": {
-        "org_id": {
-          "name": "org_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "installation_id": {
-          "name": "installation_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "account": {
-          "name": "account",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "linked_by": {
-          "name": "linked_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(cast(unixepoch('subsecond') * 1000 as integer))"
-        }
-      },
-      "indexes": {
-        "github_installations_installation_idx": {
-          "name": "github_installations_installation_idx",
-          "columns": [
-            "installation_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "github_installations_org_id_organizations_id_fk": {
-          "name": "github_installations_org_id_organizations_id_fk",
-          "tableFrom": "github_installations",
-          "tableTo": "organizations",
-          "columnsFrom": [
-            "org_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "github_installations_linked_by_users_id_fk": {
-          "name": "github_installations_linked_by_users_id_fk",
-          "tableFrom": "github_installations",
-          "tableTo": "users",
-          "columnsFrom": [
-            "linked_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "github_installations_org_id_installation_id_pk": {
-          "columns": [
-            "org_id",
-            "installation_id"
-          ],
-          "name": "github_installations_org_id_installation_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "invite_links": {
       "name": "invite_links",
       "columns": {
@@ -1578,14 +1489,6 @@
           ],
           "isUnique": false
         },
-        "shares_open_branch_idx": {
-          "name": "shares_open_branch_idx",
-          "columns": [
-            "branch"
-          ],
-          "isUnique": false,
-          "where": "\"shares\".\"branch\" is not null and \"shares\".\"ended_at\" is null"
-        },
         "shares_open_name_idx": {
           "name": "shares_open_name_idx",
           "columns": [
@@ -1678,6 +1581,14 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'pipes'"
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'console'"
         },
         "created_by": {
           "name": "created_by",

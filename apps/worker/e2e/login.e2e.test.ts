@@ -6,12 +6,14 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import {
+  alive,
   api,
   browserFetch,
   cli,
   cliEnv,
   cliPath,
   connectProxy,
+  createToken,
   localServer,
   me,
   type Person,
@@ -269,4 +271,59 @@ it("polling faster than the interval gets slow_down", async () => {
   await post("/device/token", { device_code: issued.device_code });
   const fast = await post("/device/token", { device_code: issued.device_code });
   expect(((await fast.json()) as { error: string }).error).toBe("slow_down");
+});
+
+it("a signed-in computer is listed by when it was approved and last used; signing it out stops its token at once", async () => {
+  const env = loginEnv();
+  const login = await startLogin(env);
+  expect((await device(ada, "approve", login.code)).status).toBe(200);
+  expect((await login.done).code).toBe(0);
+
+  const local = await localServer((_req, res) => res.end("from this computer"));
+  const opened = await cli([String(local.port), "--json"], env);
+  expect({ code: opened.code, stderr: opened.stderr }).toMatchObject({ code: 0 });
+  const started = JSON.parse(opened.stdout) as { id: string; url: string };
+  const cookie = await viewerCookie(stack, ada, started.url);
+  expect(await (await browserFetch(`${started.url}/`, { cookie })).text()).toBe(
+    "from this computer",
+  );
+
+  type Listed = {
+    id: string;
+    name: string;
+    source: string;
+    createdAt: string;
+    lastUsedAt: string | null;
+    createdBy: string | null;
+  };
+  const listed = await api<{ tokens: Listed[] }>(stack, ada, "/api/tokens");
+  const computers = listed.body.tokens.filter((t) => t.source === "login");
+  const computer = computers.find((t) => t.name === hostname());
+  expect(computer).toBeDefined();
+  // Approved just now, and used to open the pipe since.
+  expect(Date.now() - Date.parse(computer!.createdAt)).toBeLessThan(60_000);
+  expect(Date.parse(computer!.lastUsedAt!)).toBeGreaterThanOrEqual(Date.parse(computer!.createdAt));
+  // Console tokens are not computers.
+  await createToken(stack, ada, "made in the console");
+  const after = await api<{ tokens: Listed[] }>(stack, ada, "/api/tokens");
+  expect(after.body.tokens.find((t) => t.name === "made in the console")?.source).toBe("console");
+
+  const pid = (
+    JSON.parse(readFileSync(join(env.WURMHOL_HOME!, "shares", `${started.id}.json`), "utf8")) as {
+      pid: number;
+    }
+  ).pid;
+  const signedOut = await api(stack, ada, `/api/tokens/${computer!.id}`, { method: "DELETE" });
+  expect(signedOut.status).toBe(200);
+
+  // At once: its open pipe ends, its CLI exits, and the stored token opens nothing.
+  const ended = await browserFetch(`${started.url}/`, { cookie });
+  expect(ended.status).toBe(410);
+  await waitFor(() => !alive(pid), { what: "the signed-out computer's CLI to exit" });
+  const again = await cli([String(local.port)], env);
+  expect(again.code).toBe(1);
+  expect(again.stderr).toContain("Create a new token");
+  const gone = await api<{ tokens: Listed[] }>(stack, ada, "/api/tokens");
+  expect(gone.body.tokens.map((t) => t.id)).not.toContain(computer!.id);
+  await local.close();
 });

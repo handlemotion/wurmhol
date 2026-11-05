@@ -1,4 +1,4 @@
-// Where a pipe comes from (ADR 0012): the git repo, branch and commit of the directory the CLI
+// Where a pipe comes from (ADR 0015): the git repo, branch and commit of the directory the CLI
 // runs in, and the agent session its environment names. Anything it cannot tell is left out;
 // none of it ever stops a pipe from opening.
 import { execFile } from "node:child_process";

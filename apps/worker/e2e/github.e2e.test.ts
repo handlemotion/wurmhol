@@ -1,4 +1,4 @@
-// Pull request previews through a GitHub App (ADR 0013), on the real stack. Off by default:
+// Pull request previews through a GitHub App (ADR 0016), on the real stack. Off by default:
 // nothing changes and nothing talks to GitHub. With an App configured, the webhook takes only
 // signed calls and linking an installation takes only the state made for that person.
 // The calls to GitHub itself need a real App and are not exercised here.
