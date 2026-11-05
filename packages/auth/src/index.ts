@@ -1,15 +1,19 @@
 // Better Auth for Wurmhol, adapted from Omni's `packages/auth`: passkeys, Google and GitHub OAuth,
 // organizations, several accounts per browser, and Stripe billing per org. It runs on D1 through
 // Drizzle's SQLite adapter (ADR 0001).
+import { cimd } from "@better-auth/cimd";
+import { mcp } from "@better-auth/mcp";
 import { passkey } from "@better-auth/passkey";
 import { stripe, type StripeOptions } from "@better-auth/stripe";
 import { type Db, createPersonalOrg, schema } from "@wurmhol/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { getDpopJktFromPayload, getJwks, verifyJwsAccessToken } from "better-auth/oauth2";
 import { APIError } from "better-auth/api";
 
 export { APIError };
 import { deviceAuthorization } from "better-auth/plugins/device-authorization";
+import { jwt } from "better-auth/plugins/jwt";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { multiSession } from "better-auth/plugins/multi-session";
 import { organization } from "better-auth/plugins/organization";
@@ -17,6 +21,7 @@ import { and, asc, eq } from "drizzle-orm";
 import Stripe from "stripe";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
+import { fetchClientMetadata } from "./client-metadata.ts";
 
 const commaList = z
   .string()
@@ -210,6 +215,80 @@ function billingPlugin(env: AuthEnv, billing: BillingConfig) {
   });
 }
 
+/**
+ * The hosted MCP server's scopes (ADR 0014). `pipes:read` lists the person's orgs and pipes;
+ * `pipes:write` also terminates them. Every member may terminate any pipe of their org, so the
+ * split exists only so that a person can grant a client read-only access.
+ */
+export const MCP_SCOPES = ["pipes:read", "pipes:write"] as const;
+export type McpScope = (typeof MCP_SCOPES)[number];
+
+/** Where the OAuth flow sends a person who is not signed in, and where they consent. */
+export const MCP_LOGIN_PAGE = "/oauth/login";
+export const MCP_CONSENT_PAGE = "/oauth/consent";
+
+/**
+ * The hosted MCP server (ADR 0014): Better Auth as the OAuth 2.1 authorization server for one
+ * protected resource, `resource` (`https://api.wurmhol.com/mcp`). Clients register by Client ID
+ * Metadata Document; Dynamic Client Registration stays off.
+ */
+export interface McpAuthOptions {
+  /** The MCP server's URL, the audience of every access token. */
+  resource: string;
+}
+
+/**
+ * One instance per isolate, not per request: its cache of client metadata documents and its fetch
+ * budgets then outlive a request. The plugin supports sharing one instance across auth instances.
+ */
+const clientDiscovery = cimd({
+  fetchClientMetadataResource: fetchClientMetadata,
+  metadataProfile: "mcp-2026-07-28",
+});
+
+function mcpPlugins(env: AuthEnv, options: McpAuthOptions) {
+  return [
+    // Signs access tokens. Its private key lives in D1, encrypted with BETTER_AUTH_SECRET. The
+    // issuer is the app's origin, so the authorization server metadata sits at the root
+    // `/.well-known/oauth-authorization-server`, where every MCP client looks first.
+    jwt({
+      jwt: { issuer: new URL(env.baseURL).origin },
+      // No JWT on every get-session response: the console never uses one.
+      disableSettingJwtHeader: true,
+    }),
+    mcp({
+      resource: options.resource,
+      loginPage: MCP_LOGIN_PAGE,
+      consentPage: MCP_CONSENT_PAGE,
+      scopes: [...MCP_SCOPES, "offline_access"],
+      clientRegistrationDefaultScopes: [...MCP_SCOPES, "offline_access"],
+      clientRegistrationAllowedScopes: [...MCP_SCOPES, "offline_access"],
+      // Authorization code (with PKCE) and refresh only: no machine clients.
+      grantTypes: ["authorization_code", "refresh_token"],
+      // Better Auth's rate limiter is off (above); the Worker limits /api/auth per IP.
+      rateLimit: {
+        token: false,
+        authorize: false,
+        introspect: false,
+        revoke: false,
+        register: false,
+        rotateClientKeys: false,
+        userinfo: false,
+      },
+      schema: {
+        oauthClient: { modelName: "oauthClients" },
+        oauthResource: { modelName: "oauthResources" },
+        oauthClientResource: { modelName: "oauthClientResources" },
+        oauthRefreshToken: { modelName: "oauthRefreshTokens" },
+        oauthAccessToken: { modelName: "oauthAccessTokens" },
+        oauthConsent: { modelName: "oauthConsents" },
+        oauthClientAssertion: { modelName: "oauthClientAssertions" },
+      },
+    }),
+    clientDiscovery,
+  ];
+}
+
 export type MagicLinkSender = (message: { email: string; url: string }) => Promise<void>;
 
 export interface AuthEnv extends Partial<
@@ -225,6 +304,8 @@ export interface AuthEnv extends Partial<
    * sender only in development and test, where the link is logged instead of mailed.
    */
   sendMagicLink?: MagicLinkSender;
+  /** The hosted MCP server's authorization (ADR 0014); absent when it is off. */
+  mcp?: McpAuthOptions;
 }
 
 /**
@@ -335,8 +416,52 @@ export function createAuth(env: AuthEnv) {
         schema: { deviceCode: { modelName: "deviceCodes" } },
       }),
       ...(env.billing ? [billingPlugin(env, env.billing)] : []),
+      ...(env.mcp ? mcpPlugins(env, env.mcp) : []),
     ],
   });
 }
 
 export type Auth = ReturnType<typeof createAuth>;
+
+/** Who an MCP access token speaks for: a person, through the client they consented to. */
+export interface McpGrant {
+  userId: string;
+  clientId: string;
+  scopes: Set<string>;
+}
+
+/** One cache of the signing keys per isolate, refetched on a `kid` it does not know. */
+const jwksCache = {};
+
+/**
+ * Verifies an access token for the hosted MCP server (ADR 0014): its signature against our own
+ * signing keys, read in process rather than over HTTP from our own `/jwks`; its issuer, audience
+ * (`resource`) and expiry; and that it names a person and a client. Null when it fails any check.
+ * Sender-constrained (DPoP) tokens are refused: Wurmhol never issues them to MCP clients.
+ */
+export async function verifyMcpAccessToken(
+  auth: Auth,
+  token: string,
+  resource: string,
+): Promise<McpGrant | null> {
+  try {
+    const payload = await verifyJwsAccessToken(token, {
+      jwksFetch: async () => (await auth.api.getJwks()) as Awaited<ReturnType<typeof getJwks>>,
+      jwksCacheKey: jwksCache,
+      verifyOptions: {
+        issuer: new URL(auth.options.baseURL as string).origin,
+        audience: resource,
+        requiredClaims: ["sub", "azp", "exp"],
+      },
+    });
+    if (getDpopJktFromPayload(payload)) return null;
+    const scope = typeof payload.scope === "string" ? payload.scope : "";
+    return {
+      userId: String(payload.sub),
+      clientId: String(payload.azp),
+      scopes: new Set(scope.split(" ").filter(Boolean)),
+    };
+  } catch {
+    return null;
+  }
+}

@@ -78,6 +78,10 @@ one-line fix the CLI prints. ESM only.
 
 ## As an MCP server
 
+To ask your own assistant what's open and end pipes, connect the hosted server instead: add
+`https://api.wurmhol.com/mcp` to claude.ai, Claude Desktop or Claude Code and sign in, no token
+needed ([docs](https://wurmhol.com/docs/mcp)). It cannot open pipes; this one can.
+
 `wurmhol mcp` serves the same actions as MCP tools over stdio, for agents that call tools rather
 than run commands. In Claude Code:
 

@@ -14,7 +14,7 @@ export const auth: Auth = createAuth({
   ) as unknown as Db,
   secret: "schema-generation-only-schema-generation-only",
   baseURL: "http://localhost",
-  // Billing and magic links on, so their tables and columns are part of the schema (additive and
+  // Billing, magic links and MCP on, so their tables and columns are part of the schema (additive and
   // unused when a deploy leaves them off).
   billing: {
     secretKey: "sk_test_schema_generation_only",
@@ -25,4 +25,6 @@ export const auth: Auth = createAuth({
   sendMagicLink: async () => {
     throw new Error("auth.config.ts is for schema generation only");
   },
+  // The hosted MCP server's tables (ADR 0014): signing keys, OAuth clients, tokens and consents.
+  mcp: { resource: "http://localhost/mcp" },
 });

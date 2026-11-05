@@ -11,11 +11,14 @@
     "auth:generate": "auth generate --config auth.config.ts --output ../db/src/schema/auth.ts -y && cd ../db && oxfmt src/schema/auth.ts"
   },
   "dependencies": {
-    "@better-auth/passkey": "^1.7.16",
-    "@better-auth/stripe": "^1.7.16",
+    "@better-auth/cimd": "^1.7.17",
+    "@better-auth/mcp": "^1.7.17",
+    "@better-auth/oauth-provider": "^1.7.17",
+    "@better-auth/passkey": "^1.7.17",
+    "@better-auth/stripe": "^1.7.17",
     "@simplewebauthn/server": "13.3.3",
     "@wurmhol/db": "workspace:*",
-    "better-auth": "^1.7.16",
+    "better-auth": "^1.7.17",
     "better-call": "1.4.5",
     "drizzle-orm": "^0.45.4",
     "stripe": "^23.1.0",
@@ -24,6 +27,6 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261104.1",
-    "auth": "^1.7.16"
+    "auth": "^1.7.17"
   }
 }
