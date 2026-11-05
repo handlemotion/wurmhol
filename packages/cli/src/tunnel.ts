@@ -382,16 +382,18 @@ export class Tunnel {
 
   #openWs(id: number, open: WsOpenPayload) {
     const port = this.#options.port;
-    const headers: Record<string, string> = {};
+    // A Map, not an object literal: header names come from the browser, and one named
+    // `__proto__` must not write to the object's prototype.
+    const headers = new Map<string, string>();
     for (const [name, value] of forwardable(open.headers ?? [])) {
-      if (!/^sec-websocket-/i.test(name)) headers[name] = value;
+      if (!/^sec-websocket-/i.test(name)) headers.set(name, value);
     }
-    headers.host = `localhost:${port}`;
+    headers.set("host", `localhost:${port}`);
     const socket = new WebSocket(
       `ws://127.0.0.1:${port}${open.path ?? "/"}`,
       open.protocols ?? [],
       {
-        headers,
+        headers: Object.fromEntries(headers),
         perMessageDeflate: false,
         maxPayload: MAX_WS_MESSAGE_BYTES,
       },
