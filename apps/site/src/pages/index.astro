@@ -5,6 +5,7 @@ import Base from "../layouts/Base.astro";
 const SIGN_IN = "https://dirt.wurmhol.com/login";
 const REPO = "https://github.com/handlemotion/wurmhol";
 const SELF_HOSTING = `${REPO}/blob/main/docs/self-hosting.md`;
+const DEPLOY = `https://deploy.workers.cloudflare.com/?url=${REPO}`;
 
 const title = "Wurmhol: a private URL for your agent's dev server";
 const description =
@@ -42,7 +43,11 @@ const faq = [
   },
   {
     q: "Can I run it myself?",
-    a: "Yes. The code is open source (AGPL-3.0, the CLI is MIT). One Cloudflare account and two hostnames are enough; the self-hosting guide has the steps.",
+    a: "Yes. The code is open source (AGPL-3.0, the CLI is MIT). One Cloudflare account and two hostnames are enough.",
+    links: [
+      { href: DEPLOY, label: "Deploy to Cloudflare" },
+      { href: SELF_HOSTING, label: "Self-hosting guide" },
+    ],
   },
 ];
 ---
@@ -201,10 +206,18 @@ const faq = [
       <h2 id="faq">Questions</h2>
       <div class="body faq">
         {
-          faq.map(({ q, a }) => (
+          faq.map(({ q, a, links }) => (
             <details>
               <summary>{q}</summary>
-              <p>{a}</p>
+              <p>
+                {a}
+                {links?.map(({ href, label }) => (
+                  <>
+                    {" "}
+                    <a href={href}>{label}</a>.
+                  </>
+                ))}
+              </p>
             </details>
           ))
         }

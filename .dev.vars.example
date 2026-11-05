@@ -1,0 +1,4 @@
+# Secrets the Deploy to Cloudflare button asks for (root wrangler.jsonc). Only secrets go here:
+# the button stores every key as a Worker secret. Optional secrets (OAuth, Stripe) are set later
+# with `wrangler secret put`, see docs/self-hosting.md. Local dev uses apps/worker/.dev.vars.example.
+BETTER_AUTH_SECRET=
