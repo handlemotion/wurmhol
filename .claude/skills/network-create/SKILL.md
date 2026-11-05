@@ -163,6 +163,10 @@ you pick a variant instead of guessing. `--tsx Name` writes a React component of
   Steiner chain that is tight on the form's left and opens into the page on its right; the hole's
   rim is the accent.
 
+- **Wall** (`wall`): the empty wall. Confocal conics centred on the Create pipe button, foci
+  tagged `container` and `browser`; the innermost ellipse is the hole the open Create pipe card
+  fits in, and the hyperbolas start at its rim.
+
 When lines converge on a point, stop them short of it (as `corridor` does). A fan of 20 lines
 into one pixel reads as a smudge.
 

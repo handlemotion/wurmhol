@@ -58,6 +58,7 @@ import { type OrgAction, OrgDialog } from "./org-dialogs";
 import { Constellation } from "./constellation";
 import { ANCHOR } from "./constellation-layout";
 import { TokensDialog } from "./tokens-dialog";
+import { WallPlate } from "./wall-plate";
 
 const SAMPLE: Share[] = [1, 2, 3].map((n) => ({
   id: `sample${n}`,
@@ -84,7 +85,7 @@ export function Wall({ me }: { me: Me }) {
   const [dialog, setDialog] = useState<"members" | "tokens" | null>(null);
 
   return (
-    <div className="min-h-dvh bg-background">
+    <div className="min-h-dvh overflow-clip bg-background">
       <Header me={me} onOpen={setDialog} />
       <main className="w-full px-4 sm:px-8">
         {me.standing && !me.standing.ok && <NeedsPlan owner={me.role === "owner"} />}
@@ -295,14 +296,17 @@ function Network({ shares }: { shares: Share[] }) {
   return (
     <Constellation
       open={current}
+      // Only while the wall is empty: it draws what a pipe is (a container and a browser, the
+      // button on the line between them). Once pipes are open, their own network is the picture.
+      backdrop={
+        shares.length === 0 && (
+          <WallPlate className="text-hairline-line animate-in duration-700 ease-out fade-in motion-reduce:animate-none" />
+        )
+      }
       anchor={
         <div className="relative">
-          {shares.length === 0 && current !== ANCHOR && (
-            // Above the button, out of its box, so the button stays the network's centre.
-            <Text className="absolute start-1/2 bottom-full mb-3 -translate-x-1/2 text-nowrap">
-              No open pipes yet.
-            </Text>
-          )}
+          {/* The backdrop says it to the eye; this says it to a screen reader. */}
+          {shares.length === 0 && <span className="sr-only">No open pipes yet.</span>}
           {current === ANCHOR ? (
             <CreateCard />
           ) : (

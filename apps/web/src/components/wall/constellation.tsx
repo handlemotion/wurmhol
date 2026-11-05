@@ -30,12 +30,15 @@ export function Constellation(props: {
   nodes: Node[];
   /** The node shown as an open card, if any. */
   open: string | null;
+  /** A drawing behind the network, its (0, 0) held on the anchor's place (without its drift). */
+  backdrop?: React.ReactNode;
 }) {
   const { nodes, open } = props;
   const canvas = useRef<HTMLDivElement>(null);
   const els = useRef(new Map<string, HTMLElement>());
   const sizes = useRef(new Map<string, Size>());
   const lines = useRef(new Map<string, SVGLineElement>());
+  const backdrop = useRef<HTMLDivElement>(null);
   const targets = useRef(new Map<string, Point>());
   const sim = useRef(new Map<string, Point>());
   const origin = useRef({ x: 0, y: 0 });
@@ -126,6 +129,15 @@ export function Constellation(props: {
           el.style.visibility = "visible";
         }
       }
+      // The backdrop follows the anchor's place as it eases, but not its drift: a whole drawing
+      // swaying with the button would read as the page moving.
+      const seat = sim.current.get(ANCHOR);
+      if (backdrop.current && seat) {
+        const x = snap(origin.current.x + seat.x);
+        const y = snap(origin.current.y + seat.y);
+        backdrop.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+        backdrop.current.style.visibility = "visible";
+      }
       const hub = drawn.get(ANCHOR);
       for (const [id, line] of lines.current) {
         const end = drawn.get(id);
@@ -154,7 +166,16 @@ export function Constellation(props: {
   };
 
   return (
-    <div ref={canvas} className="relative w-full overflow-hidden">
+    <div ref={canvas} className="relative w-full">
+      {props.backdrop && (
+        <div
+          ref={backdrop}
+          aria-hidden
+          className="pointer-events-none invisible absolute top-0 left-0 size-0 will-change-transform"
+        >
+          {props.backdrop}
+        </div>
+      )}
       <svg aria-hidden className="absolute inset-0 size-full text-hairline-line">
         {nodes.map((node) => (
           <line
