@@ -379,6 +379,17 @@ const RIGHT = unfold("x", "end");
 const BOTTOM = unfold("y", "end");
 const LEFT = unfold("x", "start");
 
+/**
+ * A still copy of the pill at its own rect inside the card: opaque while the card is nearly
+ * folded and gone by halfway, so on close the pill's fill and label fade in as the card folds
+ * into it, and the real pill takes over without a fade.
+ */
+const GHOST = {
+  left: "calc(var(--pill-x) - var(--pill-w) / 2)",
+  top: "calc(var(--pill-y) - var(--pill-h) / 2)",
+  opacity: "clamp(0, calc(1 - var(--open) * 2), 1)",
+};
+
 /** The unfold's spring: interrupted (a press mid-open), it turns back from where it stands. */
 const UNFOLD = { type: "spring", stiffness: 380, damping: 36, mass: 1 } as const;
 
@@ -393,8 +404,8 @@ const content = {
 
 /**
  * A node's pill or its card. The card unfolds out of its pill's rect (its border drawn on the
- * unfolding edge) while its content fades in, and folds back into it on close; the pill returns
- * once the card has gone.
+ * unfolding edge) while its content fades in, and folds back into it on close, the pill fading
+ * in over the fold's second half; the real pill returns once the card has gone.
  */
 function Swap(props: {
   open: boolean;
@@ -424,17 +435,12 @@ function Swap(props: {
             className={cn("pointer-events-none absolute border", props.edge)}
             style={{ top: TOP, right: RIGHT, bottom: BOTTOM, left: LEFT }}
           />
+          <div aria-hidden inert className="pointer-events-none absolute" style={GHOST}>
+            {props.pill}
+          </div>
         </m.div>
       ) : (
-        <m.div
-          key="pill"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0, transition: { duration: 0 } }}
-          transition={{ duration: 0.12, ease: "easeOut" }}
-        >
-          {props.pill}
-        </m.div>
+        <div key="pill">{props.pill}</div>
       )}
     </AnimatePresence>
   );
