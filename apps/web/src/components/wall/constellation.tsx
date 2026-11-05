@@ -10,6 +10,11 @@ import { ANCHOR, grow, hash, layout, type Point, type Size } from "./constellati
  * instead of restarting or snapping it. Each frame adds a few pixels of drift, and the spokes
  * from the anchor are redrawn from the same positions, so lines never lag the nodes.
  *
+ * The loop runs at the screen's rate only while a spring is moving. At rest only the drift
+ * moves, under two pixels a second, so it ticks at `IDLE_FPS`; under reduced motion nothing
+ * drifts and it stops until something changes (a layout, a scroll, a resize). A frame writes
+ * only what changed, so a still node costs no style or layout work.
+ *
  * An open card opens where its pill stands, growing away from the anchor (its corner nearest the
  * anchor stays on the pill's); the network leans away from it, and a camera carries the whole
  * network until the card sits in the middle of the view.
@@ -23,6 +28,14 @@ const NODE = { stiffness: 140, damping: 21 };
 const VIEW = { stiffness: 110, damping: 21 };
 /** Integration step: small enough to keep the springs stable on a slow frame. */
 const STEP = 1 / 240;
+/**
+ * Ticks per second while only the drift moves. The drift is under 1.75 px/s and every position
+ * snaps to device pixels, so 15 steps a second is as smooth as the screen's rate.
+ */
+const IDLE_FPS = 15;
+/** Closer than this to its goal (px) and slower than `REST_V` (px/s), a spring is at rest. */
+const REST_D = 0.05;
+const REST_V = 0.5;
 /** Space kept above and below the network inside the canvas. */
 const PAD = 48;
 
@@ -47,6 +60,16 @@ function spring(body: Body, goal: Point, dt: number, k: { stiffness: number; dam
 /** Puts `body` on `goal` at rest (reduced motion, or the first frame). */
 function settle(body: Body, goal: Point) {
   Object.assign(body, { x: goal.x, y: goal.y, vx: 0, vy: 0 });
+}
+
+/** Settles `body` once it is close enough to rest; returns whether it still moves. */
+function moving(body: Body, goal: Point) {
+  const near = Math.abs(goal.x - body.x) < REST_D && Math.abs(goal.y - body.y) < REST_D;
+  if (near && Math.abs(body.vx) < REST_V && Math.abs(body.vy) < REST_V) {
+    settle(body, goal);
+    return false;
+  }
+  return true;
 }
 
 function snap(px: number) {
@@ -80,6 +103,8 @@ export function Constellation(props: {
   const origin = useRef<Point | null>(null);
   const seat = useRef<Body | null>(null);
   const camera = useRef<Body>({ x: 0, y: 0, vx: 0, vy: 0 });
+  /** Restarts the frame loop at the screen's rate: a layout, a scroll or a resize moved a goal. */
+  const wake = useRef(() => {});
 
   const relayout = useCallback(() => {
     const box = canvas.current;
@@ -125,6 +150,7 @@ export function Constellation(props: {
     box.style.height = `${height}px`;
     origin.current = { x: box.clientWidth / 2, y };
     targets.current = result.at;
+    wake.current();
   }, [nodes, open]);
 
   useLayoutEffect(relayout);
@@ -139,15 +165,31 @@ export function Constellation(props: {
 
   // The frame loop. Under reduced motion nodes and the camera jump to their place and hold still.
   useEffect(() => {
-    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const query = matchMedia("(prefers-reduced-motion: reduce)");
+    let still = query.matches;
     let frame = 0;
-    let last = performance.now();
+    let idle = 0;
+    // 0 after a pause: the next tick steps one frame, so a goal that moved while the loop slept
+    // starts its spring from rest instead of leaping a long step at once.
+    let last = 0;
+    /** What each element was last given, so an unchanged value is never written again. */
+    const written = new Map<string, string>();
+    const put = (key: string, value: string, write: () => void) => {
+      if (written.get(key) === value) return;
+      written.set(key, value);
+      write();
+    };
     const tick = (now: number) => {
+      frame = 0;
       // A long gap (a background tab) is cut short, so nothing leaps when the page comes back.
-      const dt = Math.min(0.064, (now - last) / 1000);
+      const dt = last ? Math.min(0.064, (now - last) / 1000) : 1 / 60;
       last = now;
-      const move = (body: Body, goal: Point, k: typeof NODE) =>
-        still ? settle(body, goal) : spring(body, goal, dt, k);
+      let busy = false;
+      const move = (body: Body, goal: Point, k: typeof NODE) => {
+        if (still) settle(body, goal);
+        else spring(body, goal, dt, k);
+        busy = moving(body, goal) || busy;
+      };
       const t = now / 1000;
       // Every read before any write, so the loop never forces a layout between its writes.
       const live = new Map<string, Size>();
@@ -180,10 +222,13 @@ export function Constellation(props: {
         centres.set(id, { x: x + dx, y: y + dy });
         // Where the pill stands inside the card's box: the card unfolds from that rect (`Swap`).
         const style = els.current.get(id)!.style;
-        style.setProperty("--pill-x", `${size.w / 2 - dx}px`);
-        style.setProperty("--pill-y", `${size.h / 2 - dy}px`);
-        style.setProperty("--pill-w", `${pill.w}px`);
-        style.setProperty("--pill-h", `${pill.h}px`);
+        const pillAt = `${size.w / 2 - dx}px ${size.h / 2 - dy}px ${pill.w}px ${pill.h}px`;
+        put(`${id} pill`, pillAt, () => {
+          style.setProperty("--pill-x", `${size.w / 2 - dx}px`);
+          style.setProperty("--pill-y", `${size.h / 2 - dy}px`);
+          style.setProperty("--pill-w", `${pill.w}px`);
+          style.setProperty("--pill-h", `${pill.h}px`);
+        });
       }
 
       // The camera: an open pipe's card in the middle of what is visible of the canvas, else at
@@ -223,8 +268,10 @@ export function Constellation(props: {
         // into a doubled, darker line.
         const left = snap(ox + c.x - size.w / 2);
         const top = snap(oy + c.y - size.h / 2);
-        el.style.transform = `translate3d(${left}px, ${top}px, 0)`;
-        el.style.visibility = "visible";
+        put(id, `${left} ${top}`, () => {
+          el.style.transform = `translate3d(${left}px, ${top}px, 0)`;
+          el.style.visibility = "visible";
+        });
       }
       // The backdrop holds still on the anchor's resting place: it ignores the camera's pan and the
       // Create pipe card's offset, so opening the card only scales it up where it stands. Nor does
@@ -233,8 +280,11 @@ export function Constellation(props: {
       if (backdrop.current && hubAt) {
         const x = snap(seat.current.x + hubAt.x);
         const y = snap(seat.current.y + hubAt.y);
-        backdrop.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-        backdrop.current.style.visibility = "visible";
+        const style = backdrop.current.style;
+        put("backdrop", `${x} ${y}`, () => {
+          style.transform = `translate3d(${x}px, ${y}px, 0)`;
+          style.visibility = "visible";
+        });
       }
       const hub = drawn.get(ANCHOR);
       for (const [id, line] of lines.current) {
@@ -243,15 +293,48 @@ export function Constellation(props: {
         // On a device pixel's centre: a 1px line on a pixel boundary paints two half-lit pixels
         // and reads twice as thick.
         const mid = 0.5 / (devicePixelRatio || 1);
-        line.setAttribute("x1", String(snap(ox + hub.x) + mid));
-        line.setAttribute("y1", String(snap(oy + hub.y) + mid));
-        line.setAttribute("x2", String(snap(ox + end.x) + mid));
-        line.setAttribute("y2", String(snap(oy + end.y) + mid));
+        const [x1, y1] = [snap(ox + hub.x) + mid, snap(oy + hub.y) + mid];
+        const [x2, y2] = [snap(ox + end.x) + mid, snap(oy + end.y) + mid];
+        put(`${id} line`, `${x1} ${y1} ${x2} ${y2}`, () => {
+          line.setAttribute("x1", String(x1));
+          line.setAttribute("y1", String(y1));
+          line.setAttribute("x2", String(x2));
+          line.setAttribute("y2", String(y2));
+        });
       }
+      if (busy) frame = requestAnimationFrame(tick);
+      else if (!still) {
+        idle = window.setTimeout(() => {
+          idle = 0;
+          last = 0;
+          frame = requestAnimationFrame(tick);
+        }, 1000 / IDLE_FPS);
+      } else last = 0;
+    };
+    const wakeUp = () => {
+      if (frame) return;
+      clearTimeout(idle);
+      idle = 0;
       frame = requestAnimationFrame(tick);
     };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
+    const onMotion = () => {
+      still = query.matches;
+      wakeUp();
+    };
+    wake.current = wakeUp;
+    query.addEventListener("change", onMotion);
+    // The camera keeps an open card in view, so its goal moves with the page.
+    addEventListener("scroll", wakeUp, { passive: true });
+    addEventListener("resize", wakeUp);
+    wakeUp();
+    return () => {
+      wake.current = () => {};
+      query.removeEventListener("change", onMotion);
+      removeEventListener("scroll", wakeUp);
+      removeEventListener("resize", wakeUp);
+      cancelAnimationFrame(frame);
+      clearTimeout(idle);
+    };
   }, [open]);
 
   // Forget the ones that left, so a pipe that comes back flies out of the anchor again.
