@@ -101,7 +101,15 @@ export function Constellation(props: {
         }
         p.x += (target.x - p.x) * k;
         p.y += (target.y - p.y) * k;
-        const a = still ? 0 : id === ANCHOR ? DRIFT.anchor : id === open ? DRIFT.open : DRIFT.pipe;
+        // With a card open, the anchor holds still with it, so the spoke between them stays a
+        // straight 1px line instead of a slanted, thicker-looking one.
+        const a = still
+          ? 0
+          : id === open || (open && id === ANCHOR)
+            ? DRIFT.open
+            : id === ANCHOR
+              ? DRIFT.anchor
+              : DRIFT.pipe;
         const phase = hash(id, 3) * Math.PI;
         const x = p.x + a * Math.sin(t * (0.55 + hash(id, 4) * 0.15) + phase);
         const y = p.y + a * Math.cos(t * (0.45 + hash(id, 5) * 0.15) + phase);
@@ -121,10 +129,13 @@ export function Constellation(props: {
       for (const [id, line] of lines.current) {
         const end = drawn.get(id);
         if (!hub || !end) continue;
-        line.setAttribute("x1", String(origin.current.x + hub.x));
-        line.setAttribute("y1", String(origin.current.y + hub.y));
-        line.setAttribute("x2", String(origin.current.x + end.x));
-        line.setAttribute("y2", String(origin.current.y + end.y));
+        // On a device pixel's centre: a 1px line on a pixel boundary paints two half-lit pixels
+        // and reads twice as thick (worst on the straight spoke to an open card).
+        const mid = 0.5 / (devicePixelRatio || 1);
+        line.setAttribute("x1", String(snap(origin.current.x + hub.x) + mid));
+        line.setAttribute("y1", String(snap(origin.current.y + hub.y) + mid));
+        line.setAttribute("x2", String(snap(origin.current.x + end.x) + mid));
+        line.setAttribute("y2", String(snap(origin.current.y + end.y) + mid));
       }
       frame = requestAnimationFrame(tick);
     };
@@ -153,7 +164,6 @@ export function Constellation(props: {
             }}
             stroke="currentColor"
             strokeWidth={1}
-            className={node.id === open ? "text-muted-foreground" : undefined}
           />
         ))}
       </svg>

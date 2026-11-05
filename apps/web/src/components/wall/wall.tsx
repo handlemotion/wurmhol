@@ -217,7 +217,7 @@ function Network({ shares }: { shares: Share[] }) {
               No open pipes. From a dev server's machine, run:
             </Text>
           )}
-          <CopyField label="New pipe" value={COMMAND} />
+          <CopyField label="New pipe" value={COMMAND} className="border border-border" />
         </div>
       }
       nodes={shares.map((share) => ({
