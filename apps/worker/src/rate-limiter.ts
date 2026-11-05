@@ -69,6 +69,15 @@ export function clientIp(request: Request) {
   return request.headers.get("cf-connecting-ip") ?? "unknown";
 }
 
+/** Limits a route per client IP. */
+export function limitPerIp(rule: RateLimitRule) {
+  return createMiddleware<AppEnv>(async (c, next) => {
+    const wait = await checkRateLimit(c.env, c.var.config, rule, clientIp(c.req.raw));
+    if (wait) return tooManyRequests(wait);
+    await next();
+  });
+}
+
 /** Limits a member route per member. Mount after `requireMember`. */
 export function limitPerMember(rule: RateLimitRule) {
   return createMiddleware<AppEnv>(async (c, next) => {

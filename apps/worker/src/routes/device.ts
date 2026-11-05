@@ -21,7 +21,7 @@ import { type Context, Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { type AppEnv, requireMember } from "../context.ts";
-import { checkRateLimit, clientIp, limitPerMember, tooManyRequests } from "../rate-limiter.ts";
+import { limitPerIp, limitPerMember } from "../rate-limiter.ts";
 
 const GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 
@@ -76,11 +76,6 @@ const FIXES: Record<string, string> = {
   invalid_grant: "That login is unknown or was already used. Run wurmhol login again.",
 };
 
-async function limitPerIp(c: Context<AppEnv>) {
-  const wait = await checkRateLimit(c.env, c.var.config, "auth", clientIp(c.req.raw));
-  return wait ? tooManyRequests(wait) : null;
-}
-
 const computerName = z.string().trim().min(1).max(80);
 const codeBody = z.object({ name: computerName });
 const tokenBody = z.object({
@@ -91,9 +86,7 @@ const tokenBody = z.object({
 
 /** The CLI's calls: no session, no token; the device code is the credential. */
 export const deviceFlow = new Hono<AppEnv>()
-  .post("/code", zValidator("json", codeBody), async (c) => {
-    const limited = await limitPerIp(c);
-    if (limited) return limited;
+  .post("/code", zValidator("json", codeBody), limitPerIp("auth"), async (c) => {
     const { name } = c.req.valid("json");
     const issued = await c.var.auth.api.deviceCode({
       body: { client_id: DEVICE_CLIENT_ID, scope: formatScope({ name, orgId: null }) },
@@ -111,9 +104,7 @@ export const deviceFlow = new Hono<AppEnv>()
       interval: issued.interval,
     });
   })
-  .post("/token", zValidator("json", tokenBody), async (c) => {
-    const limited = await limitPerIp(c);
-    if (limited) return limited;
+  .post("/token", zValidator("json", tokenBody), limitPerIp("auth"), async (c) => {
     c.header("cache-control", "no-store");
     const body = c.req.valid("json");
     let redeemed;

@@ -34,13 +34,14 @@ import { Hono } from "hono";
 import { bearerToken, refuse } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
 import { reservedPipeName, shareOrigin, SHARE_ID } from "../env.ts";
-import { INTERNAL_HEADERS, type ShareInit } from "../share-do.ts";
+import { orgStub } from "../org-do.ts";
+import { type ShareInit, shareStub, toShare } from "../share-do.ts";
 
 /** The header that names a new share's viewers, comma-separated emails. */
-export const VIEWERS_HEADER = "wurmhol-viewers";
+const VIEWERS_HEADER = "wurmhol-viewers";
 const MAX_VIEWERS = 50;
 /** The header that says where a new share came from (ADR 0015). */
-export const SOURCE_HEADER = "wurmhol-source";
+const SOURCE_HEADER = "wurmhol-source";
 /** Bigger than any source within `SOURCE_LIMITS`, URI-encoded. */
 const MAX_SOURCE_HEADER = 24 * 1024;
 
@@ -86,8 +87,9 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
         reason: share.endReason,
       });
     }
-    const stub = c.env.SHARE.get(c.env.SHARE.idFromName(share.id));
-    return stub.fetch(new Request(new URL("/connect", c.req.url), { headers: c.req.raw.headers }));
+    return shareStub(c.env, share.id).fetch(
+      toShare(c.req.raw, null, new URL("/connect", c.req.url)),
+    );
   }
 
   const port = Number(c.req.query("port"));
@@ -174,7 +176,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
     source: source.source,
     limits: { seconds, monthlyBytes: config.LIMIT_MONTHLY_BYTES },
   };
-  const org = c.env.ORG.get(c.env.ORG.idFromName(token.orgId));
+  const org = orgStub(c.env, token.orgId);
   const reservation = await org.reserve(
     {
       id: init.id,
@@ -206,10 +208,9 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
           "The org has used this month's transfer allowance. It resets on the 1st (UTC).",
         );
   }
-  const headers = new Headers(c.req.raw.headers);
-  headers.set(INTERNAL_HEADERS.init, JSON.stringify(init));
-  const stub = c.env.SHARE.get(c.env.SHARE.idFromName(init.id));
-  const response = await stub.fetch(new Request(new URL("/connect", c.req.url), { headers }));
+  const response = await shareStub(c.env, init.id).fetch(
+    toShare(c.req.raw, { init }, new URL("/connect", c.req.url)),
+  );
   if (response.status !== 101) {
     await org.remove(init.id);
     await recordShareEnd(db, { id: init.id, reason: "disconnected", bytes: 0 });

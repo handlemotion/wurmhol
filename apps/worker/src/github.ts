@@ -97,7 +97,10 @@ async function installationToken(config: GithubConfig, installationId: number) {
 }
 
 /** Whether a pipe's source is a branch of a repo on this GitHub. */
-export function onGithub(config: GithubConfig, source: PipeSource | null) {
+function onGithub(
+  config: GithubConfig,
+  source: PipeSource | null,
+): source is PipeSource & { repo: string; branch: string } {
   return Boolean(source?.repo && source.branch && source.repoHost === new URL(config.webUrl).host);
 }
 
@@ -119,18 +122,18 @@ export async function postPreview(
 ): Promise<Preview | null> {
   const { source } = pipe;
   if (!onGithub(config, source)) return null;
-  const owner = source!.repo!.split("/")[0]!.toLowerCase();
+  const owner = source.repo.split("/")[0]!.toLowerCase();
   const installation = (await orgInstallations(db, pipe.orgId)).find(
     (row) => row.account.toLowerCase() === owner,
   );
   if (!installation) return null;
   const auth = await installationToken(config, installation.installationId);
-  const head = encodeURIComponent(`${owner}:${source!.branch}`);
+  const head = encodeURIComponent(`${owner}:${source.branch}`);
   const [pull] = await github<PullRequest[]>(
     config,
     auth,
     "GET",
-    `/repos/${source!.repo}/pulls?state=open&head=${head}&per_page=1`,
+    `/repos/${source.repo}/pulls?state=open&head=${head}&per_page=1`,
   );
   if (!pull) return null;
   const repo = pull.base.repo.full_name;

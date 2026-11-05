@@ -18,19 +18,23 @@ import {
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { type AppEnv, requireMember, requireOwner, resolveSession } from "../context.ts";
+import {
+  type AppEnv,
+  ownOriginSocket,
+  requireMember,
+  requireOwner,
+  resolveSession,
+} from "../context.ts";
 import { SHARE_ID } from "../env.ts";
+import { orgStub, toOrg } from "../org-do.ts";
 import { limitPerMember } from "../rate-limiter.ts";
+import { shareStub } from "../share-do.ts";
 import { billing } from "./billing.ts";
-import { machines, toOrg } from "./machines.ts";
+import { machines } from "./machines.ts";
 import { org } from "./org.ts";
 
 /** Where the CLI dials when WURMHOL_URL is unset (`DEFAULT_SERVER`, packages/cli/src/pipe.ts). */
 const CLI_DEFAULT_SERVER = "https://api.wurmhol.com";
-
-function allowedOrigins(c: { var: AppEnv["Variables"] }) {
-  return new Set([new URL(c.var.config.auth.baseURL).origin, ...c.var.config.auth.trustedOrigins]);
-}
 
 /** A share of the member's org, or 404: another org's shares do not exist here. */
 async function ownShare(c: { var: AppEnv["Variables"] }, id: string) {
@@ -99,36 +103,23 @@ export const api = new Hono<AppEnv>()
   .use(requireMember)
   /** The wall: every open share of the active org. */
   .get("/shares", async (c) => {
-    const org = c.env.ORG.get(c.env.ORG.idFromName(c.var.member.orgId));
-    return c.json({ shares: await org.list() });
+    return c.json({ shares: await orgStub(c.env, c.var.member.orgId).list() });
   })
-  /**
-   * The wall's live feed: a snapshot, then share.started / updated / ended. Cookie-authenticated,
-   * and browsers send cookies on cross-site handshakes, so only our own origins may open it
-   * (cross-site WebSocket hijacking). A handshake with no Origin is not a browser.
-   */
-  .get("/live", async (c) => {
-    if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
-      return c.json({ error: "expected a websocket upgrade" }, 426);
-    }
-    const origin = c.req.header("origin");
-    if (origin !== undefined && !allowedOrigins(c).has(origin)) {
-      return c.json({ error: "origin not allowed" }, 403);
-    }
-    const org = c.env.ORG.get(c.env.ORG.idFromName(c.var.member.orgId));
-    return org.fetch(toOrg(c.req.raw, {}));
-  })
+  /** The wall's live feed: a snapshot, then share.started / updated / ended. */
+  .get("/live", ownOriginSocket, async (c) =>
+    orgStub(c.env, c.var.member.orgId).fetch(toOrg(c.req.raw, { kind: "wall" })),
+  )
   /** Terminate: ends the share at once and closes its CLI's socket. Any member may. */
   .post("/shares/:id/terminate", limitPerMember("manage"), async (c) => {
     const share = await ownShare(c, c.req.param("id"));
-    await c.env.SHARE.get(c.env.SHARE.idFromName(share.id)).terminate("terminated");
+    await shareStub(c.env, share.id).terminate("terminated");
     c.var.log.info("share.terminated", { shareId: share.id, orgId: share.orgId });
     return c.json({ ok: true });
   })
   /** The dev server's favicon, for the wall (the share host itself needs its own cookie). */
   .get("/shares/:id/favicon", async (c) => {
     const share = await ownShare(c, c.req.param("id"));
-    const icon = await c.env.SHARE.get(c.env.SHARE.idFromName(share.id)).favicon();
+    const icon = await shareStub(c.env, share.id).favicon();
     if (!icon) return c.body(null, 404);
     return c.body(icon.body, 200, {
       "content-type": icon.type,
@@ -164,9 +155,9 @@ export const api = new Hono<AppEnv>()
       throw new HTTPException(404, { message: "no such token" });
     }
     for (const share of await openSharesOfToken(c.var.db, tokenId)) {
-      await c.env.SHARE.get(c.env.SHARE.idFromName(share.id)).terminate("revoked");
+      await shareStub(c.env, share.id).terminate("revoked");
     }
-    await c.env.ORG.get(c.env.ORG.idFromName(c.var.member.orgId)).dropToken(tokenId);
+    await orgStub(c.env, c.var.member.orgId).dropToken(tokenId);
     return c.json({ ok: true });
   })
   .get("/members", async (c) =>

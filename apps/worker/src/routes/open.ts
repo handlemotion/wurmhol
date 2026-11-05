@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import { type AppEnv, resolveSession } from "../context.ts";
 import { shareOrigin, SHARE_ID } from "../env.ts";
 import { errorPage } from "../pages.ts";
+import { shareStub } from "../share-do.ts";
 import { sameOriginPath } from "@wurmhol/protocol";
 import { RESERVED_PREFIX } from "../viewer.ts";
 
@@ -27,7 +28,7 @@ export const open = new Hono<AppEnv>().get("/", async (c) => {
   if (!session) return login();
   // Any of the user's orgs may own it, not only the active one.
   if (!(await findMember(c.var.db, session.user.id, share.orgId))) return login("not-member");
-  const stub = c.env.SHARE.get(c.env.SHARE.idFromName(shareId));
+  const stub = shareStub(c.env, shareId);
   // Its starter named who may open it (`--only`), and this member is not one of them.
   if (!(await stub.mayView(session.user.id))) return login("not-listed");
 
