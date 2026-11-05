@@ -179,11 +179,12 @@ describe("the wall in a browser", () => {
     const card = page.locator("section[data-open]");
     await expect.poll(() => card.isVisible()).toBe(true);
     // Catches: the card opening over its neighbours instead of the pills it covers stepping aside.
+    // Its own pill stays under the card, inert, as the corner it unfolds from.
     await expect
       .poll(async () => {
         const c = (await card.boundingBox())!;
         const others = await page
-          .locator("[data-pipe], [data-create]")
+          .locator(`[data-pipe]:not([data-pipe="${opened}"]), [data-create]`)
           .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().toJSON() as DOMRect));
         return others.filter(
           (o) =>
