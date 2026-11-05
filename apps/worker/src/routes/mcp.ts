@@ -12,8 +12,8 @@ import { eq } from "drizzle-orm";
 import { createMcpHandler, McpServer, requireScopes } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { AppEnv } from "../context.ts";
-import { SHARE_ID } from "../env.ts";
-import { orgStub, type ShareCard } from "../org-do.ts";
+import { SHARE_ID, type ShareCard } from "@wurmhol/protocol";
+import { orgStub } from "../org-do.ts";
 import { checkRateLimit } from "../rate-limiter.ts";
 import { shareStub } from "../share-do.ts";
 

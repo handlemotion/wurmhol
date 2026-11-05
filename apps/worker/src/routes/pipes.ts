@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { type BearerToken, bearerToken, refuse } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
-import { SHARE_ID } from "../env.ts";
+import { SHARE_ID } from "@wurmhol/protocol";
 import { orgStub } from "../org-do.ts";
 import { shareStub } from "../share-do.ts";
 

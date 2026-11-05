@@ -1,5 +1,5 @@
 import { authEnvSchema } from "@wurmhol/auth";
-import { pipeName } from "@wurmhol/protocol";
+import { pipeName, SHARE_ID } from "@wurmhol/protocol";
 import { z } from "zod";
 
 // Secrets are not in wrangler.jsonc, so `wrangler types` cannot see them. Documented in
@@ -312,9 +312,6 @@ export function shareLabelFromHost(config: Config, host: string | null): string 
   if (label === null) return null;
   return SHARE_ID.test(label) || pipeName(label) === label ? label : "";
 }
-
-/** A share id: 10 lowercase letters and digits. */
-export const SHARE_ID = /^[a-z0-9]{10}$/;
 
 /** The relay's public origin (ADR 0010), on the app's scheme and port; null when it is off. */
 export function relayOrigin(config: Config) {

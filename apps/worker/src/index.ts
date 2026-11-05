@@ -1,6 +1,7 @@
 import { createDb, findOpenShareByName, pruneExpired } from "@wurmhol/db";
 import { app } from "./app.ts";
-import { hostRole, loadConfig, SHARE_ID } from "./env.ts";
+import { SHARE_ID } from "@wurmhol/protocol";
+import { hostRole, loadConfig } from "./env.ts";
 import { createLogger } from "./log.ts";
 import { handleRelay } from "./oauth-relay.ts";
 import { handleShareHost } from "./viewer.ts";

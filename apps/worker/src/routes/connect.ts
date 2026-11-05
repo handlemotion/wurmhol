@@ -19,9 +19,12 @@
 import {
   CONNECT_HEADERS,
   formatDuration,
+  isPort,
+  newShareCard,
   parsePipeSource,
   PIPE_NAME_RULE,
   pipeName,
+  SHARE_ID,
   type SourceResult,
 } from "@wurmhol/protocol";
 import {
@@ -34,7 +37,7 @@ import {
 import { Hono } from "hono";
 import { bearerToken, refuse } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
-import { reservedPipeName, shareOrigin, SHARE_ID } from "../env.ts";
+import { reservedPipeName, shareOrigin } from "../env.ts";
 import { orgStub } from "../org-do.ts";
 import { type ShareInit, shareStub, toShare } from "../share-do.ts";
 
@@ -90,7 +93,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
   }
 
   const port = Number(c.req.query("port"));
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  if (!isPort(port)) {
     return refuse(400, "bad port", "Pass the port your server listens on: npx wurmhol 8787.");
   }
   const limit = config.LIMIT_SHARE_SECONDS;
@@ -175,20 +178,14 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
   };
   const org = orgStub(c.env, token.orgId);
   const reservation = await org.reserve(
-    {
+    newShareCard({
       id: init.id,
       url: init.url,
       port,
       startedBy: init.startedBy,
       startedAt: init.startedAt,
-      title: null,
-      favicon: false,
-      lastRequestAt: null,
-      views: [],
-      state: "live",
       source: init.source,
-      preview: null,
-    },
+    }),
     { active: config.LIMIT_ACTIVE_SHARES, monthlyBytes: config.LIMIT_MONTHLY_BYTES },
   );
   if (!reservation.ok) {

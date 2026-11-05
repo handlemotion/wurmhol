@@ -12,8 +12,8 @@ import {
   peekInvite,
   removeMember,
   revokeToken,
-  TOKEN_SCOPES,
 } from "@wurmhol/db";
+import { SHARE_ID, TOKEN_EXPIRY_DAYS, TOKEN_SCOPES } from "@wurmhol/protocol";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -24,7 +24,6 @@ import {
   requireOwner,
   resolveSession,
 } from "../context.ts";
-import { SHARE_ID } from "../env.ts";
 import { orgStub, toOrg } from "../org-do.ts";
 import { limitPerMember } from "../rate-limiter.ts";
 import { endTokens, revokeTokensOfLeaver } from "../revoke.ts";
@@ -96,7 +95,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const tokenBody = z.object({
   name: z.string().trim().min(1).max(80),
   scope: z.enum(TOKEN_SCOPES).default("pipes"),
-  expiresInDays: z.union([z.literal(30), z.literal(90), z.null()]).default(90),
+  expiresInDays: z.union([z.literal(TOKEN_EXPIRY_DAYS), z.null()]).default(90),
 });
 
 export const api = new Hono<AppEnv>()

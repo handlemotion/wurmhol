@@ -1,16 +1,7 @@
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import {
-  api,
-  type AppConfig,
-  type Machine,
-  type Member,
-  type Share,
-  type SignInMethods,
-  type Token,
-  type TokenExpiry,
-  type TokenScope,
-} from "@/lib/api";
+import type { Machine, Role, ShareCard, TokenExpiry, TokenScope } from "@wurmhol/protocol";
+import { api, type AppConfig, type Member, type SignInMethods, type Token } from "@/lib/api";
 import { connectMachines, earlyShares, takeWall } from "@/lib/live";
 import { meQuery } from "@/lib/me";
 
@@ -66,7 +57,7 @@ export function useSignInMethods() {
  * startup, so a snapshot that already arrived renders on the first frame, with no skeleton.
  */
 export function useWall(orgId: string | null) {
-  const [shares, setShares] = useState<Share[] | undefined>(earlyShares);
+  const [shares, setShares] = useState<ShareCard[] | undefined>(earlyShares);
   useEffect(() => {
     if (!orgId) return;
     const wall = takeWall();
@@ -199,7 +190,7 @@ export function useRenameOrg() {
 }
 
 export function useSetRole() {
-  return useOrgChange(({ id, role }: { id: string; role: "owner" | "member" }) =>
+  return useOrgChange(({ id, role }: { id: string; role: Role }) =>
     api(`/api/members/${id}/role`, { method: "POST", body: { role } }),
   );
 }

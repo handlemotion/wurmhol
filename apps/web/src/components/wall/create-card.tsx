@@ -16,7 +16,7 @@ import { Link } from "@/components/ui/link";
 import { Loader } from "@/components/ui/loader";
 import { useAppConfig, useMachines, useOpenPort, useSetupCode } from "@/hooks/use-app";
 import { useClipboard } from "@/hooks/use-clipboard";
-import type { Machine } from "@/lib/api";
+import type { Machine } from "@wurmhol/protocol";
 
 const COMMAND = "npx wurmhol <port>";
 const PROMPT =
