@@ -24,7 +24,8 @@ ENVIRONMENT=development
 # --- Auth (Better Auth) ---
 # Secret. At least 32 random characters: openssl rand -base64 32
 BETTER_AUTH_SECRET=
-# Comma-separated extra origins allowed to call auth endpoints (Vite's dev server).
+# Comma-separated extra origins allowed to call auth endpoints (Vite's dev server). Wildcards
+# match subdomains: add https://*.wurmhol.dev to sign in to this stack through any pipe to it.
 AUTH_TRUSTED_ORIGINS=http://localhost:5173
 # Optional. WebAuthn relying party ID; defaults to the BETTER_AUTH_URL host.
 AUTH_PASSKEY_RP_ID=

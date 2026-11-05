@@ -32,7 +32,7 @@ export const open = new Hono<AppEnv>().get("/", async (c) => {
   if (!(await stub.mayView(session.user.id))) return login("not-listed");
 
   const code = await stub.issueCode(session.user.id);
-  const target = new URL(`${RESERVED_PREFIX}auth`, shareOrigin(c.var.config, shareId));
+  const target = new URL(`${RESERVED_PREFIX}auth`, shareOrigin(c.var.config, share));
   target.searchParams.set("code", code);
   target.searchParams.set("next", next);
   c.header("cache-control", "no-store");

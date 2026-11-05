@@ -60,6 +60,8 @@ export const shares = sqliteTable(
     /** Who started it: the token's creator. */
     startedBy: text("started_by").references(() => users.id, { onDelete: "set null" }),
     port: integer("port").notNull(),
+    /** A named pipe's name (ADR 0009), its host's first label instead of `id`. */
+    name: text("name"),
     startedAt: integer("started_at", { mode: "timestamp_ms" }).default(now).notNull(),
     endedAt: integer("ended_at", { mode: "timestamp_ms" }),
     /** `stopped` (the CLI), `terminated` (the wall), `revoked`, `expired`, `disconnected`, `limit`. */
@@ -70,7 +72,27 @@ export const shares = sqliteTable(
   (table) => [
     index("shares_org_idx").on(table.orgId, table.endedAt),
     index("shares_token_idx").on(table.tokenId),
+    // One open pipe per name: the host routes to it.
+    uniqueIndex("shares_open_name_idx")
+      .on(table.name)
+      .where(sql`${table.name} is not null and ${table.endedAt} is null`),
   ],
+);
+
+/**
+ * Pipe names (ADR 0009): the first org to open a pipe with a name keeps it, so its host, and any
+ * OAuth redirect URI registered for it, never serves another org.
+ */
+export const pipeNames = sqliteTable(
+  "pipe_names",
+  {
+    name: text("name").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).default(now).notNull(),
+  },
+  (table) => [index("pipe_names_org_idx").on(table.orgId)],
 );
 
 /**
