@@ -60,6 +60,8 @@ export interface Token {
   id: string;
   name: string;
   scope: TokenScope;
+  /** `login`: a computer approved with `wurmhol login`, shown under Computers. */
+  source: "console" | "login";
   createdAt: string;
   expiresAt: string | null;
   lastUsedAt: string | null;
