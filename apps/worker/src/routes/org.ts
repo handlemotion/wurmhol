@@ -105,7 +105,7 @@ export const org = new Hono<AppEnv>()
   })
   /**
    * Any member may leave; the last owner may not (the plugin refuses). Their tokens there are
-   * revoked, ending their pipes and machines (ADR 0019).
+   * revoked, ending their pipes and machines (ADR 0021).
    */
   .post("/org/leave", limitPerMember("manage"), async (c) => {
     const orgId = c.var.member.orgId;
