@@ -1,6 +1,7 @@
 // The share's connection: one WebSocket to `<WURMHOL_URL>/connect`, dialed through HTTPS_PROXY
 // when one is set (and trusting NODE_EXTRA_CA_CERTS, which Node reads itself). Every viewer
-// request arrives on it as a stream and is forwarded to 127.0.0.1:<port>.
+// request arrives on it as a stream and is forwarded to the dev server (127.0.0.1:<port> unless
+// the owner names another host).
 import http from "node:http";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { getProxyForUrl } from "proxy-from-env";
@@ -31,12 +32,24 @@ export interface ShareInfo {
 
 export type Logger = (event: string, fields?: Record<string, unknown>) => void;
 
+/** One viewer request the dev server answered: metadata only, never bodies or headers. */
+export interface RequestEvent {
+  method: string;
+  /** The path and query string, as the viewer asked for it. */
+  path: string;
+  status: number;
+  durationMs: number;
+}
+
 export interface TunnelOptions {
   server: string;
   token: string;
   port: number;
+  /** Where the dev server listens. */
+  host: string;
   version: string;
   log: Logger;
+  onRequest: (event: RequestEvent) => void;
   /** The share ended for good (stopped, terminated, expired, revoked, or the CLI gave up). */
   onEnd: (reason: string) => void;
 }
@@ -56,6 +69,12 @@ const SOCKET_HIGH_WATER = 4 * 1024 * 1024;
 
 interface LocalHttp {
   kind: "http";
+  method: string;
+  path: string;
+  startedAt: number;
+  /** The status sent to the relay, once a response has started. */
+  status: number | null;
+  reported: boolean;
   request: http.ClientRequest;
   response: http.IncomingMessage | null;
   send: SendWindow;
@@ -292,7 +311,7 @@ export class Tunnel {
   #openHttp(id: number, head: RequestHead) {
     const port = this.#options.port;
     const request = http.request({
-      host: "127.0.0.1",
+      host: this.#options.host,
       port,
       method: head.method,
       path: head.path,
@@ -301,6 +320,11 @@ export class Tunnel {
     });
     const stream: LocalHttp = {
       kind: "http",
+      method: head.method,
+      path: head.path,
+      startedAt: performance.now(),
+      status: null,
+      reported: false,
       request,
       response: null,
       send: new SendWindow(),
@@ -313,10 +337,11 @@ export class Tunnel {
     request.on("response", (response) => {
       stream.response = response;
       stream.answered = true;
+      stream.status = response.statusCode ?? 502;
       this.#send({
         stream: id,
         type: "response",
-        payload: { status: response.statusCode ?? 502, headers: pairs(response.rawHeaders) },
+        payload: { status: stream.status, headers: pairs(response.rawHeaders) },
       });
       void this.#pumpResponse(id, stream, response);
     });
@@ -324,6 +349,7 @@ export class Tunnel {
       if (stream.cancelled) return;
       if (!stream.answered) {
         stream.answered = true;
+        stream.status = 502;
         const refused = error.code === "ECONNREFUSED";
         const body = Buffer.from(
           refused
@@ -345,6 +371,20 @@ export class Tunnel {
       }
       this.#send({ stream: id, type: "end", payload: {} });
       this.#streams.delete(id);
+      this.#report(stream);
+    });
+  }
+
+  /** Tells the owner about a finished request, once, if the dev server's answer started. */
+  #report(stream: LocalHttp) {
+    if (stream.reported || stream.status === null) return;
+    stream.reported = true;
+    const { method, path, status, startedAt } = stream;
+    this.#options.onRequest({
+      method,
+      path,
+      status,
+      durationMs: Math.round(performance.now() - startedAt),
     });
   }
 
@@ -369,6 +409,7 @@ export class Tunnel {
       }
     } finally {
       this.#streams.delete(id);
+      this.#report(stream);
     }
   }
 
@@ -378,6 +419,7 @@ export class Tunnel {
     stream.request.destroy();
     stream.response?.destroy();
     this.#streams.delete(id);
+    this.#report(stream);
   }
 
   #openWs(id: number, open: WsOpenPayload) {
@@ -390,7 +432,7 @@ export class Tunnel {
     }
     headers.set("host", `localhost:${port}`);
     const socket = new WebSocket(
-      `ws://127.0.0.1:${port}${open.path ?? "/"}`,
+      `ws://${this.#options.host.includes(":") ? `[${this.#options.host}]` : this.#options.host}:${port}${open.path ?? "/"}`,
       open.protocols ?? [],
       {
         headers: Object.fromEntries(headers),
