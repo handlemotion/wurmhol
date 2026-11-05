@@ -23,6 +23,7 @@ import {
   type WsOpenPayload,
 } from "@wurmhol/protocol";
 import WebSocket from "ws";
+import type { PipeSource } from "./pipe.ts";
 import { FixError, explainConnectError, explainRefusal } from "./errors.ts";
 
 export interface ShareInfo {
@@ -55,6 +56,8 @@ export interface TunnelOptions {
   viewers: string[];
   /** A named pipe's name (`--name`): the same host every time. */
   name?: string;
+  /** Where a new share comes from (ADR 0015); a reconnect keeps what the share started with. */
+  source: PipeSource | null;
   version: string;
   log: Logger;
   onRequest: (event: RequestEvent) => void;
@@ -138,8 +141,7 @@ export class Tunnel {
 
   /** Connects and resolves with the share's id and URL, or rejects with a FixError. */
   async start(): Promise<ShareInfo> {
-    const socket = await this.#dial();
-    this.#attach(socket);
+    await this.#dial();
     return this.#share!;
   }
 
@@ -183,6 +185,9 @@ export class Tunnel {
           ...(!this.#share && this.#options.viewers.length
             ? { "wurmhol-viewers": this.#options.viewers.join(",") }
             : {}),
+          ...(!this.#share && this.#options.source
+            ? { "wurmhol-source": encodeURIComponent(JSON.stringify(this.#options.source)) }
+            : {}),
           "user-agent": `wurmhol/${this.#options.version} node/${process.versions.node}`,
         },
         agent: proxy ? new HttpsProxyAgent(proxy) : undefined,
@@ -199,7 +204,12 @@ export class Tunnel {
           this.#share = { id, url: shareUrl, endsAt };
         }
       });
-      socket.once("open", () => resolve(socket));
+      // Listening from the open event itself: the relay may send a request in the same packet as
+      // the upgrade, and `ws` emits it before an awaiting caller would get to attach.
+      socket.once("open", () => {
+        this.#attach(socket);
+        resolve(socket);
+      });
       socket.once("unexpected-response", (_request, response) => {
         const chunks: Buffer[] = [];
         response.on("data", (c: Buffer) => chunks.push(c));
@@ -513,8 +523,7 @@ export class Tunnel {
       await new Promise((resolve) => setTimeout(resolve, delay));
       delay = Math.min(delay * 2, 5000);
       try {
-        const socket = await this.#dial();
-        this.#attach(socket);
+        await this.#dial();
         this.#options.log("reconnected", { shareId: this.#share?.id });
         return;
       } catch (error) {

@@ -10,6 +10,7 @@ import { account, api } from "./routes/api.ts";
 import { connect } from "./routes/connect.ts";
 import { deviceApproval, deviceFlow } from "./routes/device.ts";
 import { open } from "./routes/open.ts";
+import { githubRoutes } from "./routes/github.ts";
 import { pipes } from "./routes/pipes.ts";
 import { securityHeaders } from "./security-headers.ts";
 
@@ -127,6 +128,7 @@ export const app = new Hono<AppEnv>()
   })
   .on(["GET", "POST"], "/api/auth/*", limitAuth, (c) => c.var.auth.handler(c.req.raw))
   .route("/api/device", deviceApproval)
+  .route("/api/github", githubRoutes)
   .route("/api", account)
   .route("/api", api)
   .all("/api/*", (c) => c.json({ error: "not found" }, 404))
