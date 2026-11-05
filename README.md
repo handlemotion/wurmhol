@@ -23,6 +23,12 @@ It keeps only each page's `<title>` and favicon, for the wall.
 
 `docs/spec/v1.md` is the spec; `AGENTS.md` the rules; `docs/self-hosting.md` runs your own.
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/handlemotion/wurmhol)
+
+The button creates the Worker, D1 and Durable Objects in your Cloudflare account. The pipe
+domain's wildcard route and the hostname vars are yours to set afterwards: see
+[Deploy to Cloudflare](docs/self-hosting.md#deploy-to-cloudflare).
+
 | Unit                | Package             |
 | ------------------- | ------------------- |
 | `apps/worker`       | `@wurmhol/worker`   |
