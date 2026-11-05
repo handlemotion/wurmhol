@@ -6,11 +6,12 @@ import { Hono } from "hono";
 import { type AppEnv, resolveSession } from "../context.ts";
 import { shareOrigin, SHARE_ID } from "../env.ts";
 import { errorPage } from "../pages.ts";
-import { RESERVED_PREFIX, safePath } from "../viewer.ts";
+import { sameOriginPath } from "@wurmhol/protocol";
+import { RESERVED_PREFIX } from "../viewer.ts";
 
 export const open = new Hono<AppEnv>().get("/", async (c) => {
   const shareId = c.req.query("share") ?? "";
-  const next = safePath(c.req.query("next"));
+  const next = sameOriginPath(c.req.query("next"));
   if (!SHARE_ID.test(shareId)) return errorPage(404, "This pipe has ended.");
   const share = await findShare(c.var.db, shareId);
   if (!share || share.endedAt) return errorPage(410, "This pipe has ended.");

@@ -107,6 +107,40 @@ describe("a signed-out viewer", () => {
   });
 });
 
+describe("redirects after sign-in", () => {
+  // A crafted `next` must not turn sign-in into an open redirect: browsers drop tabs and read
+  // `\` as `/`, so "/\t/evil.example" would land on evil.example.
+  const crafted = [
+    "/\t/evil.example/x",
+    "//evil.example",
+    "/\\evil.example",
+    "https://evil.example/",
+  ];
+
+  it("/open passes only same-site paths on to the pipe", async () => {
+    for (const next of crafted) {
+      const open = await browserFetch(
+        `${stack.url}/open?${new URLSearchParams({ share: shared.id, next })}`,
+        { cookie: ada.cookie },
+      );
+      expect(new URL(open.headers.get("location")!).searchParams.get("next")).toBe("/");
+    }
+  });
+
+  it("the pipe never redirects off itself, even with a tampered callback", async () => {
+    for (const next of crafted) {
+      const open = await browserFetch(`${stack.url}/open?share=${shared.id}`, {
+        cookie: ada.cookie,
+      });
+      const callback = new URL(open.headers.get("location")!);
+      callback.searchParams.set("next", next);
+      const response = await browserFetch(callback.toString());
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toBe("/");
+    }
+  });
+});
+
 describe("a member of another org", () => {
   it("gets the login page, never the share", async () => {
     hits.length = 0;
