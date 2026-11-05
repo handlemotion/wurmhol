@@ -44,6 +44,12 @@ function watch(stack: Stack, person: Person) {
   return state;
 }
 
+/**
+ * How long a disconnected `wurmhol host` may take to exit: `ws` fires `close` once the TCP
+ * connection ends, and when the server is slow to end it, only at its own 30 s close timeout.
+ */
+const HOST_EXIT_MS = 40_000;
+
 /** The real `wurmhol host`, with what it printed and how it exited (undefined while it runs). */
 function startHost(env: Record<string, string>) {
   const state: { process: ChildProcess; output: string; exited: number | null | undefined } = {
@@ -202,7 +208,10 @@ describe("a computer running wurmhol host", () => {
     );
     // Catches: a revoked token's computer still listed, and still able to open pipes.
     await waitFor(() => adas.machines?.length === 0, { what: "the machine gone" });
-    await waitFor(() => host.exited !== undefined, { timeoutMs: 15_000, what: "the CLI to exit" });
+    await waitFor(() => host.exited !== undefined, {
+      timeoutMs: HOST_EXIT_MS,
+      what: "the CLI to exit",
+    });
     expect(host.exited).toBe(1);
     expect(host.output).toContain("token");
     adas.socket.close();
@@ -228,7 +237,7 @@ describe("a computer running wurmhol host", () => {
       // Catches: `/host` taking their token back on reconnect, or refusing it with a status the
       // CLI retries forever.
       await waitFor(() => theirHost.exited !== undefined, {
-        timeoutMs: 15_000,
+        timeoutMs: HOST_EXIT_MS,
         what: "their wurmhol host to exit",
       });
       expect(theirHost.exited).toBe(1);
