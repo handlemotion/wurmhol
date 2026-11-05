@@ -18,6 +18,13 @@ export const TOKEN_SCOPES = ["pipes", "org"] as const;
 export type TokenScope = (typeof TOKEN_SCOPES)[number];
 
 /**
+ * How a token came to be: made in the console's Tokens dialog, or minted for a computer approved
+ * with `wurmhol login` (ADR 0008), which the console lists as a signed-in computer.
+ */
+export const TOKEN_SOURCES = ["console", "login"] as const;
+export type TokenSource = (typeof TOKEN_SOURCES)[number];
+
+/**
  * Share tokens (spec section 6, ADR 0008): random, 32 bytes, stored only as a SHA-256 hash.
  * Revoked tokens stay for the history; `revoked_at` is set. Null `expires_at`: never expires.
  */
@@ -32,6 +39,7 @@ export const tokens = sqliteTable(
     /** Lowercase hex SHA-256 of the token. */
     hash: text("hash").notNull(),
     scope: text("scope", { enum: TOKEN_SCOPES }).default("pipes").notNull(),
+    source: text("source", { enum: TOKEN_SOURCES }).default("console").notNull(),
     createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).default(now).notNull(),
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
