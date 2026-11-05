@@ -25,7 +25,7 @@ import {
   dropdownSectionStyles,
   DropdownSeparator,
 } from "./dropdown";
-import { useFluidHoverList } from "@/hooks/use-fluid-hover-list";
+import { useMagneticHover } from "@/hooks/use-magnetic-hover";
 import { FluidHoverHighlight } from "./fluid-hover-highlight";
 import { Popover, type PopoverProps } from "./popover";
 
@@ -70,14 +70,8 @@ const MENU_ITEM_SELECTOR = "[role='menuitem'], [role='menuitemradio'], [role='me
 const MENU_WIDTH = "w-max min-w-33 max-w-60";
 
 export function Menu<T extends object>({ className, placement, popover, ...props }: MenuProps<T>) {
-  // One highlight springs between the rows (transitive's fluid hover). React Aria marks the row
-  // it highlights (pointer or keys) with `data-focused`; an open submenu's trigger stays lit
-  // while the pointer is in the submenu.
-  const hover = useFluidHoverList({
-    itemSelector: MENU_ITEM_SELECTOR,
-    highlightedSelector: "[data-focused]",
-    heldSelector: "[data-open]",
-  });
+  // One fill springs between the rows (transitive's magnetic hover); the rows paint none.
+  const hover = useMagneticHover({ itemSelector: MENU_ITEM_SELECTOR });
   return (
     <Popover
       className={cx(MENU_WIDTH, "*:data-[slot=popover-inner]:overflow-hidden", popover?.className)}
