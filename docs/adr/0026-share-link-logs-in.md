@@ -40,6 +40,14 @@ Options considered:
 - **The approval page knows it is a share.** The code's scope carries `port:<n>`. The page asks
   "Open port 8787 on `<computer>`?" and, once approved, waits for the pipe and replaces itself with
   the pipe's URL. The person signs in once, taps Approve once, and is in the app.
+- **The page says when the pipe won't come.** `GET /api/device` returns the org's standing
+  (ADR 0004), the check `/connect` makes first. For a share's login in an org with no plan, the
+  page shows the fix in place of Approve: Subscribe for an owner, "ask an owner" for anyone else,
+  then open the link again (the code stays pending). `wurmhol login` codes keep Approve: the
+  token is useful once the org subscribes. Refusals the page cannot see ahead (the active-pipe
+  limit, a takedown, a proxy that blocks `/connect`) reach only the computer's log, so after 30 s
+  without a pipe the page asks the person to have the agent run `npx wurmhol logs <port>`, which
+  finds the log of a share whose background process has exited.
 - **Finding the pipe.** The token minted for the code records the code (`tokens.login_code`, the
   normalized user code). `GET /api/device/pipe?code=` answers, for the member who approved it, the
   newest open pipe of the token made from that code, or that it is still on its way. A user code is
