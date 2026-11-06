@@ -22,25 +22,25 @@ const tools = [
 
 const plans = [
   {
-    name: "Personal",
-    amount: "$12",
+    name: "Friends",
+    amount: "$15",
     per: "a year per org",
-    included: ["You and up to 2 others in the org", "Billed yearly"],
+    included: ["For sharing work with people", "Up to 10 people in the org"],
     limits: [
-      ["Open pipes", "3 at a time"],
-      ["Traffic", "25 GB a month"],
+      ["Requests", "2 M a month"],
+      ["Open pipes", "25 at a time"],
       ["Pipe length", "4 hours, up to 12"],
     ],
     primary: false,
   },
   {
-    name: "Team",
-    amount: "$15",
+    name: "Business",
+    amount: "$20",
     per: "a month per org",
-    included: ["Any number of people in the org", "Or $150 a year"],
+    included: ["10 M requests, then $1.50 per million", "A spend cap you set, $100 to start"],
     limits: [
-      ["Open pipes", "15 at a time"],
-      ["Traffic", "250 GB a month"],
+      ["Members", "Any number"],
+      ["Open pipes", "500 at a time"],
       ["Pipe length", "4 hours, up to 12"],
     ],
     primary: true,
@@ -70,7 +70,7 @@ const faq = [
   },
   {
     q: "How does the trial work?",
-    a: "Each org's first plan starts with 14 days free. Checkout takes a card, and the plan is charged when the trial ends unless you cancel before. Switch plans or cancel any time from Billing on the wall.",
+    a: "Each org's first plan starts with 14 days free. Checkout takes a card, and the plan is charged when the trial ends unless you cancel before. Cancel any time from Billing on the wall, and the unused time is credited.",
   },
   {
     q: "Can I run it myself?",

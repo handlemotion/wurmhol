@@ -229,3 +229,16 @@ export const orgBlocks = sqliteTable("org_blocks", {
   reason: text("reason"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).default(now).notNull(),
 });
+
+/**
+ * A Business org's monthly spend cap (ADR 0027), set by an owner: the most its bill may reach in
+ * a billing period, base price included. Its pipes stop at the requests that would pass it. No
+ * row: `DEFAULT_SPEND_CAP_CENTS`.
+ */
+export const spendCaps = sqliteTable("spend_caps", {
+  orgId: text("org_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  cents: integer("cents").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).default(now).notNull(),
+});

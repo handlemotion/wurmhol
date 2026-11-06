@@ -80,7 +80,7 @@ function OpenPipe({ code, name, port }: { code: string; name: string | null; por
 }
 
 /**
- * A share's login for an org with no plan (ADR 0004): `/connect` would refuse the pipe, so the
+ * A share's login for an org with no plan (ADR 0027): `/connect` would refuse the pipe, so the
  * page offers the fix in place of Approve. The code stays pending for the next visit.
  */
 function NeedsPlan({ data }: { data: DeviceLogin }) {
@@ -176,7 +176,7 @@ function Review({ code }: { code: string }) {
         status: "pending",
         org: { id: "", name: "Handlemotion" },
         role: "owner",
-        standing: { ok: true, reason: "subscribed" },
+        standing: { ok: true, reason: "subscribed", plan: "friends" },
       }}
       label="Loading the login"
     >

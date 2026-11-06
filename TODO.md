@@ -7,17 +7,21 @@ this file lists what waits on accounts, dashboards or decisions. Delete an item 
 
 Billing stays off until `STRIPE_SECRET_KEY` is set, so every org can open pipes without a plan.
 
-Plans per ADR 0026. Do it in the sandbox first, then repeat in live mode.
+Plans per ADR 0027. Done in both the sandbox and live: Friends ($15 a year) and Business ($20 a
+month) products and prices, the customer portal (the default configuration), and the live webhook
+endpoint for `dirt.wurmhol.com`.
 
-- [ ] Products and prices: Personal ($12 a year) and Team ($15 a month, $150 a year).
-- [ ] Customer portal on, with both products under "customers can switch plans".
-- [ ] Live webhook endpoint `https://dirt.wurmhol.com/api/auth/stripe/webhook` for
-      `checkout.session.completed` and `customer.subscription.created`, `.updated`, `.deleted`.
-      The sandbox uses `stripe listen` locally instead.
-- [ ] Doppler: sandbox `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and the three price ids in
-      `dev_worker`; live `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` in `prd_worker`, and
-      `WORKER_VAR_STRIPE_PRICE_PERSONAL`, `WORKER_VAR_STRIPE_PRICE_TEAM_MONTHLY` and
-      `WORKER_VAR_STRIPE_PRICE_TEAM_YEARLY` in `prd_github` and as Workers Builds variables.
+- [ ] Roll the live webhook's signing secret (it was shown once while setting it up), then put it
+      in Doppler `prd_worker` as `STRIPE_WEBHOOK_SECRET`.
+- [ ] Billing → Meters, in the sandbox and live: a meter with event name `wurmhol_requests`, sum
+      of `value`, customer from `stripe_customer_id`.
+- [ ] On each Business product, a monthly metered price on that meter: graduated, $0 up to
+      10,000,000, then 0.00015 cents a request ($1.50 per million).
+- [ ] Doppler `dev_worker`: the sandbox `STRIPE_SECRET_KEY`, a `stripe listen` webhook secret and
+      the three price ids. `prd_worker`: the live `STRIPE_SECRET_KEY`. `prd_github` and Workers
+      Builds: `WORKER_VAR_STRIPE_PRICE_FRIENDS`, `WORKER_VAR_STRIPE_PRICE_BUSINESS`,
+      `WORKER_VAR_STRIPE_PRICE_BUSINESS_REQUESTS`. Set the key and the price ids together: price
+      ids without a key fail the Worker's config check.
 
 ## Google sign-in
 

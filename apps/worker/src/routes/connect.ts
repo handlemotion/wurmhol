@@ -92,8 +92,8 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
   const { config, db } = c.var;
   const token = await bearerToken(c);
   if (token instanceof Response) return token;
-  const { limits } = await orgPlan(db, config, token.orgId);
-  if (!limits) {
+  const plan = await orgPlan(db, config, token.orgId);
+  if (!plan) {
     return refuse(
       402,
       "no subscription",
@@ -208,8 +208,8 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
     source: source.source,
     limits: {
       seconds,
-      monthlyBytes: limits.monthlyBytes,
-      monthlyRequests: limits.monthlyRequests,
+      monthlyBytes: plan.limits.monthlyBytes,
+      monthlyRequests: plan.limits.monthlyRequests,
     },
   };
   const org = orgStub(c.env, token.orgId);
@@ -222,7 +222,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
       startedAt: init.startedAt,
       source: init.source,
     }),
-    limits,
+    plan.limits,
   );
   if (!reservation.ok) {
     await recordShareEnd(db, { id: init.id, reason: "limit", bytes: 0 });
@@ -242,7 +242,9 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
       : refuse(
           429,
           "monthly request limit",
-          "The org has used this month's request allowance. It resets on the 1st (UTC).",
+          plan.plan === "business"
+            ? `The org's requests reached its spend cap for this billing period. An owner can raise it at ${config.auth.baseURL} (Org settings).`
+            : "The org has used this month's request allowance. It resets on the 1st (UTC).",
         );
   }
   const response = await shareStub(c.env, init.id).fetch(toShare(c.req.raw, { cli: init }));

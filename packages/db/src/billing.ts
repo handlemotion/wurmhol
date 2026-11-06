@@ -1,8 +1,8 @@
-// Whether an org may start pipes (ADR 0026): billing off, or a subscription in good standing,
+// Whether an org may start pipes (ADR 0027): billing off, or a subscription in good standing,
 // trial included. The subscription's `plan` says which plan's limits apply.
 import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "./client.ts";
-import { subscriptions } from "./schema/index.ts";
+import { spendCaps, subscriptions } from "./schema/index.ts";
 
 /** Stripe statuses in which the org may use its plan. `past_due` works while Stripe retries. */
 export const PAID_STATUSES = ["active", "trialing", "past_due"] as const;
@@ -30,6 +30,8 @@ export async function orgSubscription(db: Db, orgId: string) {
     .select({
       plan: subscriptions.plan,
       status: subscriptions.status,
+      stripeCustomerId: subscriptions.stripeCustomerId,
+      periodStart: subscriptions.periodStart,
       periodEnd: subscriptions.periodEnd,
       trialEnd: subscriptions.trialEnd,
     })
@@ -37,4 +39,21 @@ export async function orgSubscription(db: Db, orgId: string) {
     .where(and(eq(subscriptions.orgId, orgId), inArray(subscriptions.status, [...PAID_STATUSES])))
     .limit(1);
   return row ?? null;
+}
+
+/** A Business org's spend cap in cents, or null when its owner never set one. */
+export async function findSpendCap(db: Db, orgId: string) {
+  const [row] = await db
+    .select({ cents: spendCaps.cents })
+    .from(spendCaps)
+    .where(eq(spendCaps.orgId, orgId))
+    .limit(1);
+  return row?.cents ?? null;
+}
+
+export async function setSpendCap(db: Db, orgId: string, cents: number) {
+  await db
+    .insert(spendCaps)
+    .values({ orgId, cents })
+    .onConflictDoUpdate({ target: spendCaps.orgId, set: { cents, updatedAt: new Date() } });
 }

@@ -20,9 +20,9 @@ export const auth: Auth = createAuth({
     secretKey: "sk_test_schema_generation_only",
     webhookSecret: "whsec_schema_generation_only",
     prices: {
-      personal: "price_schema_generation_only_personal",
-      teamMonthly: "price_schema_generation_only_team",
-      teamYearly: undefined,
+      friends: "price_schema_generation_only_friends",
+      business: "price_schema_generation_only_business",
+      businessRequests: "price_schema_generation_only_business_requests",
     },
   },
   sendMagicLink: async () => {

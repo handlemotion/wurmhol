@@ -41,23 +41,28 @@ const optionalText = z
   .transform((value) => value || undefined);
 
 /**
- * Billing (ADR 0026): two plans per org, Personal (yearly) and Team (monthly, optionally yearly),
- * each with a trial. All optional: with no `STRIPE_SECRET_KEY` there is no Stripe plugin and pipes
- * never need a plan (self-hosting). Amounts live in Stripe as prices; only their ids are config.
+ * Billing (ADR 0027): two plans per org, Friends (yearly) and Business (a monthly base price plus
+ * metered requests), each with a trial. All optional: with no `STRIPE_SECRET_KEY` there is no
+ * Stripe plugin and pipes never need a plan (self-hosting). Amounts live in Stripe as prices; only
+ * their ids are config.
  */
 const billingFields = {
   STRIPE_SECRET_KEY: optionalText,
   STRIPE_WEBHOOK_SECRET: optionalText,
-  /** Personal's yearly price. */
-  STRIPE_PRICE_PERSONAL: optionalText,
-  /** Team's monthly price. */
-  STRIPE_PRICE_TEAM_MONTHLY: optionalText,
-  /** Team's yearly price. Empty offers Team monthly only. */
-  STRIPE_PRICE_TEAM_YEARLY: optionalText,
+  /** Friends' yearly price. */
+  STRIPE_PRICE_FRIENDS: optionalText,
+  /** Business's monthly base price. */
+  STRIPE_PRICE_BUSINESS: optionalText,
+  /** Business's metered price on the `METER_EVENT_NAME` meter: requests past those included. */
+  STRIPE_PRICE_BUSINESS_REQUESTS: optionalText,
 };
 
-/** Price ids that need `STRIPE_SECRET_KEY`, and the ones it needs. */
-const REQUIRED_PRICES = ["STRIPE_PRICE_PERSONAL", "STRIPE_PRICE_TEAM_MONTHLY"] as const;
+/** Price ids, all required with `STRIPE_SECRET_KEY`. */
+const REQUIRED_PRICES = [
+  "STRIPE_PRICE_FRIENDS",
+  "STRIPE_PRICE_BUSINESS",
+  "STRIPE_PRICE_BUSINESS_REQUESTS",
+] as const;
 
 /** Auth variables, documented in `apps/worker/.dev.vars.example`. */
 export const authEnvSchema = z
@@ -87,11 +92,7 @@ export const authEnvSchema = z
   .superRefine((env, ctx) => {
     // Half a billing setup is a mistake, not "billing off": name what is missing.
     if (!env.STRIPE_SECRET_KEY) {
-      const stray = [
-        "STRIPE_WEBHOOK_SECRET",
-        ...REQUIRED_PRICES,
-        "STRIPE_PRICE_TEAM_YEARLY",
-      ] as const;
+      const stray = ["STRIPE_WEBHOOK_SECRET", ...REQUIRED_PRICES] as const;
       for (const name of stray.filter((n) => env[n] !== undefined)) {
         ctx.addIssue({ code: "custom", path: [name], message: "needs STRIPE_SECRET_KEY" });
       }
@@ -125,15 +126,16 @@ export const authEnvSchema = z
     billing:
       env.STRIPE_SECRET_KEY &&
       env.STRIPE_WEBHOOK_SECRET &&
-      env.STRIPE_PRICE_PERSONAL &&
-      env.STRIPE_PRICE_TEAM_MONTHLY
+      env.STRIPE_PRICE_FRIENDS &&
+      env.STRIPE_PRICE_BUSINESS &&
+      env.STRIPE_PRICE_BUSINESS_REQUESTS
         ? {
             secretKey: env.STRIPE_SECRET_KEY,
             webhookSecret: env.STRIPE_WEBHOOK_SECRET,
             prices: {
-              personal: env.STRIPE_PRICE_PERSONAL,
-              teamMonthly: env.STRIPE_PRICE_TEAM_MONTHLY,
-              teamYearly: env.STRIPE_PRICE_TEAM_YEARLY,
+              friends: env.STRIPE_PRICE_FRIENDS,
+              business: env.STRIPE_PRICE_BUSINESS,
+              businessRequests: env.STRIPE_PRICE_BUSINESS_REQUESTS,
             },
           }
         : undefined,
@@ -144,8 +146,8 @@ export type AuthConfig = z.output<typeof authEnvSchema>;
 /** Present only when billing is on (`STRIPE_SECRET_KEY` and friends set). */
 export type BillingConfig = NonNullable<AuthConfig["billing"]>;
 
-/** The plans (ADR 0026), by the key the Stripe plugin stores in `subscriptions.plan`. */
-export const PLAN_NAMES = ["personal", "team"] as const;
+/** The plans (ADR 0027), by the key the Stripe plugin stores in `subscriptions.plan`. */
+export const PLAN_NAMES = ["friends", "business"] as const;
 export type PlanName = (typeof PLAN_NAMES)[number];
 
 /** Days a new org's first subscription is free. Checkout still takes a card up front. */
@@ -159,11 +161,20 @@ export interface OrgLimits {
   monthlyRequests: number;
 }
 
-/** Each plan's limits (ADR 0026). Prices live in Stripe; these are what the plan includes. */
+/**
+ * Each plan's limits (ADR 0027). Prices live in Stripe; these are what the plan includes.
+ * Business's `monthlyRequests` is a placeholder: its owner's spend cap sets the real one.
+ */
 export const PLAN_LIMITS: Record<PlanName, OrgLimits> = {
-  personal: { members: 3, active: 3, monthlyBytes: 25 * 1000 ** 3, monthlyRequests: 5_000_000 },
-  team: { members: null, active: 15, monthlyBytes: 250 * 1000 ** 3, monthlyRequests: 50_000_000 },
+  friends: { members: 10, active: 25, monthlyBytes: 100 * 1000 ** 3, monthlyRequests: 2_000_000 },
+  business: { members: null, active: 500, monthlyBytes: 10 * 1000 ** 4, monthlyRequests: 0 },
 };
+
+/** Business's spend cap before its owner sets one, in cents a month, base price included. */
+export const DEFAULT_SPEND_CAP_CENTS = 10_000;
+
+/** The Stripe meter's event name that Business requests are reported under. */
+export const METER_EVENT_NAME = "wurmhol_requests";
 
 export function isPlanName(value: string): value is PlanName {
   return (PLAN_NAMES as readonly string[]).includes(value);
@@ -202,20 +213,19 @@ function billingPlugin(env: AuthEnv, billing: BillingConfig) {
     subscription: {
       enabled: true,
       plans: [
-        // Yearly only: the plugin's base price is the yearly one, and Checkout never passes
-        // `annual` for it.
-        { name: "personal", priceId: billing.prices.personal, freeTrial: { days: TRIAL_DAYS } },
+        { name: "friends", priceId: billing.prices.friends, freeTrial: { days: TRIAL_DAYS } },
         {
-          name: "team",
-          priceId: billing.prices.teamMonthly,
-          annualDiscountPriceId: billing.prices.teamYearly,
+          // The base price, and the metered one beside it on the same subscription.
+          name: "business",
+          priceId: billing.prices.business,
+          lineItems: [{ price: billing.prices.businessRequests }],
           freeTrial: { days: TRIAL_DAYS },
         },
       ] satisfies ({ name: PlanName } & Record<string, unknown>)[],
       // Org subscriptions only (the Worker refuses others), managed by owners.
       authorizeReference: ({ user, referenceId }) => isOwner(env.db, user.id, referenceId),
       getCheckoutSessionParams: () => ({
-        // A card up front, trial or not (ADR 0026): Stripe charges it when the trial ends.
+        // A card up front, trial or not (ADR 0027): Stripe charges it when the trial ends.
         params: { allow_promotion_codes: true, payment_method_collection: "always" },
       }),
     },

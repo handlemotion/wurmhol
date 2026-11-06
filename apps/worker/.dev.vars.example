@@ -75,13 +75,19 @@ STRIPE_SECRET_KEY=
 # Secret, required with STRIPE_SECRET_KEY. Signing secret of the webhook endpoint
 # <BETTER_AUTH_URL>/api/auth/stripe/webhook (locally: `stripe listen` prints it).
 STRIPE_WEBHOOK_SECRET=
-# Required with STRIPE_SECRET_KEY (ADR 0026). Price id of Personal, yearly ($12/year).
-STRIPE_PRICE_PERSONAL=
-# Required with STRIPE_SECRET_KEY. Price id of Team, monthly ($15/month).
-STRIPE_PRICE_TEAM_MONTHLY=
-# Optional. Price id of Team, yearly ($150/year). Empty offers Team monthly only. Each org's first
-# subscription starts with a 14-day trial; Checkout takes a card up front.
-STRIPE_PRICE_TEAM_YEARLY=
+# Required with STRIPE_SECRET_KEY (ADR 0027). Price id of Friends, yearly ($15/year).
+STRIPE_PRICE_FRIENDS=
+# Required with STRIPE_SECRET_KEY. Price id of Business's monthly base ($20/month).
+STRIPE_PRICE_BUSINESS=
+# Required with STRIPE_SECRET_KEY. Price id of Business's metered requests: a monthly graduated
+# price on a meter with event name `wurmhol_requests` (first BUSINESS_INCLUDED_REQUESTS free).
+# Each org's first subscription starts with a 14-day trial; Checkout takes a card up front.
+STRIPE_PRICE_BUSINESS_REQUESTS=
+# Business's prices as the Stripe prices charge them, for turning a spend cap into requests.
+# Empty means the default: $20 base, 10 million requests included, $1.50 per million more.
+BUSINESS_BASE_CENTS=
+BUSINESS_INCLUDED_REQUESTS=
+BUSINESS_CENTS_PER_MILLION=
 
 # --- Preview links on pull requests (optional; ADR 0016, docs/self-hosting.md) ---
 # A GitHub App that posts each open pipe to the open pull request of its branch as a deployment.
@@ -103,7 +109,7 @@ GITHUB_API_URL=
 GITHUB_WEB_URL=
 
 # --- Fair-use limits per org with billing off; empty means the default ---
-# With billing on, each plan's limits apply instead (ADR 0026).
+# With billing on, each plan's limits apply instead (ADR 0027).
 LIMIT_ACTIVE_SHARES=5
 # Bytes relayed per calendar month (UTC), both directions. Default 100 GB.
 LIMIT_MONTHLY_BYTES=100000000000

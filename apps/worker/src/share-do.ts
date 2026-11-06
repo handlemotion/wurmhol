@@ -41,7 +41,7 @@ import {
 } from "@wurmhol/protocol";
 import { refuse } from "./bearer.ts";
 import { createLogger } from "./log.ts";
-import { orgStub } from "./org-do.ts";
+import { orgStub, type UsageBatch } from "./org-do.ts";
 import { errorPage } from "./pages.ts";
 import { type Meta, type ShareInit, type ShareState, type Tombstone } from "./share-meta.ts";
 import { PROBE_FIRST_MS, SharePage, TITLE_SCAN_BYTES } from "./share-page.ts";
@@ -190,6 +190,8 @@ export class Share extends DurableObject<Env> {
   #pendingUsage = 0;
   #pendingRequests = 0;
   #lastUsageFlush = 0;
+  /** Usage sends run one after another, so the Org object gets batches in order. */
+  #usageSends: Promise<unknown> = Promise.resolve();
   /** The last viewer request, kept here and pushed and stored every `LAST_REQUEST_PUSH_MS`. */
   #lastRequestAt: number | null = null;
   #lastRequestPush = 0;
@@ -976,16 +978,47 @@ export class Share extends DurableObject<Env> {
     return usage;
   }
 
+  /** Sends what piled up, after any send still running; ends the share at the org's limit. */
   async #flushUsage() {
-    if (!this.#pendingUsage && !this.#pendingRequests) return;
-    const pending = this.#takeUsage();
+    const send = this.#usageSends.then(() => {
+      const meta = this.#meta();
+      return meta ? this.#sendUsage(meta) : false;
+    });
+    this.#usageSends = send.catch(() => {});
+    try {
+      if (await send) await this.#end("limit");
+    } catch (error) {
+      // The batch stays stored and goes again with the next flush or the share's end.
+      this.#log.warn("share.usage_send_failed", { error: String(error) });
+    }
+  }
+
+  /**
+   * Sends one batch to the Org object: the stored one if the last send did not get through (the
+   * same number, so the Org object counts it once), else a new one from what piled up. The batch
+   * is stored before it goes and deleted once the Org object has it. Returns whether the org is
+   * now over a limit.
+   */
+  async #sendUsage(meta: Meta) {
+    let batch = this.ctx.storage.kv.get<UsageBatch>("usage:batch");
+    if (!batch) {
+      if (!this.#pendingUsage && !this.#pendingRequests) return false;
+      const seq = (this.ctx.storage.kv.get<number>("usage:seq") ?? 0) + 1;
+      batch = { seq, ...this.#takeUsage() };
+      this.ctx.storage.kv.put("usage:seq", seq);
+      this.ctx.storage.kv.put("usage:batch", batch);
+      meta.bytes += batch.bytes;
+      this.#save(meta);
+    }
     this.#lastUsageFlush = Date.now();
-    const meta = this.#meta();
-    if (!meta) return;
-    meta.bytes += pending.bytes;
-    this.#save(meta);
-    const usage = await this.#org(meta.orgId).addUsage(pending, meta.limits);
-    if (usage.over) await this.#end("limit");
+    const usage = await this.#org(meta.orgId).addUsage(meta.id, batch, {
+      monthlyBytes: meta.limits.monthlyBytes,
+      monthlyRequests: meta.limits.monthlyRequests ?? Number.POSITIVE_INFINITY,
+      period: null,
+      meter: null,
+    });
+    this.ctx.storage.kv.delete("usage:batch");
+    return usage.over;
   }
 
   async #end(reason: EndReason) {
@@ -1010,11 +1043,19 @@ export class Share extends DurableObject<Env> {
     }
     this.#page.clear();
     await this.ctx.storage.deleteAlarm();
-    // The usage still counts, even though the share is gone.
-    const pending = this.#takeUsage();
-    meta.bytes += pending.bytes;
+    // The usage still counts, even though the share is gone: after any send still running, a
+    // batch that did not get through, then what piled up since. Later flushes see the tombstone
+    // and send nothing.
+    await this.#usageSends;
+    for (let i = 0; i < 2; i++) {
+      try {
+        await this.#sendUsage(meta);
+      } catch (error) {
+        this.#log.warn("share.usage_lost", { shareId: meta.id, error: String(error) });
+        break;
+      }
+    }
     const org = this.#org(meta.orgId);
-    if (pending.bytes || pending.requests) await org.addUsage(pending, meta.limits);
     // The view log's last counts go to D1; the object keeps none of it.
     await this.#views.close(meta);
     await org.remove(meta.id);

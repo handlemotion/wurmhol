@@ -93,7 +93,7 @@ export const account = new Hono<AppEnv>()
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Why an org at its plan's member cap takes no one new (ADR 0026). */
+/** Why an org at its plan's member cap takes no one new (ADR 0027). */
 function orgFull(cap: number) {
   return new HTTPException(409, {
     message: `this org's plan includes ${cap} members; an owner can move it to Team (menu → Billing)`,

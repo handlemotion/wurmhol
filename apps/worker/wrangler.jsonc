@@ -46,11 +46,15 @@
     "MAIL_FROM": "",
     "GOOGLE_CLIENT_ID": "",
     "GITHUB_CLIENT_ID": "",
-    // Billing (ADR 0026): off unless the STRIPE_SECRET_KEY secret is set; then Personal's and
-    // Team's monthly prices are required, and Team's yearly price is optional.
-    "STRIPE_PRICE_PERSONAL": "",
-    "STRIPE_PRICE_TEAM_MONTHLY": "",
-    "STRIPE_PRICE_TEAM_YEARLY": "",
+    // Billing (ADR 0027): off unless the STRIPE_SECRET_KEY secret is set; then all three prices
+    // are required.
+    "STRIPE_PRICE_FRIENDS": "",
+    "STRIPE_PRICE_BUSINESS": "",
+    "STRIPE_PRICE_BUSINESS_REQUESTS": "",
+    // Business's prices as Stripe charges them, to turn a spend cap into requests.
+    "BUSINESS_BASE_CENTS": "2000",
+    "BUSINESS_INCLUDED_REQUESTS": "10000000",
+    "BUSINESS_CENTS_PER_MILLION": "150",
     // Fair-use limits per org with billing off. Empty means the default shown.
     "LIMIT_ACTIVE_SHARES": "5",
     "LIMIT_MONTHLY_BYTES": "100000000000",

@@ -2,10 +2,18 @@
 // wall, pushed to every open wall over WebSockets (hibernation API, no polling), and the counts
 // behind the org's limits: active shares, and bytes and viewer requests relayed this month.
 //
+// A Business org's requests are also metered to Stripe (ADR 0027). Usage arrives from each Share
+// object in numbered batches that are applied once, however often one is retried, and its
+// requests go out as meter events from a stored outbox, each with an identifier it keeps across
+// retries, so Stripe counts each request exactly once.
+//
 // It also holds the org's machines (ADR 0018): one socket per running `wurmhol host`, which
 // reports the ports open on its computer and opens a pipe to one when its owner asks from the
 // wall. Each machine is visible to the person whose token it runs on, and no one else.
 import { DurableObject } from "cloudflare:workers";
+import { createStripeClient, METER_EVENT_NAME } from "@wurmhol/auth";
+import { loadConfig } from "./env.ts";
+import { createLogger } from "./log.ts";
 import {
   type Machine,
   type MachinesEvent,
@@ -23,17 +31,52 @@ export type Reservation =
   | { ok: false; reason: "monthly_limit"; limit: number }
   | { ok: false; reason: "request_limit"; limit: number };
 
-/** Relayed this month: bytes both ways, and viewer requests. */
+/** Relayed in the current window: bytes both ways, and viewer requests. */
 export interface Usage {
   bytes: number;
   requests: number;
 }
 
-/** The monthly caps a share counts against. Pipes from before the request cap have none. */
-export interface MonthlyLimits {
-  monthlyBytes: number;
-  monthlyRequests?: number;
+/** One Share object's usage since its last batch, numbered in the order it sends them. */
+export interface UsageBatch extends Usage {
+  seq: number;
 }
+
+/** What the org's usage counts against (`plan.ts`). */
+export interface UsageLimits {
+  monthlyBytes: number;
+  monthlyRequests: number;
+  /** Business: its Stripe billing period, which the window follows. Null: the calendar month. */
+  period: { start: number; end: number } | null;
+  /** Business: the Stripe customer its requests are metered to. */
+  meter: { customer: string } | null;
+}
+
+/** Limits the org's object keeps: the latest the Worker gave it. */
+type StoredLimits = UsageLimits & { active: number };
+
+/** Requests not yet sent to Stripe, per customer and window: `at` is the last one's time. */
+type MeterPending = Record<string, { customer: string; value: number; at: number }>;
+
+/** The meter event being sent: kept until Stripe has it, so a retry reuses its identifier. */
+interface MeterOutbox {
+  identifier: string;
+  customer: string;
+  value: number;
+  at: number;
+  attempts: number;
+  /** When it first went out: past `METER_GIVE_UP_MS`, a resend could be counted twice. */
+  firstSentAt: number;
+}
+
+/** How soon pending requests go to Stripe, and the longest wait between retries. */
+const METER_FLUSH_MS = 60_000;
+const METER_RETRY_MAX_MS = 60 * 60_000;
+/**
+ * Stripe holds an identifier unique for at least 24 hours. An event still failing after this
+ * long is dropped and logged: billing a request twice is worse than missing it.
+ */
+const METER_GIVE_UP_MS = 20 * 60 * 60_000;
 
 /** Who a machine's socket belongs to: kept on the socket, so it survives hibernation. */
 interface MachineAttachment extends Machine {
@@ -84,9 +127,25 @@ function month(at = Date.now()) {
   return new Date(at).toISOString().slice(0, 7);
 }
 
+/**
+ * The usage window's key: a Business org's billing period, or the calendar month. Past a
+ * period's end, before Stripe's renewal reaches us, the next period has already begun at it.
+ */
+function windowOf(limits: Pick<UsageLimits, "period"> | null, at = Date.now()) {
+  const period = limits?.period;
+  if (!period) return month(at);
+  return `period:${at >= period.end ? period.end : period.start}`;
+}
+
+/** Whether Stripe already has this event: its identifier was used. */
+function isDuplicate(error: unknown) {
+  return /duplicate/i.test(String((error as { code?: string })?.code ?? ""));
+}
+
 export class Org extends DurableObject<Env> {
   /** Opens waiting on a machine's answer, by request id. In memory: an RPC keeps it awake. */
   #pending = new Map<string, (result: OpenPortResult) => void>();
+  #log = createLogger({ component: "org" });
 
   #cards(): ShareCard[] {
     return [...this.ctx.storage.kv.list<ShareCard>({ prefix: "share:" })]
@@ -107,11 +166,28 @@ export class Org extends DurableObject<Env> {
     }
   }
 
-  #usage(): Usage {
+  #limits() {
+    return this.ctx.storage.kv.get<StoredLimits>("limits") ?? null;
+  }
+
+  /** This window's usage. `month` is the window's key (a calendar month, or a billing period). */
+  #usage(limits: Pick<UsageLimits, "period"> | null = this.#limits()): Usage {
     const stored = this.ctx.storage.kv.get<{ month: string } & Partial<Usage>>("usage");
-    return stored && stored.month === month()
+    return stored && stored.month === windowOf(limits)
       ? { bytes: stored.bytes ?? 0, requests: stored.requests ?? 0 }
       : { bytes: 0, requests: 0 };
+  }
+
+  #over(usage: Usage, limits: Pick<UsageLimits, "monthlyBytes" | "monthlyRequests">) {
+    return usage.bytes >= limits.monthlyBytes || usage.requests >= limits.monthlyRequests;
+  }
+
+  /**
+   * The org's current limits, from the Worker: when a share starts, and when an owner changes
+   * the spend cap. Open shares count against these, not the ones they started with.
+   */
+  setLimits(limits: StoredLimits) {
+    this.ctx.storage.kv.put("limits", limits);
   }
 
   /**
@@ -119,11 +195,9 @@ export class Org extends DurableObject<Env> {
    * call at a time and `kv` writes are synchronous, so two CLIs starting at once cannot both get
    * the last slot.
    */
-  reserve(
-    card: ShareCard,
-    limits: { active: number; monthlyBytes: number; monthlyRequests: number },
-  ): Reservation {
-    const usage = this.#usage();
+  reserve(card: ShareCard, limits: StoredLimits): Reservation {
+    this.setLimits(limits);
+    const usage = this.#usage(limits);
     if (usage.bytes >= limits.monthlyBytes) {
       return { ok: false, reason: "monthly_limit", limit: limits.monthlyBytes };
     }
@@ -149,23 +223,109 @@ export class Org extends DurableObject<Env> {
 
   /** Takes an ended share off the wall and frees its slot. Safe to call twice. */
   remove(id: string) {
+    // Its last batch came before this (the Share object sends them in order, then ends).
+    this.ctx.storage.kv.delete(`applied:${id}`);
     if (!this.ctx.storage.kv.delete(`share:${id}`)) return;
     this.#broadcast({ type: "share.ended", id });
   }
 
-  /** Adds to this month's counts. Returns whether the org is now over either limit. */
-  addUsage(added: Usage, limits: MonthlyLimits) {
-    const usage = this.#usage();
-    const total = { bytes: usage.bytes + added.bytes, requests: usage.requests + added.requests };
-    this.ctx.storage.kv.put("usage", { month: month(), ...total });
-    const over =
-      total.bytes >= limits.monthlyBytes ||
-      (limits.monthlyRequests !== undefined && total.requests >= limits.monthlyRequests);
-    return { ...total, over };
+  /**
+   * Adds a share's batch to the window's counts, once: a batch whose number this share already
+   * sent is a retry and changes nothing. `fallback` is what the share started with, for an org
+   * whose object has no limits stored yet. Returns whether the org is now over a limit.
+   */
+  async addUsage(shareId: string, batch: UsageBatch, fallback: UsageLimits) {
+    const limits = this.#limits() ?? fallback;
+    const usage = this.#usage(limits);
+    if (batch.seq <= (this.ctx.storage.kv.get<number>(`applied:${shareId}`) ?? 0)) {
+      return { ...usage, over: this.#over(usage, limits) };
+    }
+    const total = { bytes: usage.bytes + batch.bytes, requests: usage.requests + batch.requests };
+    this.ctx.storage.kv.put("usage", { month: windowOf(limits), ...total });
+    this.ctx.storage.kv.put(`applied:${shareId}`, batch.seq);
+    if (limits.meter && batch.requests > 0) await this.#meter(limits, batch.requests);
+    return { ...total, over: this.#over(total, limits) };
   }
 
   usage() {
-    return { month: month(), ...this.#usage() };
+    return { month: windowOf(this.#limits()), ...this.#usage() };
+  }
+
+  /** Queues requests for Stripe, per customer and window, and makes sure an alarm sends them. */
+  async #meter(limits: UsageLimits, requests: number) {
+    const customer = limits.meter!.customer;
+    const now = Date.now();
+    const key = `${customer}|${windowOf(limits, now)}`;
+    const pending = this.ctx.storage.kv.get<MeterPending>("meter:pending") ?? {};
+    const entry = pending[key] ?? { customer, value: 0, at: now };
+    pending[key] = { customer, value: entry.value + requests, at: now };
+    this.ctx.storage.kv.put("meter:pending", pending);
+    if ((await this.ctx.storage.getAlarm()) === null) {
+      await this.ctx.storage.setAlarm(now + METER_FLUSH_MS);
+    }
+  }
+
+  /**
+   * Sends metered requests to Stripe, one event at a time (Stripe refuses concurrent events for
+   * one customer). An event stays in the outbox until Stripe has it, and a retry keeps its
+   * identifier, which Stripe holds unique for at least 24 hours: retries stop well before that.
+   */
+  override async alarm() {
+    const key = loadConfig(this.env).auth.billing?.secretKey;
+    if (!key) {
+      // Billing went off: nothing to send to.
+      this.ctx.storage.kv.delete("meter:pending");
+      this.ctx.storage.kv.delete("meter:outbox");
+      return;
+    }
+    const stripe = createStripeClient(key);
+    for (;;) {
+      let outbox = this.ctx.storage.kv.get<MeterOutbox>("meter:outbox");
+      if (!outbox) {
+        const pending = this.ctx.storage.kv.get<MeterPending>("meter:pending") ?? {};
+        const [next] = Object.keys(pending);
+        if (next === undefined) return;
+        const seq = (this.ctx.storage.kv.get<number>("meter:seq") ?? 0) + 1;
+        outbox = {
+          identifier: `${this.ctx.id.toString()}-${seq}`,
+          ...pending[next]!,
+          attempts: 0,
+          firstSentAt: Date.now(),
+        };
+        delete pending[next];
+        // One synchronous write set: the requests leave pending as the event enters the outbox.
+        this.ctx.storage.kv.put("meter:seq", seq);
+        this.ctx.storage.kv.put("meter:outbox", outbox);
+        this.ctx.storage.kv.put("meter:pending", pending);
+      }
+      try {
+        await stripe.billing.meterEvents.create({
+          event_name: METER_EVENT_NAME,
+          identifier: outbox.identifier,
+          timestamp: Math.floor(outbox.at / 1000),
+          payload: { stripe_customer_id: outbox.customer, value: String(outbox.value) },
+        });
+      } catch (error) {
+        if (!isDuplicate(error)) {
+          const attempts = outbox.attempts + 1;
+          const fields = {
+            identifier: outbox.identifier,
+            value: outbox.value,
+            attempts,
+            code: (error as { code?: string })?.code ?? null,
+          };
+          if (Date.now() - outbox.firstSentAt < METER_GIVE_UP_MS) {
+            this.ctx.storage.kv.put("meter:outbox", { ...outbox, attempts });
+            this.#log.warn("meter.send_failed", fields);
+            const wait = Math.min(METER_FLUSH_MS * 2 ** attempts, METER_RETRY_MAX_MS);
+            await this.ctx.storage.setAlarm(Date.now() + wait);
+            return;
+          }
+          this.#log.error("meter.dropped", fields);
+        }
+      }
+      this.ctx.storage.kv.delete("meter:outbox");
+    }
   }
 
   list() {
