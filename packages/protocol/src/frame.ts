@@ -40,7 +40,7 @@ export const HEARTBEAT_MS = 20_000;
 export const RECONNECT_GRACE_MS = 60_000;
 /**
  * How long the relay keeps an away share (its id, URL and name) for its CLI to come back: a
- * laptop that slept, a container that paused (ADR 0024). Longer than `RECONNECT_GRACE_MS`, so the
+ * laptop that slept, a container that paused (ADR 0025). Longer than `RECONNECT_GRACE_MS`, so the
  * relay never ends a share its CLI is still trying to reach.
  */
 export const AWAY_GRACE_MS = 15 * 60_000;
