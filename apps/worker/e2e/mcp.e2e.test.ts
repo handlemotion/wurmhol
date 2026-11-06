@@ -1,6 +1,6 @@
 // `wurmhol mcp` against the real stack: the built CLI runs as a stdio MCP server, driven by the
 // official MCP client over its stdin and stdout, as Claude Code or any other agent host would.
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -168,17 +168,74 @@ describe("wurmhol mcp", () => {
     await client.close();
   });
 
-  it("without a token, says to run wurmhol login or set WURMHOL_TOKEN", async () => {
-    const { client, call } = await connect({
-      WURMHOL_URL: stack.url,
-      WURMHOL_HOME: mkdtempSync(join(tmpdir(), "wurmhol-home-")),
+  // Catches a tokenless open_pipe that fails, mints a second code (and token) when the agent
+  // calls it again or for a second port, or never opens the pipes once the link is approved.
+  it("without a token, returns an approval link at once and opens the pipes once it is approved", async () => {
+    const home = mkdtempSync(join(tmpdir(), "wurmhol-home-"));
+    const { client, call } = await connect({ WURMHOL_URL: stack.url, WURMHOL_HOME: home });
+    const app = await localServer((_req, res) => res.end("mcp approved"));
+    const api2 = await localServer((_req, res) => res.end("second port"));
+
+    const first = await call("open_pipe", { port: app.port });
+    expect({ isError: first.isError, text: text(first) }).toMatchObject({ isError: undefined });
+    const waiting = first.structuredContent as unknown as PipeResult & { approval?: boolean };
+    expect(waiting).toMatchObject({ port: app.port, approval: true });
+    expect(waiting.url.startsWith(`${stack.url}/device?code=`)).toBe(true);
+    expect(text(first).split("\n")[0]).toBe(waiting.url);
+    expect(text(first)).toContain("Send this link to the user");
+    // Called again for the same port, or for another one, while it waits: the same link.
+    const again = await call("open_pipe", { port: app.port });
+    expect(again.structuredContent).toMatchObject({ url: waiting.url, approval: true });
+    const other = await call("open_pipe", { port: api2.port });
+    expect(other.structuredContent).toMatchObject({
+      url: waiting.url,
+      port: api2.port,
+      approval: true,
     });
-    const result = await call("open_pipe", { port: 3000 });
-    expect(result.isError).toBe(true);
-    expect(text(result)).toBe(
-      `No Wurmhol token. Run \`npx wurmhol login\` in a terminal, or set WURMHOL_TOKEN to a token from ${stack.url} (menu → Tokens) in this MCP server's environment, then call the tool again.`,
+    expect((await call("list_pipes")).structuredContent).toEqual({ pipes: [] });
+
+    const code = new URL(waiting.url).searchParams.get("code")!;
+    const shown = await api<{ port: number | null }>(stack, ada, `/api/device?code=${code}`);
+    expect(shown.body.port).toBe(app.port);
+    expect(
+      (await api(stack, ada, "/api/device/approve", { method: "POST", body: { code } })).status,
+    ).toBe(200);
+
+    const listed = await waitFor(
+      async () => {
+        const pipes = ((await call("list_pipes")).structuredContent as { pipes: PipeResult[] })
+          .pipes;
+        return pipes.length === 2 ? pipes : null;
+      },
+      { timeoutMs: 20_000, intervalMs: 500, what: "both ports' pipes" },
     );
+    expect(listed.map((p) => p.port).toSorted()).toEqual([app.port, api2.port].toSorted());
+    const byPort = new Map(listed.map((p) => [p.port, p.url]));
+    // The approval page asked to open the first port: it goes there, not to the newest pipe.
+    const page = await api<{ url: string | null }>(
+      stack,
+      ada,
+      `/api/device/pipe?code=${code}&port=${app.port}`,
+    );
+    expect(page.body.url).toBe(byPort.get(app.port));
+    for (const [port, body] of [
+      [app.port, "mcp approved"],
+      [api2.port, "second port"],
+    ] as const) {
+      const pipeUrl = byPort.get(port)!;
+      const cookie = await viewerCookie(stack, ada, pipeUrl);
+      expect(await (await browserFetch(`${pipeUrl}/`, { cookie })).text()).toBe(body);
+    }
+    // Logged in: the token is saved, and the next pipe opens with no link.
+    expect(existsSync(join(home, "credentials.json"))).toBe(true);
+    const next = await call("open_pipe", { port: app.port });
+    expect(next.structuredContent).not.toHaveProperty("approval");
+    expect((next.structuredContent as unknown as PipeResult).url).toBe(
+      stack.shareUrl((next.structuredContent as unknown as PipeResult).id),
+    );
+
     await client.close();
+    await Promise.all([app.close(), api2.close()]);
   });
 
   it("passes on the relay's fix for a token it does not know", async () => {

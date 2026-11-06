@@ -88,8 +88,12 @@ The server finds its token the way the CLI does:
    [With your agent](/agents#cloud-environments)).
 2. Otherwise the token `wurmhol login` stored on this computer.
 
-Without either, a tool call fails with the fix: run `npx wurmhol login`, or set `WURMHOL_TOKEN`.
-The next call picks the token up; there is nothing to restart. Never put a token in a committed
+Without either, `open_pipe` returns an approval link at once instead of a pipe, with
+`approval: true`, and tells the agent to send it to the user. Approving the computer there saves
+its token, as `wurmhol login` would, and opens the pipe; the page goes straight to it, and
+`list_pipes` shows its URL. Calling `open_pipe` again while the link waits, for the same port or
+another, returns the same link, and every port asked for opens once it is approved. A token set
+or saved later is picked up by the next call; there is nothing to restart. Never put a token in a committed
 `.mcp.json`. `WURMHOL_URL` points the server at a self-hosted install.
 
 ### Tools

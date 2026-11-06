@@ -25,6 +25,10 @@ token, as `wurmhol login` would, so its next pipes open straight away. Until the
 lists the share as waiting for approval, running the same command prints the same link, and
 `wurmhol stop <port>` ends the wait. The link stays valid for 30 minutes.
 
+One approval per computer: a second port shared while the first link waits prints that same link
+and opens once it is approved. If the first share's wait ends with no approval, the second ends
+too; run it again for a new link.
+
 ## Open pipes from the browser
 
 `npx wurmhol host` keeps this computer connected to your wall. In Create pipe, **Create from this

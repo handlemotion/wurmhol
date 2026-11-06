@@ -29,6 +29,7 @@ import { allowlistLine, consoleUrl, envToken, findToken, savedLogin, server } fr
 import { credentialsFile, removeCredentials, writeCredentials } from "./credentials.ts";
 import {
   DAEMON_COMMAND,
+  type LoginMessage,
   runDaemon,
   type ShareOptions,
   shareRequest,
@@ -171,11 +172,18 @@ function reusable(options: ShareOptions): ShareState | undefined {
  * share waiting for approval prints its approval link instead (ADR 0026).
  */
 function printPipe(
-  pipe: { url: string; port: number; id: string; endsAt: string; approval?: boolean },
+  pipe: {
+    url: string;
+    port: number;
+    id: string;
+    endsAt: string;
+    approval?: boolean;
+    follows?: string;
+  },
   path: string | undefined,
   json: boolean,
 ) {
-  const { url, port, id, endsAt, approval } = pipe;
+  const { url, port, id, endsAt, approval, follows } = pipe;
   const page = path === undefined || approval ? undefined : pageUrl(url, path);
   const out = json
     ? JSON.stringify({
@@ -188,7 +196,11 @@ function printPipe(
       })
     : (page ?? url);
   process.stdout.write(`${out}\n`);
-  if (approval) {
+  if (follows) {
+    process.stderr.write(
+      "Not logged in yet, and another share is already waiting on this link: this pipe opens once someone in your org approves it.\n",
+    );
+  } else if (approval) {
     process.stderr.write(
       "Not logged in yet. Send this link to someone in your org: it opens the pipe once they approve this computer.\n",
     );
@@ -208,23 +220,35 @@ async function share(options: ShareOptions, json: boolean, path: string | undefi
     }
     return;
   }
-  // No token: the link it prints logs this computer in and then opens the pipe (ADR 0026).
-  let pending;
+  // No token: the link it prints logs this computer in and then opens the pipe (ADR 0026). One
+  // login per computer: while another share waits on its link, this one waits on the same link.
+  let pending: LoginMessage | undefined;
+  let follows: string | undefined;
   if (!findToken()) {
-    try {
-      pending = await startLogin({
-        server: server(),
-        name: hostname(),
-        version: pkg.version,
-        port,
-      });
-    } catch (error) {
-      fail(error);
+    const leader = listStates().find((s) => s.approval && !s.follows);
+    if (leader) {
+      follows = leader.id;
+      pending = {
+        type: "follow",
+        leader: { id: leader.id, url: leader.url, endsAt: leader.endsAt },
+      };
+    } else {
+      try {
+        const code = await startLogin({
+          server: server(),
+          name: hostname(),
+          version: pkg.version,
+          port,
+        });
+        pending = { type: "login", code };
+      } catch (error) {
+        fail(error);
+      }
     }
   }
   const message = await startDaemon(entry, options, undefined, pending);
   if (message.type === "error") fail(message.message);
-  printPipe({ ...message, port, approval: message.type === "approval" }, path, json);
+  printPipe({ ...message, port, approval: message.type === "approval", follows }, path, json);
 }
 
 /**

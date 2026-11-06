@@ -222,6 +222,72 @@ it("with no token, a share prints a link; approving it there opens that pipe and
   await Promise.all([local.close(), other.close()]);
 });
 
+// Catches a second tokenless share starting its own code: two links for the human and two
+// tokens minted for one computer, or a second share that never opens once the first is approved.
+it("a second share with no token waits on the first one's link and opens once it is approved", async () => {
+  const env = loginEnv();
+  const computers = async () =>
+    (await api<{ tokens: { name: string }[] }>(stack, ada, "/api/tokens")).body.tokens.filter(
+      (t) => t.name === hostname(),
+    ).length;
+  const before = await computers();
+  const app = await localServer((_req, res) => res.end("first port"));
+  const web = await localServer((_req, res) => res.end("second port"));
+
+  const first = await cli([String(app.port), "--json"], env);
+  expect({ code: first.code, stderr: first.stderr }).toMatchObject({ code: 0 });
+  const link = (JSON.parse(first.stdout) as { url: string }).url;
+  const second = await cli([String(web.port), "--json"], env);
+  expect({ code: second.code, stderr: second.stderr }).toMatchObject({ code: 0 });
+  expect(JSON.parse(second.stdout)).toMatchObject({ url: link, port: web.port, approval: true });
+  expect(second.stderr).toContain("another share is already waiting on this link");
+  // Re-run, the second share prints the same link and says the same.
+  const again = await cli([String(web.port)], env);
+  expect(again.stdout.trim()).toBe(link);
+  expect(again.stderr).toContain("another share is already waiting on this link");
+  const waiting = JSON.parse((await cli(["ls", "--json"], env)).stdout) as {
+    port: number;
+    approval?: boolean;
+  }[];
+  expect(waiting.map((s) => [s.port, s.approval])).toEqual([
+    [app.port, true],
+    [web.port, true],
+  ]);
+
+  const code = new URL(link).searchParams.get("code")!;
+  expect((await device(ada, "approve", code)).status).toBe(200);
+  const open = await waitFor(
+    async () => {
+      const listed = JSON.parse((await cli(["ls", "--json"], env)).stdout) as {
+        port: number;
+        url: string;
+        approval?: boolean;
+      }[];
+      return listed.length === 2 && listed.every((s) => !s.approval) ? listed : null;
+    },
+    { timeoutMs: 20_000, intervalMs: 500, what: "both shares' pipes" },
+  );
+  for (const [port, body] of [
+    [app.port, "first port"],
+    [web.port, "second port"],
+  ] as const) {
+    const url = open.find((s) => s.port === port)!.url;
+    const cookie = await viewerCookie(stack, ada, url);
+    expect(await (await browserFetch(`${url}/`, { cookie })).text()).toBe(body);
+  }
+  // The approval page asked to open the first port: it goes there, though the second opened later.
+  const page = await api<{ url: string | null }>(
+    stack,
+    ada,
+    `/api/device/pipe?code=${code}&port=${app.port}`,
+  );
+  expect(page.body.url).toBe(open.find((s) => s.port === app.port)!.url);
+  // One approval, one token for this computer.
+  expect(await computers()).toBe(before + 1);
+  await stopAll(env);
+  await Promise.all([app.close(), web.close()]);
+});
+
 it("with no plan, a share's approval page says so instead of waiting for a pipe that /connect refuses", async () => {
   // Billing on and no subscription: what a new hosted org looks like before it subscribes.
   const billed = await startStack({

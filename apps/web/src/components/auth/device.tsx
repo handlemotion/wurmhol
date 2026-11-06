@@ -48,8 +48,9 @@ function EnterCode() {
  */
 function OpenPipe({ code, name, port }: { code: string; name: string | null; port: number }) {
   const pipe = useQuery({
-    queryKey: ["device-pipe", code],
-    queryFn: () => api<{ url: string | null }>(`/api/device/pipe?code=${encodeURIComponent(code)}`),
+    queryKey: ["device-pipe", code, port],
+    queryFn: () =>
+      api<{ url: string | null }>(`/api/device/pipe?code=${encodeURIComponent(code)}&port=${port}`),
     refetchInterval: (query) => (query.state.data?.url ? false : 1000),
   });
   const [slow, setSlow] = useState(false);

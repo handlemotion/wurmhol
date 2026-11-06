@@ -244,16 +244,22 @@ export const deviceApproval = new Hono<AppEnv>()
   })
   /**
    * Where an approved share's login has got to (ADR 0026): `{ url }` once its pipe is open, else
-   * `{ url: null }`. The code is gone once redeemed, so this reads the token made from it.
+   * `{ url: null }`. The code is gone once redeemed, so this reads the token made from it; `port`
+   * is the one the approval page asked to open.
    */
   .get("/pipe", async (c) => {
     const code = normalizeUserCode(c.req.query("code") ?? "");
     if (!code) throw new HTTPException(400, { message: "Which code?" });
+    const asked = c.req.query("port");
+    const port = asked === undefined ? undefined : Number(asked);
+    if (port !== undefined && !isPort(port))
+      throw new HTTPException(400, { message: "Not a port." });
     const pipe = await findLoginPipe(c.var.db, {
       orgId: c.var.member.orgId,
       userId: c.var.user.id,
       loginCode: code,
       since: new Date(Date.now() - LOGIN_PIPE_MS),
+      port,
     });
     c.header("cache-control", "no-store");
     return c.json({ url: pipe ? shareOrigin(c.var.config, pipe) : null });

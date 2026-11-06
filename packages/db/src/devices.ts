@@ -17,11 +17,13 @@ export async function findDeviceUserCode(db: Db, deviceCode: string) {
 /**
  * Where a share's device login has got to (ADR 0026), for the member who approved it: `waiting`
  * until the CLI has redeemed the code and opened its pipe, then the newest open pipe of the
- * token made from it. Only tokens `userId` made in `orgId` since `since` count.
+ * token made from it, on `port` when given: the computer may open other ports with the same
+ * token, and the approval page asked to open that one. Only tokens `userId` made in `orgId`
+ * since `since` count.
  */
 export async function findLoginPipe(
   db: Db,
-  input: { orgId: string; userId: string; loginCode: string; since: Date },
+  input: { orgId: string; userId: string; loginCode: string; since: Date; port?: number },
 ) {
   const [row] = await db
     .select({ id: shares.id, name: shares.name })
@@ -34,6 +36,7 @@ export async function findLoginPipe(
         eq(tokens.loginCode, input.loginCode),
         isNull(tokens.revokedAt),
         gt(tokens.createdAt, input.since),
+        input.port === undefined ? undefined : eq(shares.port, input.port),
       ),
     )
     .orderBy(desc(shares.startedAt))

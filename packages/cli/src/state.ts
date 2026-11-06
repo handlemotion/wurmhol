@@ -18,6 +18,11 @@ export interface ShareState {
    * approval link and `endsAt` the code's expiry. The pipe gets its own state once it opens.
    */
   approval?: boolean;
+  /**
+   * The id of the waiting share whose login this one waits on instead of starting its own: a
+   * second share before anyone approved the first one's link opens once that link is approved.
+   */
+  follows?: string;
 }
 
 /** The options a pipe was asked for that change what it is; `--ttl` is not one of them. */
