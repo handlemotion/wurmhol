@@ -1,0 +1,1 @@
+ALTER TABLE `tokens` ADD `login_code` text;

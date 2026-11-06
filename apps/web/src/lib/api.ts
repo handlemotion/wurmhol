@@ -40,12 +40,14 @@ export interface Me {
   orgs: { id: string; name: string; role: string; personal: boolean }[];
   activeOrgId: string | null;
   role: Role | null;
-  standing:
-    | { ok: true; reason: "billing_off" }
-    | { ok: true; reason: "subscribed"; plan: string }
-    | { ok: false; reason: "no_subscription" }
-    | null;
+  standing: Standing | null;
 }
+
+/** Whether the org may open pipes (ADR 0027): billing off, or a plan in good standing. */
+export type Standing =
+  | { ok: true; reason: "billing_off" }
+  | { ok: true; reason: "subscribed"; plan: string }
+  | { ok: false; reason: "no_subscription" };
 
 export interface Token {
   id: string;
@@ -83,6 +85,11 @@ export interface AppConfig {
 export interface DeviceLogin {
   code: string;
   name: string | null;
+  /** The port a share's login opens once approved (ADR 0026); null for `wurmhol login`. */
+  port: number | null;
   status: "pending" | "approved" | "denied";
   org: { id: string; name: string | null };
+  role: Role;
+  /** Not ok: `/connect` refuses the org, so a share's login would never open its pipe. */
+  standing: Standing;
 }

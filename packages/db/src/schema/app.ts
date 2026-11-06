@@ -35,6 +35,11 @@ export const tokens = sqliteTable(
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
     lastUsedAt: integer("last_used_at", { mode: "timestamp_ms" }),
     revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+    /**
+     * The normalized user code of the device login that made it, so the approval page can follow
+     * the login to the pipe it opens (ADR 0026). Null for console tokens.
+     */
+    loginCode: text("login_code"),
   },
   (table) => [
     uniqueIndex("tokens_hash_idx").on(table.hash),

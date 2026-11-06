@@ -21,6 +21,8 @@ export async function createToken(
     source?: TokenSource;
     /** Null: never expires. */
     expiresAt: Date | null;
+    /** The device login's normalized user code, for a `login` token (ADR 0026). */
+    loginCode?: string;
   },
 ) {
   const token = `${TOKEN_PREFIX}${randomSecret(32)}`;
@@ -34,6 +36,7 @@ export async function createToken(
     source: input.source ?? "console",
     expiresAt: input.expiresAt,
     createdBy: input.createdBy,
+    loginCode: input.loginCode ?? null,
   });
   return { id, token };
 }

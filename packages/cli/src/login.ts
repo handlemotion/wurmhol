@@ -2,7 +2,8 @@
 // the human approves it in the console on any device, and the CLI polls until it gets an org
 // token. Both calls go to the host the CLI already dials, through HTTPS_PROXY like the pipe.
 // `wurmhol host --code` skips the approval: Create pipe hands it a code already approved by the
-// signed-in member (ADR 0020), redeemed once on the same token endpoint.
+// signed-in member (ADR 0020), redeemed once on the same token endpoint. `wurmhol <port>` with no
+// token starts a code with its port and leaves the waiting to its daemon (ADR 0026).
 import { type Answer, send } from "./dial.ts";
 import { explainRefusal, FixError } from "./errors.ts";
 
@@ -19,7 +20,7 @@ function parse<T>(answer: Answer): T | null {
   }
 }
 
-interface DeviceCode {
+export interface DeviceCode {
   device_code: string;
   user_code: string;
   verification_uri: string;
@@ -28,7 +29,7 @@ interface DeviceCode {
   interval: number;
 }
 
-interface Granted {
+export interface Granted {
   token: string;
   org: { id: string; name: string | null };
   name: string;
@@ -43,21 +44,58 @@ export interface LoginOptions {
   prompt: (code: DeviceCode) => void;
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
+  });
 
-/** Runs the flow to the end: the granted token, or a FixError that says what to do. */
-export async function login(options: LoginOptions): Promise<Granted> {
-  const { server, version } = options;
-  const started = await postJson(server, "/device/code", { name: options.name }, version);
+/** Asks for a code; `port` makes it a share's login, whose approval page opens that pipe. */
+export async function startLogin(options: {
+  server: string;
+  name: string;
+  version: string;
+  port?: number;
+}): Promise<DeviceCode> {
+  const { server, version, name, port } = options;
+  const started = await postJson(server, "/device/code", { name, port }, version);
   const code = started.status === 200 ? parse<DeviceCode>(started) : null;
   if (!code?.device_code) {
     throw explainRefusal(started.status, started.body, { server, viaProxy: started.viaProxy });
   }
+  return code;
+}
+
+/** Runs the flow to the end: the granted token, or a FixError that says what to do. */
+export async function login(options: LoginOptions): Promise<Granted> {
+  const code = await startLogin(options);
   options.prompt(code);
+  return awaitLogin({ server: options.server, version: options.version, code });
+}
+
+/**
+ * Polls until someone approves `code`: the granted token, or a FixError that says what to do.
+ * `signal` ends the wait early with its reason.
+ */
+export async function awaitLogin(options: {
+  server: string;
+  version: string;
+  code: DeviceCode;
+  signal?: AbortSignal;
+}): Promise<Granted> {
+  const { server, version, code, signal } = options;
   let interval = Math.max(code.interval, 1) * 1000;
   const deadline = Date.now() + code.expires_in * 1000;
   while (Date.now() < deadline) {
-    await sleep(interval);
+    await sleep(interval, signal);
     const polled = await postJson(
       server,
       "/device/token",

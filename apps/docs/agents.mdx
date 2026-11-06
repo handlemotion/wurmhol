@@ -3,18 +3,20 @@ title: "With your agent"
 description: "Let a coding agent share its own dev server and send you the link."
 ---
 
-Wurmhol is made for the agent to run, you just open the link it sends. It needs a token and, in a sandbox, one host on its allowed list.
+Wurmhol is made for the agent to run, you just open the link it sends. In a sandbox, it needs one host on its allowed list.
 
 ## Cloud environments
 
-In a cloud sandbox like Claude Code on the web, put the token in the environment's settings. When you create a token, dirt shows the values below, each copied in one click.
+In a cloud sandbox like Claude Code on the web, the agent can share with no setup. With no token, `npx wurmhol <port>` prints an approval link where the pipe's URL would go. Open it, sign in and approve the computer, and the page opens the pipe. Every new sandbox asks once, because the saved token goes away with the container.
 
-| Setting                         | Value                |
-| ------------------------------- | -------------------- |
-| Environment variables           | `WURMHOL_TOKEN=wh_…` |
-| Network access, allowed domains | `api.wurmhol.com`    |
+To skip that step, put a token in the environment's settings. When you create a token, dirt shows the values below, each copied in one click.
 
-`api.wurmhol.com` is the only host the CLI talks to, the people opening pipes do that from their own browsers. New sessions pick both up. Use `WURMHOL_TOKEN` here and skip `wurmhol login`, a saved token dies with the container.
+| Setting                         | Value                                   |
+| ------------------------------- | --------------------------------------- |
+| Network access, allowed domains | `api.wurmhol.com` (with Limited access) |
+| Environment variables           | `WURMHOL_TOKEN=wh_…` (optional)         |
+
+`api.wurmhol.com` is the only host the CLI talks to, the people opening pipes do that from their own browsers. New sessions pick both up.
 
 If the sandbox goes through a proxy, the CLI uses `HTTPS_PROXY` and trusts the proxy's certificate from `NODE_EXTRA_CA_CERTS`. Claude Code's cloud sets both for you. It needs Node 22 or later.
 

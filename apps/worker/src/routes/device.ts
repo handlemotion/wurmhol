@@ -10,18 +10,31 @@
 // - A setup code (ADR 0020): `POST /api/device/setup` issues a code already approved by the
 //   caller for the active org and hands back its device code, which Create pipe puts in
 //   `wurmhol host --code`. The CLI redeems it on `/device/token` like any other, once.
+// - A share's login (ADR 0026): `npx wurmhol <port>` with no token starts a code with the port in
+//   it. The token minted for it records the code, and `GET /api/device/pipe` follows the code to
+//   the pipe it opened, so the approval page can open that pipe.
 //
-// A code's scope is a space-separated list: `name:<computer>` (from the CLI, URI-encoded) and,
-// once approved, `org:<id>`. A setup code has no name; the CLI sends it when it redeems.
+// A code's scope is a space-separated list: `name:<computer>` (from the CLI, URI-encoded),
+// `port:<n>` for a share's login and, once approved, `org:<id>`. A setup code has no name; the CLI
+// sends it when it redeems.
 import { zValidator } from "@hono/zod-validator";
 import { APIError, DEVICE_CLIENT_ID } from "@wurmhol/auth";
-import { createToken, findMember, listOrgsForUser, setPendingDeviceScope } from "@wurmhol/db";
+import {
+  createToken,
+  findDeviceUserCode,
+  findLoginPipe,
+  findMember,
+  listOrgsForUser,
+  orgStanding,
+  setPendingDeviceScope,
+} from "@wurmhol/db";
 
 import { type Context, Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { COMPUTER_NAME_MAX } from "@wurmhol/protocol";
+import { COMPUTER_NAME_MAX, isPort } from "@wurmhol/protocol";
 import { type AppEnv, requireMember } from "../context.ts";
+import { shareOrigin } from "../env.ts";
 import { limitPerIp, limitPerMember } from "../rate-limiter.ts";
 
 const GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
@@ -29,9 +42,14 @@ const GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 /** `wurmhol login` tokens open pipes and expire after 90 days (ADR 0008). */
 const LOGIN_TOKEN_MS = 90 * 24 * 60 * 60 * 1000;
 
+/** How long after its token was made a share's login still leads to its pipe. */
+const LOGIN_PIPE_MS = 60 * 60 * 1000;
+
 interface Scope {
   name: string | null;
   orgId: string | null;
+  /** The port a share's login opens once approved (ADR 0026). */
+  port?: number | null;
 }
 
 function parseScope(scope: string | null | undefined): Scope {
@@ -40,12 +58,14 @@ function parseScope(scope: string | null | undefined): Scope {
     const part = parts.find((p) => p.startsWith(prefix));
     return part ? decodeURIComponent(part.slice(prefix.length)) : null;
   };
-  return { name: value("name:"), orgId: value("org:") };
+  const port = Number(value("port:"));
+  return { name: value("name:"), orgId: value("org:"), port: isPort(port) ? port : null };
 }
 
 function formatScope(scope: Scope) {
   return [
     scope.name !== null ? `name:${encodeURIComponent(scope.name)}` : null,
+    scope.port ? `port:${scope.port}` : null,
     scope.orgId !== null ? `org:${encodeURIComponent(scope.orgId)}` : null,
   ]
     .filter(Boolean)
@@ -78,7 +98,11 @@ const FIXES: Record<string, string> = {
 };
 
 const computerName = z.string().trim().min(1).max(COMPUTER_NAME_MAX);
-const codeBody = z.object({ name: computerName });
+const codeBody = z.object({
+  name: computerName,
+  /** The port `npx wurmhol <port>` opens once approved (ADR 0026); absent for `wurmhol login`. */
+  port: z.number().int().refine(isPort).optional(),
+});
 const tokenBody = z.object({
   device_code: z.string().min(1).max(200),
   /** The computer's name, for a setup code, whose scope has none. */
@@ -88,9 +112,9 @@ const tokenBody = z.object({
 /** The CLI's calls: no session, no token; the device code is the credential. */
 export const deviceFlow = new Hono<AppEnv>()
   .post("/code", zValidator("json", codeBody), limitPerIp("auth"), async (c) => {
-    const { name } = c.req.valid("json");
+    const { name, port } = c.req.valid("json");
     const issued = await c.var.auth.api.deviceCode({
-      body: { client_id: DEVICE_CLIENT_ID, scope: formatScope({ name, orgId: null }) },
+      body: { client_id: DEVICE_CLIENT_ID, scope: formatScope({ name, orgId: null, port }) },
     });
     const verificationUri = new URL("/device", c.var.config.auth.baseURL);
     const complete = new URL(verificationUri);
@@ -108,6 +132,8 @@ export const deviceFlow = new Hono<AppEnv>()
   .post("/token", zValidator("json", tokenBody), limitPerIp("auth"), async (c) => {
     c.header("cache-control", "no-store");
     const body = c.req.valid("json");
+    // Read before redemption deletes the code: the token keeps it for the approval page.
+    const userCode = await findDeviceUserCode(c.var.db, body.device_code);
     let redeemed;
     try {
       redeemed = await c.var.auth.api.deviceToken({
@@ -154,6 +180,7 @@ export const deviceFlow = new Hono<AppEnv>()
       source: "login",
       expiresAt: new Date(Date.now() + LOGIN_TOKEN_MS),
       createdBy: session.user.id,
+      ...(userCode && scope.port ? { loginCode: userCode } : {}),
     });
     const orgs = await listOrgsForUser(c.var.db, session.user.id);
     c.var.log.info("device.token", { orgId: member.orgId });
@@ -197,14 +224,45 @@ export const deviceApproval = new Hono<AppEnv>()
     const code = c.req.query("code") ?? "";
     if (!code) throw new HTTPException(400, { message: "Enter the code your terminal shows." });
     const claimed = await claim(c, code);
-    const orgs = await listOrgsForUser(c.var.db, c.var.user.id);
-    const org = orgs.find((o) => o.id === c.var.member.orgId);
+    const { db, config, member } = c.var;
+    const [orgs, standing] = await Promise.all([
+      listOrgsForUser(db, c.var.user.id),
+      // `/connect` refuses an org without a plan: a share's login approved there would never
+      // open its pipe, so the page offers the fix instead (ADR 0026).
+      orgStanding(db, member.orgId, { enabled: config.auth.billing !== undefined }),
+    ]);
+    const org = orgs.find((o) => o.id === member.orgId);
     return c.json({
       code: displayUserCode(claimed.userCode),
       name: claimed.scope.name,
+      port: claimed.scope.port ?? null,
       status: claimed.status,
-      org: { id: c.var.member.orgId, name: org?.name ?? null },
+      org: { id: member.orgId, name: org?.name ?? null },
+      role: member.role,
+      standing,
     });
+  })
+  /**
+   * Where an approved share's login has got to (ADR 0026): `{ url }` once its pipe is open, else
+   * `{ url: null }`. The code is gone once redeemed, so this reads the token made from it; `port`
+   * is the one the approval page asked to open.
+   */
+  .get("/pipe", async (c) => {
+    const code = normalizeUserCode(c.req.query("code") ?? "");
+    if (!code) throw new HTTPException(400, { message: "Which code?" });
+    const asked = c.req.query("port");
+    const port = asked === undefined ? undefined : Number(asked);
+    if (port !== undefined && !isPort(port))
+      throw new HTTPException(400, { message: "Not a port." });
+    const pipe = await findLoginPipe(c.var.db, {
+      orgId: c.var.member.orgId,
+      userId: c.var.user.id,
+      loginCode: code,
+      since: new Date(Date.now() - LOGIN_PIPE_MS),
+      port,
+    });
+    c.header("cache-control", "no-store");
+    return c.json({ url: pipe ? shareOrigin(c.var.config, pipe) : null });
   })
   .post("/approve", limitPerMember("manage"), zValidator("json", userCodeBody), async (c) => {
     const claimed = await claim(c, c.req.valid("json").code);
@@ -212,7 +270,7 @@ export const deviceApproval = new Hono<AppEnv>()
       throw new HTTPException(409, { message: "This code was already used." });
     }
     // The org goes on the code first: approval is what the CLI's next poll redeems.
-    const scope = formatScope({ name: claimed.scope.name, orgId: c.var.member.orgId });
+    const scope = formatScope({ ...claimed.scope, orgId: c.var.member.orgId });
     const set = await setPendingDeviceScope(c.var.db, {
       userCode: claimed.userCode,
       userId: c.var.user.id,

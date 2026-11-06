@@ -13,6 +13,16 @@ export interface ShareState {
   endsAt: string;
   /** What the pipe was opened with, so a repeat of the same command can reuse it. */
   request?: ShareRequest;
+  /**
+   * True while the share waits for someone to approve this computer (ADR 0026): `url` is the
+   * approval link and `endsAt` the code's expiry. The pipe gets its own state once it opens.
+   */
+  approval?: boolean;
+  /**
+   * The id of the waiting share whose login this one waits on instead of starting its own: a
+   * second share before anyone approved the first one's link opens once that link is approved.
+   */
+  follows?: string;
 }
 
 /** The options a pipe was asked for that change what it is; `--ttl` is not one of them. */
@@ -85,6 +95,6 @@ export function matches(state: ShareState, target: string) {
     state.id === target ||
     (/^\d+$/.test(wanted) && state.port === Number(wanted)) ||
     // A named pipe, by the first label of its host.
-    new URL(state.url).hostname.split(".")[0] === wanted
+    (!state.approval && new URL(state.url).hostname.split(".")[0] === wanted)
   );
 }
