@@ -137,3 +137,33 @@ export class HttpStreamOrder {
     }
   }
 }
+
+/**
+ * Bytes likely still queued toward a WebSocket peer that acknowledges nothing (`ws-message` has
+ * no window, and workerd shows no `bufferedAmount`): everything sent, less what a peer reading
+ * `drainPerSecond` would have taken since. A sender closes the stream once `add` says no.
+ */
+export class SendBacklog {
+  #pending = 0;
+  #at: number;
+  #limit: number;
+  #drainPerMs: number;
+
+  constructor(options: { limit: number; drainPerSecond: number; now: number }) {
+    this.#limit = options.limit;
+    this.#drainPerMs = options.drainPerSecond / 1000;
+    this.#at = options.now;
+  }
+
+  /** Counts `bytes` sent at `now`; false when that puts the backlog over its limit. */
+  add(bytes: number, now: number): boolean {
+    this.#pending = Math.max(0, this.#pending - Math.max(0, now - this.#at) * this.#drainPerMs);
+    this.#at = Math.max(this.#at, now);
+    this.#pending += bytes;
+    return this.#pending <= this.#limit;
+  }
+
+  get pending() {
+    return this.#pending;
+  }
+}

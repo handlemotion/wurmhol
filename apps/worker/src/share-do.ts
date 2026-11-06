@@ -30,12 +30,12 @@ import {
   REPLACED_CLOSE_CODE,
   type RequestHead,
   type ResponseHead,
+  SendBacklog,
   SendWindow,
   sendableCloseCode,
   SHARE_HEADERS,
   viewerRequestHeaders,
   WAITING_HEADER,
-  type WsClosePayload,
   type WsOpenPayload,
 } from "@wurmhol/protocol";
 import { refuse } from "./bearer.ts";
@@ -126,6 +126,14 @@ const USAGE_FLUSH_BYTES = 8 * 1024 * 1024;
 const LAST_REQUEST_PUSH_MS = 5_000;
 /** Stream ids are reserved in storage this many at a time, so most streams write nothing. */
 const STREAM_ID_BLOCK = 1024;
+/** How long a browser WebSocket waits for the dev server to accept it. */
+const WS_OPEN_TIMEOUT_MS = 15_000;
+/**
+ * A browser WebSocket stream is closed (1013) once the bytes likely still queued toward either
+ * end pass this: what was sent, less what a peer reading `WS_DRAIN_PER_SECOND` took since.
+ */
+const WS_BACKLOG_BYTES = 16 * 1024 * 1024;
+const WS_DRAIN_PER_SECOND = 2 * 1024 * 1024;
 /** One-time viewer codes (spec section 6). */
 const CODE_TTL_MS = 60_000;
 
@@ -180,6 +188,8 @@ export class Share extends DurableObject<Env> {
   #lastRequestTimer: ReturnType<typeof setTimeout> | null = null;
   /** The next stream id, and the first one not yet reserved in storage; null until first used. */
   #streamIds: { next: number; reserved: number } | null = null;
+  /** Per open browser WebSocket stream, the estimated bytes queued toward each end. */
+  #backlogs = new Map<number, Record<"viewer" | "cli", SendBacklog>>();
   #log = createLogger({ component: "share" });
   #page: SharePage;
   #views: ViewLog;
@@ -656,10 +666,14 @@ export class Share extends DurableObject<Env> {
     try {
       opened = await Promise.race([
         stream.opened.promise,
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out")), 15_000)),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("timed out")), WS_OPEN_TIMEOUT_MS),
+        ),
       ]);
     } catch {
       this.#streams.delete(id);
+      // The CLI may still be dialling, or have a socket open: it must not keep one nobody reads.
+      this.#closeCliStream(id, 1001, "the relay stopped waiting for the websocket");
       return new Response("the local server did not accept the websocket", { status: 502 });
     }
     this.#streams.delete(id);
@@ -684,6 +698,10 @@ export class Share extends DurableObject<Env> {
       const data =
         typeof message === "string" ? new TextEncoder().encode(message) : new Uint8Array(message);
       this.#count(data.byteLength);
+      if (!this.#backlog(stream, "cli").add(data.byteLength, Date.now())) {
+        this.#overflow(stream, socket, "cli");
+        return;
+      }
       try {
         this.#send({
           stream,
@@ -754,10 +772,15 @@ export class Share extends DurableObject<Env> {
     try {
       if (frame.type === "ws-message") {
         this.#count(frame.payload.data.byteLength);
+        if (!this.#backlog(frame.stream, "viewer").add(frame.payload.data.byteLength, Date.now())) {
+          this.#overflow(frame.stream, viewer, "viewer");
+          return;
+        }
         viewer.send(
           frame.payload.binary ? frame.payload.data : textDecoder.decode(frame.payload.data),
         );
       } else if (frame.type === "ws-close") {
+        this.#backlogs.delete(frame.stream);
         viewer.close(sendableCloseCode(frame.payload.code), frame.payload.reason.slice(0, 120));
       }
     } catch {
@@ -765,16 +788,50 @@ export class Share extends DurableObject<Env> {
     }
   }
 
+  #backlog(stream: number, toward: "viewer" | "cli") {
+    let backlogs = this.#backlogs.get(stream);
+    if (!backlogs) {
+      const options = { limit: WS_BACKLOG_BYTES, drainPerSecond: WS_DRAIN_PER_SECOND };
+      const now = Date.now();
+      backlogs = {
+        viewer: new SendBacklog({ ...options, now }),
+        cli: new SendBacklog({ ...options, now }),
+      };
+      this.#backlogs.set(stream, backlogs);
+    }
+    return backlogs[toward];
+  }
+
+  /** Closes a browser WebSocket stream at both ends: more is queued toward one than it reads. */
+  #overflow(stream: number, viewer: WebSocket, toward: "viewer" | "cli") {
+    const bytes = Math.round(this.#backlog(stream, toward).pending);
+    this.#backlogs.delete(stream);
+    this.#log.warn("share.ws_backlog", { shareId: this.#meta()?.id, stream, toward, bytes });
+    const reason = "too much data queued";
+    try {
+      viewer.close(1013, reason);
+    } catch {
+      // Already closing.
+    }
+    this.#closeCliStream(stream, 1013, reason);
+  }
+
+  /** Tells the CLI to close its end of a browser WebSocket stream. */
+  #closeCliStream(stream: number, code: number, reason: string) {
+    try {
+      this.#send({ stream, type: "ws-close", payload: { code, reason } });
+    } catch {
+      // CLI gone: it drops its streams when its socket goes.
+    }
+  }
+
   override async webSocketClose(socket: WebSocket, code: number, reason: string) {
     const tags = this.ctx.getTags(socket);
     const viewerTag = tags.find((tag) => tag.startsWith("v:"));
     if (viewerTag) {
-      const payload: WsClosePayload = { code: sendableCloseCode(code), reason };
-      try {
-        this.#send({ stream: Number(viewerTag.slice(2)), type: "ws-close", payload });
-      } catch {
-        // CLI gone.
-      }
+      const stream = Number(viewerTag.slice(2));
+      this.#backlogs.delete(stream);
+      this.#closeCliStream(stream, sendableCloseCode(code), reason);
       return;
     }
     if (!tags.includes("cli")) return;
@@ -804,6 +861,7 @@ export class Share extends DurableObject<Env> {
   }
 
   #failStreams(reason: string) {
+    this.#backlogs.clear();
     for (const [id, stream] of this.#streams) {
       if (stream.kind === "http") {
         stream.closed = true;
