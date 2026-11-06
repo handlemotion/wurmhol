@@ -1,5 +1,4 @@
 // Token scopes and expiry, and the org pipes API on the CLI's host (ADR 0008).
-import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import {
   api,
@@ -68,10 +67,7 @@ function shareRow(id: string) {
 
 it("refuses an expired token, saying it expired", async () => {
   const { id, token } = await createToken(stack, ada, "short", { scope: "org", expiresInDays: 30 });
-  const handle = stack.db();
-  const path = (handle.prepare("pragma database_list").get() as { file: string }).file;
-  handle.close();
-  const db = new DatabaseSync(path);
+  const db = stack.db({ write: true });
   db.prepare("update tokens set expires_at = ? where id = ?").run(Date.now() - 1000, id);
   db.close();
 

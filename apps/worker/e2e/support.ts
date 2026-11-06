@@ -100,6 +100,14 @@ export async function waitFor<T>(
   }
 }
 
+/**
+ * Opens a SQLite file the local stack writes to. workerd holds a write lock while it commits, so
+ * the connection waits out a busy database instead of failing with "database is locked".
+ */
+export function openSqlite(file: string, options: { readOnly?: boolean } = {}) {
+  return new DatabaseSync(file, { readOnly: options.readOnly ?? false, timeout: 5000 });
+}
+
 export interface Stack {
   url: string;
   /** Everything wrangler dev printed so far (the simulated Email binding logs each email). */
@@ -208,7 +216,7 @@ export async function startStack(vars: Record<string, string> = {}): Promise<Sta
     port,
     output: () => output,
     shareUrl: (id) => `http://${id}.pipe.localhost:${port}`,
-    db: (options) => new DatabaseSync(dbFile(), { readOnly: !options?.write }),
+    db: (options) => openSqlite(dbFile(), { readOnly: !options?.write }),
     restart: async (whileStopped) => {
       await kill(child);
       await whileStopped?.();

@@ -6,7 +6,6 @@
 // sandbox key.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import Stripe from "stripe";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -183,7 +182,7 @@ describe("billing", () => {
 
   it("a Friends trial lets pipes start, takes 10 members, and has no spend cap", async () => {
     // Checkout would have made the org's Stripe customer; here the row says so directly.
-    const db = new DatabaseSync(dbPath(stack));
+    const db = stack.db({ write: true });
     db.prepare("update organizations set stripe_customer_id = ? where id = ?").run(customer, orgId);
     db.close();
     expect((await webhook("customer.subscription.created", subscription("trialing"))).status).toBe(
@@ -292,10 +291,3 @@ describe("billing", () => {
     expect((await cli([String(local.port)], env)).code).toBe(1);
   });
 });
-
-function dbPath(s: Stack) {
-  const handle = s.db();
-  const path = (handle.prepare("pragma database_list").get() as { file: string }).file;
-  handle.close();
-  return path;
-}

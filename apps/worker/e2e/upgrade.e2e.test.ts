@@ -1,6 +1,5 @@
 // A Worker deploy keeps every Durable Object's storage: wall cards written by the previous
 // Worker reach walls served by the new one, which must still get cards in the current shape.
-import { DatabaseSync } from "node:sqlite";
 import { deserialize, serialize } from "node:v8";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -8,6 +7,7 @@ import {
   cliEnv,
   createToken,
   localServer,
+  openSqlite,
   type Person,
   share,
   signIn,
@@ -19,7 +19,7 @@ import {
 
 /** Rewrites every stored wall card in `file` (an Org object's SQLite) through `change`. */
 function rewriteCards(file: string, change: (card: Record<string, unknown>) => void) {
-  const db = new DatabaseSync(file);
+  const db = openSqlite(file);
   try {
     const rows = db.prepare("select key, value from _cf_KV where key like 'share:%'").all() as {
       key: string;

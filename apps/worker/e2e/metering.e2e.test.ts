@@ -4,7 +4,6 @@
 //
 //   STRIPE_E2E_SECRET_KEY, STRIPE_E2E_METER_ID, STRIPE_E2E_PRICE_FRIENDS,
 //   STRIPE_E2E_PRICE_BUSINESS, STRIPE_E2E_PRICE_BUSINESS_REQUESTS
-import { DatabaseSync } from "node:sqlite";
 import Stripe from "stripe";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -55,7 +54,7 @@ describe.runIf(e2e.key && e2e.meter)("metering Business requests to Stripe", () 
     env = cliEnv(stack, (await createToken(stack, ada)).token);
     local = await localServer((_req, res) => res.end("ok"));
     customer = (await stripe.customers.create({ description: "wurmhol metering e2e" })).id;
-    const db = new DatabaseSync(dbPath(stack));
+    const db = stack.db({ write: true });
     db.prepare("update organizations set stripe_customer_id = ? where id = ?").run(customer, orgId);
     db.close();
     // The subscription as Stripe would send it; the meter events are real.
@@ -129,10 +128,3 @@ describe.runIf(e2e.key && e2e.meter)("metering Business requests to Stripe", () 
     expect(total).toBe(sent);
   }, 300_000);
 });
-
-function dbPath(s: Stack) {
-  const handle = s.db();
-  const path = (handle.prepare("pragma database_list").get() as { file: string }).file;
-  handle.close();
-  return path;
-}
