@@ -1,5 +1,21 @@
 # wurmhol
 
+## 0.5.0
+
+### Minor Changes
+
+- 37c3332: `wurmhol <port> --path /checkout?step=2` prints the pipe's link opened at that page (and `pageUrl` in `--json`); sign-in lands there. `wurmhol mcp`'s `open_pipe` takes `path` and returns `pageUrl`. A path that would leave the pipe is refused with a fix.
+- 75d13e8: A pipe whose connection is gone longer than the relay's reconnect grace (a laptop asleep, a network down) no longer ends: `wurmhol <port>` opens it again for the same port and flags, retrying with backoff (1 s doubling to 60 s) until its end time. A `--name` pipe gets its URL back; an unnamed one gets a new URL, shown by `wurmhol ls`, and both logs record a `reopened` event with the old and new ids. `wurmhol stop` ends it, including while it retries.
+- a6c835e: `wurmhol logs <port|id|name>` shows a pipe's recent requests (method, path without query values, status, time taken) and connection events, with `--follow` and `--json`; `wurmhol mcp` gains a `recent_requests` tool. The log stays on this machine, capped at about 2 MB per pipe, and never holds bodies, headers, cookies or query values.
+- e7deeba: `npx wurmhol <port>` run again with the same flags prints the pipe that is already open on this machine (same `--json` shape) instead of opening a second one. A different `--name`, `--only`, `--link` or `--note`, or any `--ttl`, opens a new pipe; `wurmhol stop <port>` first for a new URL.
+- ea6013c: `npx wurmhol <port>` with no token no longer fails: it prints an approval link where the URL goes (`--json` adds `"approval": true`) and returns. Approving the computer at that link saves its token and opens the pipe, and the page goes straight to it. `wurmhol ls` lists the share as waiting for approval and `wurmhol stop <port>` ends the wait.
+- ac586ae: Add `wurmhol doctor [--port N] [--json]`: checks the token, `HTTPS_PROXY` and its CA, whether the network allows the CLI's host and the pipe domain, and whether a port answers HTTP on 127.0.0.1 or ::1; one line each, `ok` or the fix, exit 1 if any fails. `wurmhol init` and `wurmhol login` now name the hosts to allowlist first.
+
+### Patch Changes
+
+- 585221b: Pipes and `wurmhol host` reach a dev server that listens only on `::1`, like Vite on its default `localhost` with Node 17+: they try 127.0.0.1, then ::1, and remember which one answered.
+- 11084c5: A pipe whose reconnect is refused for good now closes with the relay's reason: `revoked` when its token expired or was revoked, `no_subscription` when the org has no plan, or why the share ended. It used to close as `disconnected`. A viewer who opens a pipe before its server is up no longer puts "Waiting for port N" on the wall as the pipe's title.
+
 ## 0.4.0
 
 ### Minor Changes
