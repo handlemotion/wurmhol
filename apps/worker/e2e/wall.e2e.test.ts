@@ -119,6 +119,69 @@ describe("the wall in a browser", () => {
     await expect.poll(() => page.locator("[data-create]").isVisible()).toBe(true);
   });
 
+  it("puts Create pipe back where it stood, in the first frame it shows after its card closes", async () => {
+    // With motion on: the frame loop then rests between drift ticks instead of holding still.
+    const moving = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      storageState: await context.storageState(),
+    });
+    const wall = await moving.newPage();
+    try {
+      await wall.goto(`${stack.url}/`);
+      const button = wall.locator("[data-create]:not([inert] *)");
+      await expect.poll(() => button.isVisible()).toBe(true);
+      const rest = (await button.boundingBox())!;
+      // The live button (not the card's inert copy) in a colour nothing else on the wall uses.
+      await wall.addStyleTag({
+        content: "[data-create]:not([inert] *) { background: rgb(255 0 255) !important; }",
+      });
+      await button.click();
+      await expect.poll(() => wall.locator("section[data-open]").isVisible()).toBe(true);
+      await wall.waitForTimeout(500);
+      // Every frame the browser paints, as it painted it.
+      const cdp = await moving.newCDPSession(wall);
+      const frames: string[] = [];
+      cdp.on("Page.screencastFrame", ({ data, sessionId }) => {
+        frames.push(data);
+        void cdp.send("Page.screencastFrameAck", { sessionId });
+      });
+      await cdp.send("Page.startScreencast", { format: "png", everyNthFrame: 1 });
+      await wall.keyboard.press("Escape");
+      await expect.poll(() => wall.locator("section[data-open]").count()).toBe(0);
+      await wall.waitForTimeout(400);
+      await cdp.send("Page.stopScreencast");
+      // Where the magenta is in each frame, decoded by the browser itself.
+      const reader = await moving.newPage();
+      const boxes = await reader.evaluate(async (pngs) => {
+        const found: { x: number; y: number }[] = [];
+        for (const png of pngs) {
+          const image = await createImageBitmap(
+            await (await fetch(`data:image/png;base64,${png}`)).blob(),
+          );
+          const canvas = new OffscreenCanvas(image.width, image.height);
+          const g = canvas.getContext("2d")!;
+          g.drawImage(image, 0, 0);
+          const { data, width } = g.getImageData(0, 0, image.width, image.height);
+          let [x, y] = [Infinity, Infinity];
+          for (let i = 0; i < data.length; i += 4) {
+            if (data[i]! > 240 && data[i + 1]! < 20 && data[i + 2]! > 240) {
+              x = Math.min(x, (i / 4) % width);
+              y = Math.min(y, Math.floor(i / 4 / width));
+            }
+          }
+          if (x !== Infinity) found.push({ x, y });
+        }
+        return found;
+      }, frames);
+      expect(boxes.length).toBeGreaterThan(0);
+      // Catches: the button painted at the closed card's corner (the flicker) until the frame
+      // loop's next idle tick moves it home. Drift moves it a couple of pixels at most.
+      for (const at of boxes) expect(Math.hypot(at.x - rest.x, at.y - rest.y)).toBeLessThan(4);
+    } finally {
+      await moving.close();
+    }
+  });
+
   it("removes a pipe live when its card's Terminate is pressed", async () => {
     const started = await openPipe("Terminate me");
     const pill = page.locator(`[data-pipe="${started.id}"]`);

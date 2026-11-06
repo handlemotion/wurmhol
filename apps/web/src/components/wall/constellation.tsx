@@ -103,7 +103,7 @@ export function Constellation(props: {
   const origin = useRef<Point | null>(null);
   const seat = useRef<Body | null>(null);
   const camera = useRef<Body>({ x: 0, y: 0, vx: 0, vy: 0 });
-  /** Restarts the frame loop at the screen's rate: a layout, a scroll or a resize moved a goal. */
+  /** Ticks the frame loop now and keeps it at the screen's rate: a layout, scroll or resize moved a goal. */
   const wake = useRef(() => {});
 
   const relayout = useCallback(() => {
@@ -311,11 +311,14 @@ export function Constellation(props: {
         }, 1000 / IDLE_FPS);
       } else last = 0;
     };
+    // A tick now, not on the next frame: a resize observer or a layout effect calls this before
+    // the browser paints, so a node whose size just changed (a card folding back into its pill)
+    // is placed in the frame it first shows, never painted at its old box's corner.
     const wakeUp = () => {
-      if (frame) return;
+      cancelAnimationFrame(frame);
       clearTimeout(idle);
       idle = 0;
-      frame = requestAnimationFrame(tick);
+      tick(performance.now());
     };
     const onMotion = () => {
       still = query.matches;
