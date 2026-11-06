@@ -38,7 +38,7 @@ import { doctor as runDoctor, formatCheck } from "./doctor.ts";
 import { FixError } from "./errors.ts";
 import { host as runHost } from "./host.ts";
 import { init } from "./init.ts";
-import { login as deviceLogin, redeem } from "./login.ts";
+import { login as deviceLogin, redeem, startLogin } from "./login.ts";
 import { followLog, isRequest, type LogRecord, readLog, toRequest } from "./logs.ts";
 import { checkService, installService, stableEntry, uninstallService } from "./service.ts";
 import { DEFAULT_CONSOLE, DEFAULT_SERVER, pagePath, pageUrl } from "./pipe.ts";
@@ -53,7 +53,8 @@ Usage:
   npx wurmhol <port> [--json]   Open a pipe to a port; prints the URL, then returns.
                                 Run again with the same flags, it prints the open pipe's
                                 URL; wurmhol stop <port> first for a new one (--ttl always
-                                opens a new one)
+                                opens a new one). With no token it prints a link instead:
+                                approving this computer there opens the pipe
     --ttl <duration>            How long it lasts, like 90m or 8h (default 4h, at most 12h)
     --only a@x.com,b@y.com      Only these members of the org may open it
     --name <name>               Keep the same URL every time (https://<name>.<pipe domain>),
@@ -165,37 +166,65 @@ function reusable(options: ShareOptions): ShareState | undefined {
   );
 }
 
-/** What `wurmhol <port>` prints: the URL (at `--path`, when given), or the JSON for `--json`. */
+/**
+ * What `wurmhol <port>` prints: the URL (at `--path`, when given), or the JSON for `--json`. A
+ * share waiting for approval prints its approval link instead (ADR 0026).
+ */
 function printPipe(
-  pipe: { url: string; port: number; id: string; endsAt: string },
+  pipe: { url: string; port: number; id: string; endsAt: string; approval?: boolean },
   path: string | undefined,
   json: boolean,
 ) {
-  const { url, port, id, endsAt } = pipe;
-  const page = path === undefined ? undefined : pageUrl(url, path);
+  const { url, port, id, endsAt, approval } = pipe;
+  const page = path === undefined || approval ? undefined : pageUrl(url, path);
   const out = json
-    ? JSON.stringify({ url, port, id, endsAt, ...(page ? { pageUrl: page } : {}) })
+    ? JSON.stringify({
+        url,
+        port,
+        id,
+        endsAt,
+        ...(page ? { pageUrl: page } : {}),
+        ...(approval ? { approval: true } : {}),
+      })
     : (page ?? url);
   process.stdout.write(`${out}\n`);
+  if (approval) {
+    process.stderr.write(
+      "Not logged in yet. Send this link to someone in your org: it opens the pipe once they approve this computer.\n",
+    );
+  }
 }
 
 async function share(options: ShareOptions, json: boolean, path: string | undefined) {
-  token();
   const { port } = options;
   // Agents re-run commands: the same command again prints the same pipe, not a second one.
   const open = reusable(options);
   if (open) {
     printPipe(open, path, json);
-    if (!json) {
+    if (!json && !open.approval) {
       process.stderr.write(
         `Already open. For a new URL: wurmhol stop ${port}, then run this again.\n`,
       );
     }
     return;
   }
-  const message = await startDaemon(entry, options);
+  // No token: the link it prints logs this computer in and then opens the pipe (ADR 0026).
+  let pending;
+  if (!findToken()) {
+    try {
+      pending = await startLogin({
+        server: server(),
+        name: hostname(),
+        version: pkg.version,
+        port,
+      });
+    } catch (error) {
+      fail(error);
+    }
+  }
+  const message = await startDaemon(entry, options, undefined, pending);
   if (message.type === "error") fail(message.message);
-  printPipe({ ...message, port }, path, json);
+  printPipe({ ...message, port, approval: message.type === "approval" }, path, json);
 }
 
 /**
@@ -281,7 +310,16 @@ function ls(json: boolean) {
   const states = listStates();
   if (json) {
     process.stdout.write(
-      `${JSON.stringify(states.map(({ id, url, port, startedAt, endsAt }) => ({ id, url, port, startedAt, endsAt })))}\n`,
+      `${JSON.stringify(
+        states.map(({ id, url, port, startedAt, endsAt, approval }) => ({
+          id,
+          url,
+          port,
+          startedAt,
+          endsAt,
+          ...(approval ? { approval: true } : {}),
+        })),
+      )}\n`,
     );
     return;
   }
@@ -291,7 +329,11 @@ function ls(json: boolean) {
   }
   for (const s of states) {
     const left = Math.max(0, Math.round((Date.parse(s.endsAt) - Date.now()) / 60_000)) * 60;
-    const ends = left ? `ends in ${formatDuration(left)}` : "ends in under a minute";
+    const ends = s.approval
+      ? "waiting for approval"
+      : left
+        ? `ends in ${formatDuration(left)}`
+        : "ends in under a minute";
     process.stdout.write(`${s.port}\t${s.url}\t${s.id}\t${ends}\n`);
   }
 }
@@ -428,7 +470,10 @@ async function main() {
   if (values.version) return void process.stdout.write(`${pkg.version}\n`);
   if (values.help || !command) return void process.stdout.write(HELP);
   if (command === DAEMON_COMMAND) {
-    return runDaemon(argument ?? fail("no share options"), { server: server(), token: token() });
+    return runDaemon(argument ?? fail("no share options"), {
+      server: server(),
+      token: findToken(),
+    });
   }
   if (command === "ls") return ls(values.json);
   if (command === "stop") return stop(argument, values.all);

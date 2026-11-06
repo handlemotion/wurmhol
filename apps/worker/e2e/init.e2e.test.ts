@@ -44,7 +44,7 @@ it("in a Vite project, appends the line with 5173 to CLAUDE.md once, and says th
     "With Limited network access, allowlist api.wurmhol.com (the CLI's host) and *.wurmhol.dev (pipe URLs, to open them from the sandbox).",
   );
   expect(first).toContain("Added a line to CLAUDE.md (port 5173");
-  expect(first).toContain("No token. On this computer, run wurmhol login.");
+  expect(first).toContain("No token. The first share prints a link instead of a URL");
   expect(first).toContain("api.wurmhol.com under Allowed domains");
   expect(init(dir)).toContain("CLAUDE.md already mentions wurmhol");
   expect(readFileSync(join(dir, "CLAUDE.md"), "utf8")).toBe(`# Rules\n\n${line(5173)}\n`);

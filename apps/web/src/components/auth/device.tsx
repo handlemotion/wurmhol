@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Skeleton } from "skullet/react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -37,7 +37,35 @@ function EnterCode() {
   );
 }
 
-/** `wurmhol login` (ADR 0008): approve or deny a computer's request for an org token. */
+/**
+ * After a share's login is approved (ADR 0026): waits for the computer to open its pipe, then
+ * goes there.
+ */
+function OpenPipe({ code, name, port }: { code: string; name: string | null; port: number }) {
+  const pipe = useQuery({
+    queryKey: ["device-pipe", code],
+    queryFn: () => api<{ url: string | null }>(`/api/device/pipe?code=${encodeURIComponent(code)}`),
+    refetchInterval: (query) => (query.state.data?.url ? false : 1000),
+  });
+  useEffect(() => {
+    if (pipe.data?.url) location.replace(pipe.data.url);
+  }, [pipe.data?.url]);
+  return (
+    <div className="flex flex-col gap-2">
+      <Heading>Approved</Heading>
+      <Text>
+        {pipe.error
+          ? pipe.error.message
+          : `Port ${port} opens here as soon as ${name ?? "the computer"} connects.`}
+      </Text>
+    </div>
+  );
+}
+
+/**
+ * `wurmhol login` (ADR 0008), or `npx wurmhol <port>` with no token (ADR 0026): approve or deny
+ * a computer's request for an org token.
+ */
 function Review({ code }: { code: string }) {
   const login = useQuery({
     queryKey: ["device", code],
@@ -66,6 +94,9 @@ function Review({ code }: { code: string }) {
       </div>
     );
   }
+  if (decide.isSuccess && decide.variables === "approve" && login.data?.port) {
+    return <OpenPipe code={code} name={login.data.name} port={login.data.port} />;
+  }
   if (decide.isSuccess) {
     return (
       <div className="flex flex-col gap-2">
@@ -85,6 +116,7 @@ function Review({ code }: { code: string }) {
       sample={{
         code: "ABCD-1234",
         name: "ada-laptop",
+        port: null,
         status: "pending",
         org: { id: "", name: "Handlemotion" },
       }}
@@ -93,11 +125,25 @@ function Review({ code }: { code: string }) {
       {(data) => (
         <div className="flex flex-col gap-6">
           <div className="flex flex-col gap-2">
-            <Heading>Log in {data.name}?</Heading>
-            <Text>
-              It gets a token that opens pipes for <Strong>{data.org.name}</Strong>. Approve only if
-              your terminal shows <Code className="tabular-nums">{data.code}</Code>.
-            </Text>
+            {data.port ? (
+              <>
+                <Heading>
+                  Open port {data.port} on {data.name}?
+                </Heading>
+                <Text>
+                  It gets a token that opens pipes for <Strong>{data.org.name}</Strong>, and this
+                  page opens the pipe. Approve only a link you expected from your agent.
+                </Text>
+              </>
+            ) : (
+              <>
+                <Heading>Log in {data.name}?</Heading>
+                <Text>
+                  It gets a token that opens pipes for <Strong>{data.org.name}</Strong>. Approve
+                  only if your terminal shows <Code className="tabular-nums">{data.code}</Code>.
+                </Text>
+              </>
+            )}
           </div>
           {data.status === "pending" ? (
             <div className="flex flex-col gap-2">

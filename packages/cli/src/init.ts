@@ -82,10 +82,10 @@ export function init(writeSkill: boolean) {
   } else {
     const host = new URL(server()).hostname;
     say(
-      `No token. On this computer, run wurmhol login. Where the agent runs, set WURMHOL_TOKEN to a token from ${consoleUrl()} (menu → Tokens).`,
+      `No token. The first share prints a link instead of a URL: approving it there logs this computer in and opens the pipe. To skip that step, set WURMHOL_TOKEN to a token from ${consoleUrl()} (menu → Tokens).`,
     );
     say(
-      `In a Claude Code cloud environment: WURMHOL_TOKEN under Environment variables, ${host} under Allowed domains.`,
+      `In a Claude Code cloud environment: ${host} under Allowed domains; WURMHOL_TOKEN under Environment variables skips the approval.`,
     );
   }
 }

@@ -79,6 +79,8 @@ export interface AppConfig {
 export interface DeviceLogin {
   code: string;
   name: string | null;
+  /** The port a share's login opens once approved (ADR 0026); null for `wurmhol login`. */
+  port: number | null;
   status: "pending" | "approved" | "denied";
   org: { id: string; name: string | null };
 }

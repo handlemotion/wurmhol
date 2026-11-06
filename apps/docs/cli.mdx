@@ -5,7 +5,7 @@ description: "Every command, flag and variable of `npx wurmhol`."
 
 | Command                         | Does                                                                                |
 | ------------------------------- | ----------------------------------------------------------------------------------- |
-| `wurmhol <port>`                | Open a pipe to a port, print its link and return                                    |
+| `wurmhol <port>`                | Open a pipe to a port, print its link and return; with no token, an approval link   |
 | `wurmhol ls`                    | List open pipes and when each one ends                                              |
 | `wurmhol stop <port\|id\|name>` | End one, or every one with `--all`                                                  |
 | `wurmhol logs <port\|id\|name>` | Recent requests and connection events; `--follow`, `--json`                         |
@@ -15,6 +15,15 @@ description: "Every command, flag and variable of `npx wurmhol`."
 | `wurmhol login`                 | Approve this computer in the browser and save a token                               |
 | `wurmhol logout`                | Delete the saved token                                                              |
 | `wurmhol mcp`                   | Run the [MCP server](/mcp) on stdio                                                 |
+
+## With no token
+
+With no `WURMHOL_TOKEN` and nothing saved by `wurmhol login`, `wurmhol <port>` prints an approval
+link where the pipe's link goes (`--json` adds `"approval": true`) and returns. Whoever opens it
+signs in, approves the computer for their org, and the page opens the pipe. The computer keeps the
+token, as `wurmhol login` would, so its next pipes open straight away. Until then, `wurmhol ls`
+lists the share as waiting for approval, running the same command prints the same link, and
+`wurmhol stop <port>` ends the wait. The link stays valid for 30 minutes.
 
 ## Open pipes from the browser
 
