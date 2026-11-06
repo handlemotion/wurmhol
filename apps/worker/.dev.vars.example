@@ -75,11 +75,19 @@ STRIPE_SECRET_KEY=
 # Secret, required with STRIPE_SECRET_KEY. Signing secret of the webhook endpoint
 # <BETTER_AUTH_URL>/api/auth/stripe/webhook (locally: `stripe listen` prints it).
 STRIPE_WEBHOOK_SECRET=
-# Required with STRIPE_SECRET_KEY (ADR 0004). Price id of the yearly plan ($12/year).
-STRIPE_PRICE_YEARLY=
-# Optional. Price id of a monthly price. Empty offers yearly only. There is no trial: an org buys
-# the plan before its first pipe.
-STRIPE_PRICE_MONTHLY=
+# Required with STRIPE_SECRET_KEY (ADR 0027). Price id of Friends, yearly ($15/year).
+STRIPE_PRICE_FRIENDS=
+# Required with STRIPE_SECRET_KEY. Price id of Business's monthly base ($20/month).
+STRIPE_PRICE_BUSINESS=
+# Required with STRIPE_SECRET_KEY. Price id of Business's metered requests: a monthly graduated
+# price on a meter with event name `wurmhol_requests` (first BUSINESS_INCLUDED_REQUESTS free).
+# Each org's first subscription starts with a 14-day trial; Checkout takes a card up front.
+STRIPE_PRICE_BUSINESS_REQUESTS=
+# Business's prices as the Stripe prices charge them, for turning a spend cap into requests.
+# Empty means the default: $20 base, 10 million requests included, $1.50 per million more.
+BUSINESS_BASE_CENTS=
+BUSINESS_INCLUDED_REQUESTS=
+BUSINESS_CENTS_PER_MILLION=
 
 # --- Preview links on pull requests (optional; ADR 0016, docs/self-hosting.md) ---
 # A GitHub App that posts each open pipe to the open pull request of its branch as a deployment.
@@ -100,10 +108,13 @@ GITHUB_APP_WEBHOOK_SECRET=
 GITHUB_API_URL=
 GITHUB_WEB_URL=
 
-# --- Fair-use limits per org (spec section 4); empty means the default ---
+# --- Fair-use limits per org with billing off; empty means the default ---
+# With billing on, each plan's limits apply instead (ADR 0027).
 LIMIT_ACTIVE_SHARES=5
 # Bytes relayed per calendar month (UTC), both directions. Default 100 GB.
 LIMIT_MONTHLY_BYTES=100000000000
+# Viewer requests per calendar month (UTC). Default 50 million.
+LIMIT_MONTHLY_REQUESTS=50000000
 # Longest a share stays open, in seconds; `wurmhol --ttl` may ask for up to this. Default 12 hours.
 LIMIT_SHARE_SECONDS=43200
 # How long a share stays open without `--ttl`, in seconds, capped at LIMIT_SHARE_SECONDS.

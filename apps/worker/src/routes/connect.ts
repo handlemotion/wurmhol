@@ -31,16 +31,17 @@ import {
 import {
   findMembersByEmail,
   findShare,
-  orgStanding,
   recordShareEnd,
   recordShareStart,
   type Db,
 } from "@wurmhol/db";
+import { TRIAL_DAYS } from "@wurmhol/auth";
 import { Hono } from "hono";
 import { bearerToken, refuse } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
 import { reservedPipeName, shareOrigin } from "../env.ts";
 import { orgStub } from "../org-do.ts";
+import { orgPlan } from "../plan.ts";
 import { shareGone, shareStub, toShare } from "../share-do.ts";
 import type { ShareInit } from "../share-meta.ts";
 
@@ -91,14 +92,12 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
   const { config, db } = c.var;
   const token = await bearerToken(c);
   if (token instanceof Response) return token;
-  const standing = await orgStanding(db, token.orgId, {
-    enabled: config.auth.billing !== undefined,
-  });
-  if (!standing.ok) {
+  const plan = await orgPlan(db, config, token.orgId);
+  if (!plan) {
     return refuse(
       402,
       "no subscription",
-      `The org has no plan yet. Subscribe at ${config.auth.baseURL} (menu → Billing).`,
+      `The org has no plan yet. An owner starts a ${TRIAL_DAYS}-day trial at ${config.auth.baseURL}.`,
     );
   }
 
@@ -207,7 +206,11 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
     startedAt: started.startedAt.getTime(),
     viewers,
     source: source.source,
-    limits: { seconds, monthlyBytes: config.LIMIT_MONTHLY_BYTES },
+    limits: {
+      seconds,
+      monthlyBytes: plan.limits.monthlyBytes,
+      monthlyRequests: plan.limits.monthlyRequests,
+    },
   };
   const org = orgStub(c.env, token.orgId);
   const reservation = await org.reserve(
@@ -219,20 +222,29 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
       startedAt: init.startedAt,
       source: init.source,
     }),
-    { active: config.LIMIT_ACTIVE_SHARES, monthlyBytes: config.LIMIT_MONTHLY_BYTES },
+    plan.limits,
   );
   if (!reservation.ok) {
     await recordShareEnd(db, { id: init.id, reason: "limit", bytes: 0 });
-    return reservation.reason === "active_limit"
+    if (reservation.reason === "active_limit") {
+      return refuse(
+        429,
+        "active pipe limit",
+        `The org already has ${reservation.limit} open pipes. Stop one (wurmhol stop <port>) or terminate one on ${config.auth.baseURL}.`,
+      );
+    }
+    return reservation.reason === "monthly_limit"
       ? refuse(
-          429,
-          "active pipe limit",
-          `The org already has ${reservation.limit} open pipes. Stop one (wurmhol stop <port>) or terminate one on ${config.auth.baseURL}.`,
-        )
-      : refuse(
           429,
           "monthly transfer limit",
           "The org has used this month's transfer allowance. It resets on the 1st (UTC).",
+        )
+      : refuse(
+          429,
+          "monthly request limit",
+          plan.plan === "business"
+            ? `The org's requests reached its spend cap for this billing period. An owner can raise it at ${config.auth.baseURL} (Org settings).`
+            : "The org has used this month's request allowance. It resets on the 1st (UTC).",
         );
   }
   const response = await shareStub(c.env, init.id).fetch(toShare(c.req.raw, { cli: init }));

@@ -45,6 +45,9 @@ export function Join({ code }: { code: string }) {
                     <Button size="lg" isPending={join.isPending} onPress={() => join.mutate()}>
                       Join {data.orgName}
                     </Button>
+                    {join.isError && !isSignedOut(join.error) && (
+                      <Text className="text-danger-subtle-foreground">{join.error.message}</Text>
+                    )}
                   </div>
                 )}
               </Skeleton>

@@ -49,20 +49,35 @@ export function Wall({ me }: { me: Me }) {
   );
 }
 
-/** No plan yet (ADR 0004: no trial): pipes refuse to start until an owner subscribes. */
+/** No plan yet (ADR 0027): pipes refuse to start until an owner starts a trial of a plan. */
 function NeedsPlan({ owner }: { owner: boolean }) {
   const billing = useOpenBilling();
+  const pending = billing.isPending ? billing.variables : undefined;
   return (
     <div className="mx-auto mt-4 flex max-w-xl flex-wrap items-center justify-between gap-3 border border-border p-5">
       <Text>
         {owner
-          ? "Subscribe to open pipes from your agents."
-          : "Pipes start once an owner of this org subscribes."}
+          ? "Start a 14-day trial to open pipes. Friends is for sharing with people, Business grows with your usage."
+          : "Pipes start once an owner of this org starts a trial."}
       </Text>
       {owner && (
-        <Button isPending={billing.isPending} onPress={() => billing.mutate()}>
-          Subscribe
-        </Button>
+        <div className="flex gap-3">
+          <Button
+            intent="outline"
+            isPending={pending === "friends"}
+            isDisabled={billing.isPending}
+            onPress={() => billing.mutate("friends")}
+          >
+            Friends
+          </Button>
+          <Button
+            isPending={pending === "business"}
+            isDisabled={billing.isPending}
+            onPress={() => billing.mutate("business")}
+          >
+            Business
+          </Button>
+        </div>
       )}
     </div>
   );

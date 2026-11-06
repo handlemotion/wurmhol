@@ -12,7 +12,7 @@ The URL (a pipe) opens only for signed-in members of the org that owns the token
 needs one outbound WebSocket on 443 to `api.wurmhol.com` and works through an HTTPS CONNECT proxy (`HTTPS_PROXY`,
 `NODE_EXTRA_CA_CERTS`).
 
-- $12 a year per org (ADR 0004).
+- Friends at $15 a year or Business at $20 a month plus metered requests, per org, each with a 14-day trial (ADR 0027).
 - `wurmhol ls`, `wurmhol stop <port|id>`, `wurmhol stop --all`, `wurmhol init`
 - `WURMHOL_TOKEN`: a token from your org at https://dirt.wurmhol.com (menu → Tokens). `WURMHOL_URL`: a self-hosted install.
 

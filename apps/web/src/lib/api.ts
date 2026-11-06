@@ -43,11 +43,11 @@ export interface Me {
   standing: Standing | null;
 }
 
-/** Whether the org may open pipes (ADR 0004): billing off, or a plan in good standing. */
-export interface Standing {
-  ok: boolean;
-  reason: "billing_off" | "subscribed" | "no_subscription";
-}
+/** Whether the org may open pipes (ADR 0027): billing off, or a plan in good standing. */
+export type Standing =
+  | { ok: true; reason: "billing_off" }
+  | { ok: true; reason: "subscribed"; plan: string }
+  | { ok: false; reason: "no_subscription" };
 
 export interface Token {
   id: string;

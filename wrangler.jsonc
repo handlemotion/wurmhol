@@ -48,11 +48,15 @@
     "MAIL_FROM": "",
     "GOOGLE_CLIENT_ID": "",
     "GITHUB_CLIENT_ID": "",
-    // Billing (ADR 0004): off unless the STRIPE_SECRET_KEY secret is set.
-    "STRIPE_PRICE_YEARLY": "",
-    "STRIPE_PRICE_MONTHLY": "",
+    // Billing (ADR 0027): off unless the STRIPE_SECRET_KEY secret is set. The three price ids
+    // (STRIPE_PRICE_*) are set beside it, as secrets, so a deploy gets the key and its prices together.
+    // Business's prices as Stripe charges them, to turn a spend cap into requests.
+    "BUSINESS_BASE_CENTS": "2000",
+    "BUSINESS_INCLUDED_REQUESTS": "10000000",
+    "BUSINESS_CENTS_PER_MILLION": "150",
     "LIMIT_ACTIVE_SHARES": "5",
     "LIMIT_MONTHLY_BYTES": "100000000000",
+    "LIMIT_MONTHLY_REQUESTS": "50000000",
     "LIMIT_SHARE_SECONDS": "43200",
     "DEFAULT_SHARE_SECONDS": "14400",
     // Days a pipe's history is kept.

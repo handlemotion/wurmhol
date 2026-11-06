@@ -19,8 +19,11 @@ export const auth: Auth = createAuth({
   billing: {
     secretKey: "sk_test_schema_generation_only",
     webhookSecret: "whsec_schema_generation_only",
-    yearlyPriceId: "price_schema_generation_only",
-    monthlyPriceId: undefined,
+    prices: {
+      friends: "price_schema_generation_only_friends",
+      business: "price_schema_generation_only_business",
+      businessRequests: "price_schema_generation_only_business_requests",
+    },
   },
   sendMagicLink: async () => {
     throw new Error("auth.config.ts is for schema generation only");

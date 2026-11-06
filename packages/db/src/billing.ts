@@ -1,14 +1,15 @@
-// Whether an org may start pipes (ADR 0004): billing off, or a subscription in good standing.
-// There is no trial: an org buys the plan before its first pipe.
+// Whether an org may start pipes (ADR 0027): billing off, or a subscription in good standing,
+// trial included. The subscription's `plan` says which plan's limits apply.
 import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "./client.ts";
-import { subscriptions } from "./schema/index.ts";
+import { spendCaps, subscriptions } from "./schema/index.ts";
 
-/** Stripe statuses in which the org has paid. `past_due` keeps working while Stripe retries. */
+/** Stripe statuses in which the org may use its plan. `past_due` works while Stripe retries. */
 export const PAID_STATUSES = ["active", "trialing", "past_due"] as const;
 
 export type Standing =
-  | { ok: true; reason: "billing_off" | "subscribed" }
+  | { ok: true; reason: "billing_off" }
+  | { ok: true; reason: "subscribed"; plan: string }
   | { ok: false; reason: "no_subscription" };
 
 export async function orgStanding(
@@ -17,17 +18,42 @@ export async function orgStanding(
   billing: { enabled: boolean },
 ): Promise<Standing> {
   if (!billing.enabled) return { ok: true, reason: "billing_off" };
-  return (await orgSubscription(db, orgId))
-    ? { ok: true, reason: "subscribed" }
+  const subscription = await orgSubscription(db, orgId);
+  return subscription
+    ? { ok: true, reason: "subscribed", plan: subscription.plan }
     : { ok: false, reason: "no_subscription" };
 }
 
 /** The org's subscription in good standing, if any. */
 export async function orgSubscription(db: Db, orgId: string) {
   const [row] = await db
-    .select({ status: subscriptions.status, periodEnd: subscriptions.periodEnd })
+    .select({
+      plan: subscriptions.plan,
+      status: subscriptions.status,
+      stripeCustomerId: subscriptions.stripeCustomerId,
+      periodStart: subscriptions.periodStart,
+      periodEnd: subscriptions.periodEnd,
+      trialEnd: subscriptions.trialEnd,
+    })
     .from(subscriptions)
     .where(and(eq(subscriptions.orgId, orgId), inArray(subscriptions.status, [...PAID_STATUSES])))
     .limit(1);
   return row ?? null;
+}
+
+/** A Business org's spend cap in cents, or null when its owner never set one. */
+export async function findSpendCap(db: Db, orgId: string) {
+  const [row] = await db
+    .select({ cents: spendCaps.cents })
+    .from(spendCaps)
+    .where(eq(spendCaps.orgId, orgId))
+    .limit(1);
+  return row?.cents ?? null;
+}
+
+export async function setSpendCap(db: Db, orgId: string, cents: number) {
+  await db
+    .insert(spendCaps)
+    .values({ orgId, cents })
+    .onConflictDoUpdate({ target: spendCaps.orgId, set: { cents, updatedAt: new Date() } });
 }

@@ -293,7 +293,9 @@ it("with no plan, a share's approval page says so instead of waiting for a pipe 
   const billed = await startStack({
     STRIPE_SECRET_KEY: "sk_test_e2e_not_a_real_key",
     STRIPE_WEBHOOK_SECRET: "whsec_e2e_wurmhol_webhook_secret",
-    STRIPE_PRICE_YEARLY: "price_e2e_year",
+    STRIPE_PRICE_FRIENDS: "price_e2e_friends",
+    STRIPE_PRICE_BUSINESS: "price_e2e_business",
+    STRIPE_PRICE_BUSINESS_REQUESTS: "price_e2e_business_requests",
   });
   const local = await localServer((_req, res) => res.end("never served"));
   const env: Record<string, string> = cliEnv(billed, "");
@@ -330,7 +332,7 @@ it("with no plan, a share's approval page says so instead of waiting for a pipe 
       },
       { timeoutMs: 20_000, intervalMs: 500, what: "the refused pipe in wurmhol logs" },
     );
-    expect(failed).toContain("Subscribe at");
+    expect(failed).toContain("trial at");
     expect(
       (await api<{ url: string | null }>(billed, cy, `/api/device/pipe?code=${code}`)).body.url,
     ).toBeNull();

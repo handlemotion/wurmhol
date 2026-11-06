@@ -2,6 +2,7 @@
 import { zValidator } from "@hono/zod-validator";
 import {
   acceptInvite,
+  countMembers,
   createInvite,
   createToken,
   listMembers,
@@ -25,6 +26,7 @@ import {
 } from "../context.ts";
 import { endShare, endTokens, revokeTokensOfLeaver, shareOfOrg } from "../ending.ts";
 import { orgStub, toOrg } from "../org-do.ts";
+import { memberCap } from "../plan.ts";
 import { limitPerMember } from "../rate-limiter.ts";
 import { shareStub } from "../share-do.ts";
 import { billing } from "./billing.ts";
@@ -75,10 +77,13 @@ export const account = new Hono<AppEnv>()
   .post("/invites/:code/accept", async (c) => {
     const session = await resolveSession(c);
     if (!session) throw new HTTPException(401, { message: "sign in first" });
-    const result = await acceptInvite(c.var.db, c.req.param("code"), session.user.id);
+    const result = await acceptInvite(c.var.db, c.req.param("code"), session.user.id, (orgId) =>
+      memberCap(c.var.db, c.var.config, orgId),
+    );
     if (result.status === "invalid") {
       throw new HTTPException(404, { message: "this invite link has expired or was used" });
     }
+    if (result.status === "full") throw orgFull(result.cap);
     await c.var.auth.api.setActiveOrganization({
       headers: c.req.raw.headers,
       body: { organizationId: result.orgId },
@@ -87,6 +92,13 @@ export const account = new Hono<AppEnv>()
   });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Why an org at its plan's member cap takes no one new (ADR 0027). */
+function orgFull(cap: number) {
+  return new HTTPException(409, {
+    message: `this org's plan includes ${cap} members; an owner can move it to Team (menu → Billing)`,
+  });
+}
 
 /** A new token (ADR 0008): 30 days, 90 days (the default) or never; scope `pipes` by default. */
 const tokenBody = z.object({
@@ -170,6 +182,9 @@ export const api = new Hono<AppEnv>()
   })
   /** A single-use invite link (spec section 3, Members). */
   .post("/invites", requireOwner, limitPerMember("manage"), async (c) => {
+    const { db, config, member } = c.var;
+    const cap = await memberCap(db, config, member.orgId);
+    if (cap !== null && (await countMembers(db, member.orgId)) >= cap) throw orgFull(cap);
     const { code, expiresAt } = await createInvite(c.var.db, {
       orgId: c.var.member.orgId,
       createdBy: c.var.user.id,

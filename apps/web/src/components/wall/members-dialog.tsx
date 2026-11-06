@@ -44,7 +44,7 @@ export function MembersDialog({
   const setRole = useSetRole();
   const [handOver, setHandOver] = useState<Member | null>(null);
   const owner = me.role === "owner";
-  const failure = setRole.error ?? remove.error;
+  const failure = invite.error ?? setRole.error ?? remove.error;
 
   return (
     <Dialog

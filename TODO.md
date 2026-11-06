@@ -7,12 +7,14 @@ this file lists what waits on accounts, dashboards or decisions. Delete an item 
 
 Billing stays off until `STRIPE_SECRET_KEY` is set, so every org can open pipes without a plan.
 
-- [ ] Sandbox profile: one product with a yearly price ($12, ADR 0004), the customer portal turned
-      on, and a webhook endpoint `https://dirt.wurmhol.com/api/auth/stripe/webhook` for
-      `checkout.session.completed` and `customer.subscription.created`, `.updated`, `.deleted`.
-- [ ] Doppler: `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` in `prd_worker`;
-      `WORKER_VAR_STRIPE_PRICE_YEARLY` in `prd_github` and as a Workers Builds variable.
-- [ ] Repeat with live mode once the sandbox flow is checked end to end.
+Plans per ADR 0027. Done in both the sandbox and live: the Friends and Business products and
+prices, the `wurmhol_requests` meter with Business's metered price (10 M free, then $1.50 per
+million), the customer portal (the default configuration) and the live webhook endpoint for
+`dirt.wurmhol.com`. Doppler has the sandbox key and ids in `dev_worker`, and the live key, webhook
+secret and price ids in `prd_worker`. `metering.e2e.test.ts` passes against the sandbox.
+
+Live price ids: Friends `price_1UYfvsPfbaFGc0CuHQXkQDyg`, Business `price_1UYfwJPfbaFGc0CuPvvPImpM`,
+Business requests `price_1UYom5PfbaFGc0CuMAYkRGVm`.
 
 ## Google sign-in
 

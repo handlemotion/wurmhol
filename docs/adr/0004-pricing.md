@@ -1,6 +1,7 @@
 # 0004: $12 a year per org, bought up front, no trial
 
-Status: accepted. Departs from spec v1 section 4 ($3 a month or $30 a year, 7-day trial) and
+Status: superseded by ADR 0027 (Friends and Business plans, each with a 14-day trial). Departed from
+spec v1 section 4 ($3 a month or $30 a year, 7-day trial) and
 answers open questions 3 (per org) and 5 (no trial, no free tier) for v1.
 
 ## What one org costs us

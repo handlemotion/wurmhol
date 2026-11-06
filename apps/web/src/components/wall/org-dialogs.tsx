@@ -9,11 +9,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
-import { useCreateOrg, useDeleteOrg, useLeaveOrg, useRenameOrg } from "@/hooks/use-app";
+import {
+  useBilling,
+  useCreateOrg,
+  useDeleteOrg,
+  useLeaveOrg,
+  useRenameOrg,
+  useSetSpendCap,
+} from "@/hooks/use-app";
 
 /** The org actions in the switcher menu, each confirmed in a small dialog. */
 export type OrgAction = "create" | "settings" | "delete";
@@ -132,6 +140,7 @@ function Settings({
           </div>
           <Failure error={rename.error} />
         </form>
+        {isOwner && <SpendCap />}
         <Separator />
         <div className="flex items-center justify-between gap-4">
           <div className="flex min-w-0 flex-col gap-0.5">
@@ -176,5 +185,40 @@ function Delete({ orgName, onDone }: { orgName: string; onDone: () => void }) {
         </Button>
       </DialogFooter>
     </>
+  );
+}
+
+/**
+ * Business's monthly spend cap (ADR 0027), in whole dollars: pipes stop at the requests that
+ * would take the bill past it. Shown to owners on Business only.
+ */
+function SpendCap() {
+  const billing = useBilling(true);
+  const cap = billing.data?.spendCap;
+  const set = useSetSpendCap();
+  const [dollars, setDollars] = useState<string | null>(null);
+  if (!cap) return null;
+  const value = dollars ?? String(cap.cents / 100);
+  const cents = Math.round(Number(value) * 100);
+  const changed = Number.isFinite(cents) && cents !== cap.cents;
+  return (
+    <form
+      className="flex flex-col gap-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        set.mutate(cents, { onSuccess: () => setDollars(null) });
+      }}
+    >
+      <div className="flex items-end gap-2">
+        <TextField value={value} onChange={setDollars} className="flex-1">
+          <Label>Monthly spend cap, USD</Label>
+          <Input inputMode="decimal" />
+        </TextField>
+        <Button type="submit" isPending={set.isPending} isDisabled={!changed}>
+          Save
+        </Button>
+      </div>
+      <Failure error={set.error} />
+    </form>
   );
 }

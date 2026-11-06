@@ -244,12 +244,41 @@ export function useNow(ms = 15_000) {
   return now;
 }
 
-/** Billing: the Stripe portal when the org has a plan, Checkout when it has none. */
+/** Billing: the Stripe portal when the org has a plan, Checkout for `plan` when it has none. */
 export function useOpenBilling() {
   return useMutation({
-    mutationFn: async () => {
-      const { url } = await api<{ url: string }>("/api/billing/open", { method: "POST", body: {} });
+    mutationFn: async (plan?: "friends" | "business") => {
+      const { url } = await api<{ url: string }>("/api/billing/open", {
+        method: "POST",
+        body: plan ? { plan } : {},
+      });
       location.assign(url);
     },
+  });
+}
+
+/** The org's billing: its plan, this window's usage and, on Business, the spend cap. */
+export interface Billing {
+  enabled: boolean;
+  subscription: { plan: string; status: string } | null;
+  usage: { bytes: number; requests: number } | null;
+  spendCap: { cents: number; minCents: number; maxCents: number; requests: number } | false;
+}
+
+export function useBilling(enabled: boolean) {
+  return useQuery({
+    queryKey: ["billing"],
+    queryFn: () => api<Billing>("/api/billing"),
+    enabled,
+  });
+}
+
+/** Sets Business's monthly spend cap, in cents. */
+export function useSetSpendCap() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (cents: number) =>
+      api<{ cents: number }>("/api/billing/spend-cap", { method: "PUT", body: { cents } }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["billing"] }),
   });
 }
