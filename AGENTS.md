@@ -94,9 +94,6 @@ Own the follow-through. Green tests are the floor, not the proof.
   unsure which kind a value is, treat it as a credential.
 - Writes to `dev*` configs are fine when the user asks. Creating, rotating, or deleting
   production secrets needs explicit approval.
-- Do not assign the user a setup or verification step you can do or check yourself with the CLIs
-  here (`doppler`, `wrangler`, `gh`). Hand off only what needs a human: a dashboard-only action, a
-  credential you must not see, or approval for production changes.
 
 ## Self-hostable by design
 
@@ -132,6 +129,18 @@ change keeps that path working:
 - If the premise turns out wrong or the change keeps growing, stop and shrink the plan.
 - Before finishing, check the diff against the ask: intent met, relevant checks and tests run,
   nothing unrequested added.
+
+## Working with the user
+
+- Decide what the code, the docs, an agreed plan or a sensible default already answers, act on it,
+  and say what you chose. Ask only for what needs the user's judgement: product and pricing
+  calls, spending money, and the production approvals this file names.
+- Do every setup and verification step the CLIs and connectors here can reach (`doppler`,
+  `wrangler`, `cf`, `gh`, the Stripe and Cloudflare tools). Hand off only what needs a human: a
+  dashboard-only action, a credential you must not see, or a production approval.
+- A hand-off is a direct URL to the exact page (the setting, the resource, the token), with the
+  values to enter. Look up the ids that build the URL yourself first, so the user never hunts
+  through a list or follows menu paths that may have moved.
 
 ## Comments and prose
 
