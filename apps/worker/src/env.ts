@@ -12,6 +12,9 @@ declare global {
       GITHUB_CLIENT_SECRET?: string;
       STRIPE_SECRET_KEY?: string;
       STRIPE_WEBHOOK_SECRET?: string;
+      STRIPE_PRICE_FRIENDS?: string;
+      STRIPE_PRICE_BUSINESS?: string;
+      STRIPE_PRICE_BUSINESS_REQUESTS?: string;
       GITHUB_APP_PRIVATE_KEY?: string;
       GITHUB_APP_CLIENT_SECRET?: string;
       GITHUB_APP_WEBHOOK_SECRET?: string;

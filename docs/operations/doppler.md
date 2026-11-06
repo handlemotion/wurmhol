@@ -7,13 +7,15 @@ environment's root config.
 | ------------ | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `dev`        | every local command (root)           | local D1 settings, non-secret dev config                                                                                                                                     |
 | `dev_worker` | `wrangler dev` (mounted `.dev.vars`) | `BETTER_AUTH_SECRET`, `ENVIRONMENT=development`, OAuth client secrets, Stripe sandbox keys (`STRIPE_*`)                                                                      |
-| `prd_worker` | Worker secrets                       | `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`                                                           |
+| `prd_worker` | Worker secrets                       | `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_*`                                         |
 | `prd_github` | `production.yml`, records            | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `D1_DATABASE_ID`, `WORKER_DOMAIN`, `DOPPLER_TOKEN_WORKER` (read-only, `prd_worker`); records `WORKER_ROUTE`, `WORKER_VAR_*` |
 
 Rules:
 
 - A key is either a Worker secret (`prd_worker`) or a Worker var (`WORKER_VAR_*`), never both:
-  Cloudflare refuses a name bound twice. Public values (price ids, client ids, hosts) are vars.
+  Cloudflare refuses a name bound twice. Public values (client ids, hosts) are vars. Stripe's price
+  ids are the exception: they sit in `prd_worker` beside `STRIPE_SECRET_KEY`, so the secret sync
+  delivers the key and its prices in one step and no deploy runs with one but not the other.
 - Local: `doppler run -p wurmhol -c dev_<unit> -- <command>`. The Worker's `dev` script mounts
   `dev_worker` as `apps/worker/.dev.vars` (a named pipe, nothing on disk). Headless: set
   `DOPPLER_TOKEN` to a service token scoped to one config.
