@@ -14,7 +14,7 @@ import {
   signShareCookie,
   verifyShareCookie,
 } from "./share-cookie.ts";
-import { refusedViewer, shareStub, toShare } from "./share-do.ts";
+import { fromShare, refusedViewer, shareStub, toShare } from "./share-do.ts";
 
 /** Paths on a share host the relay keeps for itself. */
 export const RESERVED_PREFIX = "/__wurmhol/";
@@ -30,14 +30,16 @@ export async function handleShareHost(request: Request, env: Env, shareId: strin
   const config = loadConfig(env);
   if (!shareId) return errorPage(404, "This pipe has ended.");
   const stub = shareStub(env, shareId);
-  const status = await stub.status();
-  if (status.state === "unknown" || status.state === "ended") {
-    return errorPage(410, "This pipe has ended.");
-  }
+  const open = async () => {
+    const { state } = await stub.status();
+    return state === "live" || state === "away";
+  };
+  const ended = () => errorPage(410, "This pipe has ended.");
   const url = new URL(request.url);
 
   // Step 3: the app sent the viewer back with a one-time code.
   if (url.pathname === `${RESERVED_PREFIX}auth`) {
+    if (!(await open())) return ended();
     const code = url.searchParams.get("code");
     const userId = code ? await stub.redeemCode(code) : null;
     if (!userId) return errorPage(400, "This sign-in link has expired. Open the pipe's URL again.");
@@ -62,9 +64,10 @@ export async function handleShareHost(request: Request, env: Env, shareId: strin
     readCookie(request.headers.get("cookie"), SHARE_COOKIE),
     shareId,
   );
-  if (!userId) return signIn(request, config.auth.baseURL, shareId);
+  if (!userId) return (await open()) ? signIn(request, config.auth.baseURL, shareId) : ended();
 
-  const response = await stub.fetch(toShare(request, { viewer: userId }));
+  // The hot path, one trip to the object: it answers an ended or unknown share itself.
+  const { response, orgId } = fromShare(await stub.fetch(toShare(request, { viewer: userId })));
   if (refusedViewer(response)) {
     // Removed from the org since the cookie was issued: sign in again, as someone who belongs.
     createLogger({ component: "viewer" }).info("viewer.refused", { shareId });
@@ -73,7 +76,7 @@ export async function handleShareHost(request: Request, env: Env, shareId: strin
     out.headers.append("set-cookie", clearShareCookieHeader());
     return out;
   }
-  await noteOAuthRedirect(env, config, { id: shareId, orgId: status.orgId }, request, response);
+  if (orgId) await noteOAuthRedirect(env, config, { id: shareId, orgId }, request, response);
   return response;
 }
 
