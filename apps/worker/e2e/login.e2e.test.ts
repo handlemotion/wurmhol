@@ -288,6 +288,59 @@ it("a second share with no token waits on the first one's link and opens once it
   await Promise.all([app.close(), web.close()]);
 });
 
+it("with no plan, a share's approval page says so instead of waiting for a pipe that /connect refuses", async () => {
+  // Billing on and no subscription: what a new hosted org looks like before it subscribes.
+  const billed = await startStack({
+    STRIPE_SECRET_KEY: "sk_test_e2e_not_a_real_key",
+    STRIPE_WEBHOOK_SECRET: "whsec_e2e_wurmhol_webhook_secret",
+    STRIPE_PRICE_YEARLY: "price_e2e_year",
+  });
+  const local = await localServer((_req, res) => res.end("never served"));
+  const env: Record<string, string> = cliEnv(billed, "");
+  delete env.WURMHOL_TOKEN;
+  try {
+    const cy = await signIn(billed);
+    const first = await cli([String(local.port), "--json"], env);
+    expect({ code: first.code, stderr: first.stderr }).toMatchObject({ code: 0 });
+    const code = new URL((JSON.parse(first.stdout) as { url: string }).url).searchParams.get(
+      "code",
+    )!;
+    const shown = await api<{ port: number | null; role: string; standing: unknown }>(
+      billed,
+      cy,
+      `/api/device?code=${code}`,
+    );
+    expect(shown.body).toMatchObject({
+      port: local.port,
+      role: "owner",
+      standing: { ok: false, reason: "no_subscription" },
+    });
+
+    // Approved anyway (an old page, a direct call): the computer logs in and /connect refuses
+    // the pipe. The page's fallback hint, `wurmhol logs <port>`, finds why after the daemon exits.
+    const approved = await api(billed, cy, "/api/device/approve", {
+      method: "POST",
+      body: { code },
+    });
+    expect(approved.status).toBe(200);
+    const failed = await waitFor(
+      async () => {
+        const logs = await cli(["logs", String(local.port)], env);
+        return /open\.failed .*no plan yet/.test(logs.stdout) ? logs.stdout : null;
+      },
+      { timeoutMs: 20_000, intervalMs: 500, what: "the refused pipe in wurmhol logs" },
+    );
+    expect(failed).toContain("Subscribe at");
+    expect(
+      (await api<{ url: string | null }>(billed, cy, `/api/device/pipe?code=${code}`)).body.url,
+    ).toBeNull();
+  } finally {
+    await stopAll(env);
+    await local.close();
+    await billed.stop();
+  }
+});
+
 it("a denied login stores nothing and says so", async () => {
   const env = loginEnv();
   const login = await startLogin(env);

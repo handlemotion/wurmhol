@@ -25,6 +25,7 @@ import {
   findLoginPipe,
   findMember,
   listOrgsForUser,
+  orgStanding,
   setPendingDeviceScope,
 } from "@wurmhol/db";
 
@@ -223,14 +224,22 @@ export const deviceApproval = new Hono<AppEnv>()
     const code = c.req.query("code") ?? "";
     if (!code) throw new HTTPException(400, { message: "Enter the code your terminal shows." });
     const claimed = await claim(c, code);
-    const orgs = await listOrgsForUser(c.var.db, c.var.user.id);
-    const org = orgs.find((o) => o.id === c.var.member.orgId);
+    const { db, config, member } = c.var;
+    const [orgs, standing] = await Promise.all([
+      listOrgsForUser(db, c.var.user.id),
+      // `/connect` refuses an org without a plan: a share's login approved there would never
+      // open its pipe, so the page offers the fix instead (ADR 0026).
+      orgStanding(db, member.orgId, { enabled: config.auth.billing !== undefined }),
+    ]);
+    const org = orgs.find((o) => o.id === member.orgId);
     return c.json({
       code: displayUserCode(claimed.userCode),
       name: claimed.scope.name,
       port: claimed.scope.port ?? null,
       status: claimed.status,
-      org: { id: c.var.member.orgId, name: org?.name ?? null },
+      org: { id: member.orgId, name: org?.name ?? null },
+      role: member.role,
+      standing,
     });
   })
   /**
