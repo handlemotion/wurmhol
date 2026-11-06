@@ -1,6 +1,6 @@
 // Named pipes (ADR 0009): `wurmhol <port> --name <name>` opens `<name>.<SHARE_DOMAIN>`, the same
 // host every time, held by the first org to use the name, one open pipe per name. A pipe away
-// or stale gives its name to the next one (ADR 0026).
+// or stale gives its name to the next one (ADR 0025).
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -133,7 +133,7 @@ it("re-running a crashed pipe's name takes it back at the same URL; another toke
   const pid = pidOf(first.id);
   process.kill(pid, "SIGKILL");
   await waitFor(() => !alive(pid), { what: "the CLI to die" });
-  // Catches: 409 "name open" until the old pipe's grace runs out, 15 minutes later.
+  // Catches: 409 "name open" until the old pipe's reconnect grace runs out.
   const second = await openNamed(env, local.port, "crashy");
   expect(second.url).toBe(first.url);
   expect(second.id).not.toBe(first.id);
