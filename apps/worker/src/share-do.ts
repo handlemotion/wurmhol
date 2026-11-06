@@ -18,6 +18,7 @@ import {
   type EndReason,
   FIRST_STREAM_ID,
   forwardable,
+  HEARTBEAT_MS,
   type Frame,
   HttpStreamOrder,
   nextStreamId,
@@ -126,6 +127,11 @@ const USAGE_FLUSH_BYTES = 8 * 1024 * 1024;
 const LAST_REQUEST_PUSH_MS = 5_000;
 /** Stream ids are reserved in storage this many at a time, so most streams write nothing. */
 const STREAM_ID_BLOCK = 1024;
+/**
+ * A live CLI pings every `HEARTBEAT_MS`, answered by the runtime. After two missed heartbeats
+ * (and slack for a slow link) its socket counts as dead: half-open, or its process frozen.
+ */
+const CLI_SILENT_MS = 2 * HEARTBEAT_MS + 10_000;
 /** How long a browser WebSocket waits for the dev server to accept it. */
 const WS_OPEN_TIMEOUT_MS = 15_000;
 /**
@@ -189,6 +195,8 @@ export class Share extends DurableObject<Env> {
   /** The next stream id, and the first one not yet reserved in storage; null until first used. */
   #streamIds: { next: number; reserved: number } | null = null;
   /** Per open browser WebSocket stream, the estimated bytes queued toward each end. */
+  /** When the CLI last sent a frame other than its heartbeat. */
+  #cliFrameAt = 0;
   #backlogs = new Map<number, Record<"viewer" | "cli", SendBacklog>>();
   #log = createLogger({ component: "share" });
   #page: SharePage;
@@ -281,7 +289,17 @@ export class Share extends DurableObject<Env> {
     const expires = meta.startedAt + meta.limits.seconds * 1000;
     const away = meta.awaySince === null ? Infinity : meta.awaySince + RECONNECT_GRACE_MS;
     const probe = meta.probe?.at ?? Infinity;
-    void this.ctx.storage.setAlarm(Math.min(expires, away, probe));
+    const silent =
+      meta.state === "live" ? (this.#cliSeenAt(meta) ?? Date.now()) + CLI_SILENT_MS : Infinity;
+    void this.ctx.storage.setAlarm(Math.min(expires, away, probe, silent));
+  }
+
+  /** When the live CLI was last heard from (a heartbeat, a frame, its connect), or null. */
+  #cliSeenAt(meta: Meta) {
+    const cli = this.#cli();
+    if (!cli) return null;
+    const ping = this.ctx.getWebSocketAutoResponseTimestamp(cli)?.getTime() ?? 0;
+    return Math.max(meta.liveSince ?? meta.startedAt, ping, this.#cliFrameAt);
   }
 
   // --- RPC from the Worker ------------------------------------------------------------------
@@ -383,6 +401,7 @@ export class Share extends DurableObject<Env> {
     const wasAway = meta.state === "away";
     meta.state = "live";
     meta.awaySince = null;
+    meta.liveSince = Date.now();
     this.#save(meta);
     this.#armAlarm(meta);
     if (wasAway) this.ctx.waitUntil(this.#org(meta.orgId).update(meta.id, { state: "live" }));
@@ -722,6 +741,7 @@ export class Share extends DurableObject<Env> {
       socket.close(1002, "protocol error");
       return;
     }
+    this.#cliFrameAt = Date.now();
     this.#onFrame(frame);
   }
 
@@ -842,6 +862,14 @@ export class Share extends DurableObject<Env> {
     ) {
       return;
     }
+    await this.#cliLost(code);
+  }
+
+  /**
+   * The CLI's socket is gone (closed, or silent past `CLI_SILENT_MS`): a clean close (1000) ends
+   * the pipe, anything else makes it away until the CLI comes back or the grace runs out.
+   */
+  async #cliLost(code: number) {
     this.#failStreams("the share's CLI disconnected");
     const meta = this.#meta();
     if (!meta || meta.state !== "live") return;
@@ -898,13 +926,29 @@ export class Share extends DurableObject<Env> {
     ) {
       await this.#end("disconnected");
     } else {
-      if (meta.probe && now >= meta.probe.at) {
-        // A timer would not survive hibernation; the alarm does. The next try, if any, is set
-        // before this handler returns.
-        const attempt = meta.probe.attempt;
-        meta.probe = null;
-        this.#save(meta);
-        await this.#page.probe(attempt);
+      if (meta.state === "live") {
+        const seen = this.#cliSeenAt(meta);
+        if (seen === null || now >= seen + CLI_SILENT_MS) {
+          this.#log.info("share.cli_silent", { shareId: meta.id, silentMs: now - (seen ?? now) });
+          for (const cli of this.ctx.getWebSockets("cli")) {
+            try {
+              cli.close(1001, "no heartbeat");
+            } catch {
+              // Already closed.
+            }
+          }
+          await this.#cliLost(1001);
+        }
+      }
+      const live = this.#meta();
+      if (live?.probe && now >= live.probe.at) {
+        // A timer would not survive hibernation; the alarm does. The probe sets its next try, if
+        // any. It is not awaited: a request to a frozen CLI would hold this handler, and with it
+        // every later alarm, including the one that finds the CLI silent.
+        const attempt = live.probe.attempt;
+        live.probe = null;
+        this.#save(live);
+        this.ctx.waitUntil(this.#page.probe(attempt));
       }
       const current = this.#meta();
       if (current) this.#armAlarm(current);
