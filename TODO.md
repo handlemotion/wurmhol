@@ -7,21 +7,22 @@ this file lists what waits on accounts, dashboards or decisions. Delete an item 
 
 Billing stays off until `STRIPE_SECRET_KEY` is set, so every org can open pipes without a plan.
 
-Plans per ADR 0027. Done in both the sandbox and live: Friends ($15 a year) and Business ($20 a
-month) products and prices, the customer portal (the default configuration), and the live webhook
-endpoint for `dirt.wurmhol.com`.
+Plans per ADR 0027. Done in both the sandbox and live: the Friends and Business products and
+prices, the `wurmhol_requests` meter with Business's metered price (10 M free, then $1.50 per
+million), the customer portal (the default configuration) and the live webhook endpoint for
+`dirt.wurmhol.com`. Doppler has the sandbox key and ids in `dev_worker`, and the live key and
+webhook secret in `prd_worker`. `metering.e2e.test.ts` passes against the sandbox.
 
-- [ ] Roll the live webhook's signing secret (it was shown once while setting it up), then put it
-      in Doppler `prd_worker` as `STRIPE_WEBHOOK_SECRET`.
-- [ ] Billing → Meters, in the sandbox and live: a meter with event name `wurmhol_requests`, sum
-      of `value`, customer from `stripe_customer_id`.
-- [ ] On each Business product, a monthly metered price on that meter: graduated, $0 up to
-      10,000,000, then 0.00015 cents a request ($1.50 per million).
-- [ ] Doppler `dev_worker`: the sandbox `STRIPE_SECRET_KEY`, a `stripe listen` webhook secret and
-      the three price ids. `prd_worker`: the live `STRIPE_SECRET_KEY`. `prd_github` and Workers
-      Builds: `WORKER_VAR_STRIPE_PRICE_FRIENDS`, `WORKER_VAR_STRIPE_PRICE_BUSINESS`,
-      `WORKER_VAR_STRIPE_PRICE_BUSINESS_REQUESTS`. Set the key and the price ids together: price
-      ids without a key fail the Worker's config check.
+Live price ids: Friends `price_1UYfvsPfbaFGc0CuHQXkQDyg`, Business `price_1UYfwJPfbaFGc0CuPvvPImpM`,
+Business requests `price_1UYom5PfbaFGc0CuMAYkRGVm`.
+
+- [ ] Doppler `dev_worker`: `STRIPE_WEBHOOK_SECRET`, from `stripe listen`. Until then the Worker's
+      config check fails under `pnpm dev`, since a key without a webhook secret is half a setup.
+- [ ] Before the next push to `main`: the three live price ids as
+      `WORKER_VAR_STRIPE_PRICE_FRIENDS`, `WORKER_VAR_STRIPE_PRICE_BUSINESS` and
+      `WORKER_VAR_STRIPE_PRICE_BUSINESS_REQUESTS` in `prd_github` and as Workers Builds variables.
+      `prd_worker` already holds the live key, and the next deploy syncs it: without the price ids
+      the Worker's config check fails.
 
 ## Google sign-in
 
