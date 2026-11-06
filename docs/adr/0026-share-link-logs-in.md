@@ -57,6 +57,17 @@ Options considered:
   approve their link gets a token in that member's org. The page names the computer and port and
   says to approve only a link the person expected, as it already says for a typed code.
 - The first share without a token is not ready in 3 s: it is ready when someone approves.
-- `wurmhol mcp` and the SDK still need a token: they hold the pipe in the caller's process, with
-  no link to hand back before the pipe exists.
+- `wurmhol mcp` works the same way: with no token, `open_pipe` starts a share login for its port
+  and returns the approval link at once (`approval: true`), telling the agent to send it to the
+  user. The MCP process waits for the approval, saves the token and opens the pipe it holds, as
+  the daemon does. Another call while it waits, for the same port or another, returns the same
+  link and opens that port too. The SDK still needs a token: it hands back a pipe, not a link.
+- **One login per computer.** A second tokenless `npx wurmhol <port>` while a share already waits
+  on its link starts no code: its daemon writes its own waiting state that `follows` the first,
+  prints the same link and says it opens once that link is approved. It waits until the first
+  share stops waiting, then reads the token from `credentials.json` and opens its pipe; if none
+  was saved (denied, expired, stopped), it ends too. Two commands started in the same instant
+  can still each start a code.
+- **The approval page names its port.** One token can open several pipes before the page looks,
+  so `GET /api/device/pipe` takes the port the page asked to open and answers that port's pipe.
 - Self-hosted installs get it with the deploy and a migration: no new binding or variable.

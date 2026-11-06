@@ -1,19 +1,25 @@
 // `wurmhol mcp`: a stdio MCP server for agents that call tools instead of running commands.
 // Each pipe is an `openPipe` held in this process (ADR 0008, section 3), so it lives as long as
-// the agent's MCP session and ends with it; no daemon is left behind.
+// the agent's MCP session and ends with it; no daemon is left behind. With no token, open_pipe
+// returns a share login's approval link at once and opens the pipe here once it is approved
+// (ADR 0026).
+import { hostname } from "node:os";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { MAX_PORT, PIPE_NAME_RULE, parseDuration, pipeName } from "@wurmhol/protocol";
 import { z } from "zod";
 import pkg from "../package.json" with { type: "json" };
-import { consoleUrl, findToken, server } from "./config.ts";
+import { findToken, server } from "./config.ts";
+import { writeCredentials } from "./credentials.ts";
 import { FixError } from "./errors.ts";
+import { awaitLogin, startLogin } from "./login.ts";
 import { appendRequest, recentRequests } from "./logs.ts";
 import { openPipe, pagePath, pageUrl, type Pipe } from "./pipe.ts";
 import { listStates, matches } from "./state.ts";
 
 const INSTRUCTIONS = `Wurmhol gives a local dev server a private HTTPS URL that only members of the user's org can open, in their own browser, on any device.
 When the user wants to see or try a server running here, call open_pipe with its port and send them the URL. Call stop_pipe when they are done. Pipes end when this MCP session ends.
+If this computer is not logged in yet, open_pipe returns an approval link instead: send it to the user. The pipe opens once they approve it, and the page becomes the pipe; list_pipes then shows its URL.
 When the user says something is broken on the page they opened, call recent_requests to see what their browser asked for and what the dev server answered.
 Errors say the fix in one line: pass them on to the user as they are.`;
 
@@ -35,13 +41,16 @@ const pipeShape = {
   endsAt: z.string().describe("When the pipe ends on its own (ISO 8601)"),
 };
 
-/** The CLI's own token, or a fix that fits an agent's MCP session. */
-function token() {
-  const found = findToken();
-  if (found) return found;
-  throw new FixError(
-    `No Wurmhol token. Run \`npx wurmhol login\` in a terminal, or set WURMHOL_TOKEN to a token from ${consoleUrl()} (menu → Tokens) in this MCP server's environment, then call the tool again.`,
-  );
+/**
+ * A share login this process started because it had no token (ADR 0026): its approval link, and
+ * the pipes to open once someone approves it, one per port.
+ */
+interface PendingLogin {
+  id: string;
+  url: string;
+  startedAt: Date;
+  endsAt: Date;
+  opens: Map<number, (token: string) => Promise<unknown>>;
 }
 
 function describe(held: Held) {
@@ -72,12 +81,66 @@ export function createServer(pipes: Map<string, Held>) {
     { instructions: INSTRUCTIONS },
   );
 
+  /** Holds `pipe` until it ends: listed, logged, stopped with the session. */
+  const hold = (pipe: Pipe, name: string | null) => {
+    const held: Held = { pipe, name, startedAt: new Date() };
+    pipes.set(pipe.id, held);
+    pipe.on("request", (request) => appendRequest(pipe.id, request, { port: pipe.port }));
+    pipe.once("close", () => pipes.delete(pipe.id));
+    return held;
+  };
+
+  // One login per process: a second port asked for while it waits opens with the same approval.
+  let login: Promise<PendingLogin> | null = null;
+  const pendingLogin = (port: number) => {
+    login ??= (async () => {
+      const code = await startLogin({
+        server: server(),
+        name: hostname(),
+        version: pkg.version,
+        port,
+      });
+      const pending: PendingLogin = {
+        id: `login-${code.user_code}`,
+        url: code.verification_uri_complete,
+        startedAt: new Date(),
+        endsAt: new Date(Date.now() + code.expires_in * 1000),
+        opens: new Map(),
+      };
+      void (async () => {
+        try {
+          const granted = await awaitLogin({ server: server(), version: pkg.version, code });
+          writeCredentials({
+            server: server(),
+            token: granted.token,
+            org: granted.org.name,
+            name: granted.name,
+          });
+          login = null;
+          for (const [waiting, open] of pending.opens) {
+            open(granted.token).catch((error: unknown) =>
+              process.stderr.write(`wurmhol: port ${waiting}: ${String(error)}\n`),
+            );
+          }
+        } catch (error) {
+          login = null;
+          const message = error instanceof FixError ? error.message : String(error);
+          process.stderr.write(`wurmhol: login: ${message}\n`);
+        }
+      })();
+      return pending;
+    })();
+    // A code that could not be started is not kept: the next call asks again.
+    login.catch(() => (login = null));
+    return login;
+  };
+
   mcp.registerTool(
     "open_pipe",
     {
       title: "Open a pipe",
       description:
-        "Give a local port a private HTTPS URL that members of the user's org can open in their own browser. Returns once the URL works. Send the URL to the user.",
+        "Give a local port a private HTTPS URL that members of the user's org can open in their own browser. Returns once the URL works. Send the URL to the user. If this computer is not logged in, returns an approval link at once instead (approval: true): send that to the user, and the pipe opens once they approve it.",
       inputSchema: {
         port: z.number().int().min(1).max(MAX_PORT).describe("The port the dev server listens on"),
         ttl: z
@@ -104,6 +167,12 @@ export function createServer(pipes: Map<string, Held>) {
       outputSchema: {
         ...pipeShape,
         pageUrl: z.string().optional().describe("The URL at `path`, when one was given"),
+        approval: z
+          .boolean()
+          .optional()
+          .describe(
+            "True when `url` is an approval link: this computer is not logged in yet, and the pipe opens once the user approves it",
+          ),
       },
       annotations: { openWorldHint: true },
     },
@@ -119,22 +188,41 @@ export function createServer(pipes: Map<string, Held>) {
           throw new FixError(`Not a pipe name: ${name}. Use ${PIPE_NAME_RULE}.`);
         }
         const viewers = only?.map((email) => email.trim()).filter(Boolean);
-        const pipe = await openPipe({
-          server: server(),
-          token: token(),
-          port,
-          ttl: seconds,
-          viewers,
-          name,
-          log: (event, fields) => {
-            if (event === "connected") return;
-            process.stderr.write(`wurmhol: port ${port}: ${event} ${JSON.stringify(fields)}\n`);
-          },
-        });
-        const held: Held = { pipe, name: name ? pipeName(name) : null, startedAt: new Date() };
-        pipes.set(pipe.id, held);
-        pipe.on("request", (request) => appendRequest(pipe.id, request, { port }));
-        pipe.once("close", () => pipes.delete(pipe.id));
+        const open = async (token: string) =>
+          hold(
+            await openPipe({
+              server: server(),
+              token,
+              port,
+              ttl: seconds,
+              viewers,
+              name,
+              log: (event, fields) => {
+                if (event === "connected") return;
+                process.stderr.write(`wurmhol: port ${port}: ${event} ${JSON.stringify(fields)}\n`);
+              },
+            }),
+            name ? pipeName(name) : null,
+          );
+        const token = findToken();
+        if (!token) {
+          const pending = await pendingLogin(port);
+          if (!pending.opens.has(port)) pending.opens.set(port, open);
+          return ok(
+            `${pending.url}\nNot logged in yet. Send this link to the user: once someone in their org approves this computer there, port ${port} opens and the page becomes the pipe. list_pipes shows its URL after.`,
+            {
+              id: pending.id,
+              url: pending.url,
+              port,
+              name: name ? pipeName(name) : null,
+              startedAt: pending.startedAt.toISOString(),
+              endsAt: pending.endsAt.toISOString(),
+              approval: true,
+            },
+          );
+        }
+        const held = await open(token);
+        const { pipe } = held;
         const result = describe(held);
         const at = page === undefined ? undefined : pageUrl(pipe.url, page);
         return ok(`${at ?? pipe.url}\nPort ${port}, ends ${result.endsAt}. Id ${pipe.id}.`, {
