@@ -9,7 +9,7 @@
 // A `name` query parameter opens a named pipe (ADR 0009) at `<name>.<SHARE_DOMAIN>`: the same
 // host every time, held by the first org to use the name, one open pipe per name. The OAuth
 // relay's label (ADR 0010) is no pipe's name. Asking for a name the org's open pipe holds takes it
-// over when that pipe is away or stale, or when the same token started it (ADR 0025).
+// over when that pipe is away or stale, or when the same token started it (ADR 0026).
 //
 // `Wurmhol-Source` says where a new pipe came from (ADR 0015): URI-encoded JSON of
 // `@wurmhol/protocol`'s `PipeSource`, every field optional and bounded. It goes on the share's
@@ -62,7 +62,7 @@ function readSource(header: string | undefined): SourceResult {
 
 /**
  * Ends the org's open pipe named as a new one asks, so the new one can have the name and its URL
- * (ADR 0025): when its CLI is away, when its object already ended or never started (a row left
+ * (ADR 0026): when its CLI is away, when its object already ended or never started (a row left
  * open), or when the same token started it (the same agent, run again after a crash). A live pipe
  * of another token keeps its name. True when the name is free to take again.
  */

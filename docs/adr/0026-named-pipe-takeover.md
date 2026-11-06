@@ -1,4 +1,4 @@
-# 0025: A named pipe that is away or stale gives its name to the next one
+# 0026: A named pipe that is away or stale gives its name to the next one
 
 Status: accepted. Amends ADR 0009 ("One open pipe per name": a second one is refused with the fix
 `wurmhol stop <name>`).
@@ -6,7 +6,7 @@ Status: accepted. Amends ADR 0009 ("One open pipe per name": a second one is ref
 ## Context
 
 A named pipe holds its name while it is open. When its CLI crashes, or its machine sleeps, the
-pipe goes away and stays open for its CLI to come back: 15 minutes since ADR 0024. Running
+pipe goes away and stays open for its CLI to come back: 15 minutes since ADR 0025. Running
 `wurmhol <port> --name app` again in that time, the obvious thing to do after a crash, was
 refused with 409 "name open", and the `wurmhol stop app` it suggested could not reach a CLI that
 no longer runs. The org had to find the pipe on the wall and press Terminate, or wait.

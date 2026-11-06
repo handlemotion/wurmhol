@@ -1,6 +1,6 @@
 // Named pipes (ADR 0009): `wurmhol <port> --name <name>` opens `<name>.<SHARE_DOMAIN>`, the same
 // host every time, held by the first org to use the name, one open pipe per name. A pipe away
-// or stale gives its name to the next one (ADR 0025).
+// or stale gives its name to the next one (ADR 0026).
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
