@@ -165,10 +165,11 @@ Several agents may work in this repository at once.
     merge the stack with the `gh stack` CLI (`init`, `add`, `submit`, `rebase`, `sync`, `merge`).
     PRs whose bases only point at each other are not a stack: GitHub does not group or merge
     them as one.
-  - Where `gh stack` cannot reach GitHub (cloud sessions block GraphQL), follow the skill's
-    fallback: link the PRs through the stacks API as soon as they are open, and merge with the
-    REST call `gh stack merge` makes (`PUT pulls/<top>/merge-async`). Never stop at a hand-made
-    chain of bases.
+  - Where `gh stack` cannot reach GitHub (cloud sessions block GraphQL), keep the stack with its
+    local commands (`init`, `add`, `rebase`, `push`) and do GitHub's side through the REST stacks
+    API, as the skill shows: create the stack once two PRs are open, add each later PR to it
+    (`POST stacks/<n>/add`) as it opens, and merge with the call `gh stack merge` makes
+    (`PUT pulls/<top>/merge-async`). Never stop at a hand-made chain of bases.
 - **Parallel agents.** Independent work gets its own stack rooted on `main`. Before starting, an
   agent names the packages it owns; two stacks never edit the same package. Shared touch points
   (`pnpm-lock.yaml`, root config, `apps/docs/self-hosting/`) are resolved by the later layer: merge

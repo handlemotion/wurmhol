@@ -18,20 +18,30 @@ The upstream guidance below is generic; where it conflicts with `AGENTS.md`, the
 
 - **Setup lines are off-limits.** Do not run `git config ...`. Cloud environments get the
   extension from `kickoff.sh`; elsewhere, install it once with
-  `gh extension install github/gh-stack` if `gh stack` is missing.
-- **Claude Code cloud sessions block GitHub GraphQL**, so `submit`, `checkout <pr>`, `merge` and
-  anything else that looks up PRs fails there with a 403. Local commands (`init`, `add`, `up`,
-  `down`, `rebase`, `view --json`) work. To link a stack from a cloud session: build the layers
-  with `gh stack init`/`add`, push each branch with `git push -u origin <branch>`, open each PR
-  with the GitHub MCP tools (base = the layer below), then link them bottom-first through the
-  REST stacks API (at least two PRs, each based on the one below):
-  `gh api -X POST repos/{owner}/{repo}/stacks --input - <<<'{"pull_requests":[<bottom>,...,<top>]}'`.
-  `gh api 'repos/{owner}/{repo}/stacks?pull_request=<n>'` reads a PR's stack. To merge from a
-  cloud session, make the REST call `gh stack merge` makes: it merges every PR up to `<top>`,
-  all or nothing, and answers with a `uuid` to poll.
-  `gh api -X PUT repos/{owner}/{repo}/pulls/<top>/merge-async --input - <<<'{"merge_method":"squash","merge_action":"default"}'`,
-  then `gh api repos/{owner}/{repo}/pulls/<top>/merge-async/<uuid>` until `status` is not
-  `pending`.
+  `gh extension install github/gh-stack` if `gh stack` is missing. In a cloud session where
+  `gh stack` is missing (kickoff did not run), `gh extension install` fails with a 403, but the
+  pinned release download in `kickoff.sh` works: run its gh-stack block.
+- **Claude Code cloud sessions block GitHub GraphQL**, so every `gh stack` command that looks up
+  PRs fails there with a 403: `submit`, `link`, `sync`, `checkout <pr>` and `merge` (even with
+  `--squash`, it reads the repo's merge settings first). The local ones work and are how a cloud
+  session keeps the stack: `init <branches...>` (adopts existing branches, bottom to top), `add`,
+  `up`/`down`, `view --json`, `rebase` (`--no-trunk`, `--upstack`) and `push` (it pushes with
+  git, then its PR refresh fails quietly). Everything on GitHub's side goes through the REST
+  stacks API, which these commands call themselves:
+  - **Create** once the first two PRs are open (each based on the one below):
+    `gh api -X POST repos/{owner}/{repo}/stacks --input - <<<'{"pull_requests":[<bottom>,...,<top>]}'`.
+  - **Grow** an existing stack as each new layer's PR opens (`create` refuses PRs already in a
+    stack): `gh api -X POST repos/{owner}/{repo}/stacks/<stack>/add --input - <<<'{"pull_requests":[<new>,...]}'`.
+  - **Read** a PR's stack: `gh api 'repos/{owner}/{repo}/stacks?pull_request=<n>'`.
+  - **Merge** every PR up to `<top>`, all or nothing:
+    `gh api -X PUT repos/{owner}/{repo}/pulls/<top>/merge-async --input - <<<'{"merge_method":"squash","merge_action":"default"}'`
+    answers `pending` with a `uuid`; poll `gh api repos/{owner}/{repo}/pulls/<top>/merge-async/<uuid>`
+    until `status` is `merged` (or an error to act on).
+  - **Unstack** what is left unmerged (a layer dropped, a single PR remaining):
+    `gh api -X POST repos/{owner}/{repo}/stacks/<stack>/unstack`. Merged PRs stay in the stack.
+- **After a lower layer squash-merges**, the layer above still carries its commits. Replay only
+  its own: `git rebase --onto origin/main <old tip of the merged layer> <branch>`, then
+  `gh stack rebase --no-trunk` to cascade the layers above it, and push them.
 - **Merge only when the user (or the coordinating session the user put in charge) asks for that
   PR.** A stack merges through `gh stack merge <target> --yes --squash` (the `main` ruleset
   requires squash merges and the `Checks` status); never enable auto-merge. Stacks merge
