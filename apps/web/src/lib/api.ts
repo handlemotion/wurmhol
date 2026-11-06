@@ -40,7 +40,13 @@ export interface Me {
   orgs: { id: string; name: string; role: string; personal: boolean }[];
   activeOrgId: string | null;
   role: Role | null;
-  standing: { ok: boolean; reason: "billing_off" | "subscribed" | "no_subscription" } | null;
+  standing: Standing | null;
+}
+
+/** Whether the org may open pipes (ADR 0004): billing off, or a plan in good standing. */
+export interface Standing {
+  ok: boolean;
+  reason: "billing_off" | "subscribed" | "no_subscription";
 }
 
 export interface Token {
@@ -83,4 +89,7 @@ export interface DeviceLogin {
   port: number | null;
   status: "pending" | "approved" | "denied";
   org: { id: string; name: string | null };
+  role: Role;
+  /** Not ok: `/connect` refuses the org, so a share's login would never open its pipe. */
+  standing: Standing;
 }

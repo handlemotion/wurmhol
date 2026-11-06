@@ -385,6 +385,9 @@ const LOG_LINES = 50;
 function logOf(target: string): string | null {
   const open = listStates().filter((s) => matches(s, target));
   if (open.length) return open.at(-1)!.id;
+  // A daemon that never got a pipe, such as a share's login whose pipe was refused, logs under
+  // its port and has exited by the time anyone asks.
+  if (isPort(Number(target)) && readLog(`port-${target}`)) return `port-${target}`;
   return /^[a-z0-9]{1,40}$/.test(target) && readLog(target) ? target : null;
 }
 
