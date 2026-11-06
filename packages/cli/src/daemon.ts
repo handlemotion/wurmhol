@@ -3,8 +3,11 @@
 // itself with `DAEMON_COMMAND` and the share's options, and the daemon reports over IPC once it
 // has the URL or knows why it cannot.
 import { spawn } from "node:child_process";
+import pkg from "../package.json" with { type: "json" };
 import { setTimeout as sleep } from "node:timers/promises";
+import { writeCredentials } from "./credentials.ts";
 import { FixError } from "./errors.ts";
+import { awaitLogin, type DeviceCode } from "./login.ts";
 import { appendLog, appendRequest } from "./logs.ts";
 import { openPipe, type Pipe, type PipeSource } from "./pipe.ts";
 import { detectSource } from "./source.ts";
@@ -42,16 +45,26 @@ export function shareRequest(options: ShareOptions): ShareRequest {
 
 export type ReadyMessage =
   | { type: "ready"; id: string; url: string; endsAt: string }
+  /** Waiting for someone to approve this computer at `url` (ADR 0026). */
+  | { type: "approval"; id: string; url: string; endsAt: string }
   | { type: "error"; message: string };
+
+/** What the CLI hands a daemon that has no token yet, over IPC: never in its argv. */
+interface LoginMessage {
+  type: "login";
+  code: DeviceCode;
+}
 
 /**
  * Starts the daemon by running `entry` (the CLI's own file) detached, in `cwd`, and waits for it
- * to report the URL (or the reason it could not).
+ * to report the URL (or the reason it could not). With `login`, a code no one has approved yet,
+ * the daemon reports the approval link and opens the pipe once the code is approved.
  */
 export async function startDaemon(
   entry: string,
   options: ShareOptions,
   cwd?: string,
+  login?: DeviceCode,
 ): Promise<ReadyMessage> {
   const child = spawn(process.execPath, [entry, DAEMON_COMMAND, JSON.stringify(options)], {
     detached: true,
@@ -59,6 +72,7 @@ export async function startDaemon(
     env: process.env,
     cwd,
   });
+  if (login) child.send({ type: "login", code: login } satisfies LoginMessage);
   const message = await new Promise<ReadyMessage>((resolve) => {
     child.once("message", (m) => resolve(m as ReadyMessage));
     child.once("exit", (code) =>
@@ -69,7 +83,7 @@ export async function startDaemon(
     );
   });
   child.removeAllListeners("exit");
-  if (message.type === "ready") {
+  if (message.type !== "error") {
     child.disconnect();
     child.unref();
   }
@@ -94,7 +108,10 @@ function exit(pipe: Pipe): never {
  * stopped: a named pipe gets its URL back, an unnamed one a new URL. The new pipe keeps the old
  * one's end time. Every other reason, and a refusal no retry can get past, ends the daemon.
  */
-export async function runDaemon(argument: string, connection: { server: string; token: string }) {
+export async function runDaemon(
+  argument: string,
+  connection: { server: string; token: string | null },
+) {
   const options = JSON.parse(argument) as ShareOptions;
   const { port, only, name, link, note } = options;
   const report = (message: ReadyMessage) => process.send?.(message);
@@ -108,8 +125,10 @@ export async function runDaemon(argument: string, connection: { server: string; 
     .map((email) => email.trim())
     .filter(Boolean);
   let source: Partial<PipeSource>;
+  const { server } = connection;
+  let token = connection.token ?? "";
   const open = (ttl: number | undefined) =>
-    openPipe({ ...connection, port, ttl, viewers, name, source, signal }, { log });
+    openPipe({ server, token, port, ttl, viewers, name, source, signal }, { log });
   const hold = (pipe: Pipe) => {
     pipe.on("request", (request) => appendRequest(pipe.id, request, { port }));
     pipe.once("close", (reason) => {
@@ -162,19 +181,74 @@ export async function runDaemon(argument: string, connection: { server: string; 
     exit(old);
   };
 
+  const stop = () => stopping.abort();
+  process.on("SIGTERM", stop);
+  process.on("SIGINT", stop);
+  process.on("SIGHUP", () => {}); // The terminal that started it may close.
+
+  // No token: the CLI sends a code no one has approved yet. Report its link and return the CLI
+  // to its caller, then wait here for the approval (ADR 0026).
+  let waiting: string | null = null;
+  if (!token) {
+    const code = await loginCode();
+    waiting = `login-${process.pid}`;
+    const endsAt = new Date(Date.now() + code.expires_in * 1000).toISOString();
+    const url = code.verification_uri_complete;
+    writeState({
+      id: waiting,
+      url,
+      port,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      endsAt,
+      request: shareRequest(options),
+      approval: true,
+    });
+    report({ type: "approval", id: waiting, url, endsAt });
+    process.disconnect?.();
+    try {
+      const granted = await awaitLogin({ server, version: pkg.version, code, signal });
+      writeCredentials({ server, token: granted.token, org: granted.org.name, name: granted.name });
+      token = granted.token;
+      log(null, "login.approved", { org: granted.org.name });
+    } catch (error) {
+      log(null, "login.failed", { message: signal.aborted ? "stopped" : String(error) });
+      removeState(waiting);
+      process.exit(signal.aborted ? 0 : 1);
+    }
+  }
+
   let pipe: Pipe;
   try {
     source = { ...(await detectSource(process.cwd(), process.env)), link, note };
     pipe = await open(options.ttl);
   } catch (error) {
-    report({ type: "error", message: error instanceof FixError ? error.message : String(error) });
+    const message = error instanceof FixError ? error.message : String(error);
+    if (waiting) {
+      log(null, "open.failed", { message });
+      removeState(waiting);
+    } else {
+      report({ type: "error", message });
+    }
     process.exit(1);
   }
   hold(pipe);
-  const stop = () => stopping.abort();
-  process.on("SIGTERM", stop);
-  process.on("SIGINT", stop);
-  process.on("SIGHUP", () => {}); // The terminal that started it may close.
+  if (waiting) {
+    removeState(waiting);
+    return;
+  }
   report({ type: "ready", id: pipe.id, url: pipe.url, endsAt: pipe.endsAt.toISOString() });
   process.disconnect?.();
+}
+
+/** The code the CLI sends a daemon that has no token; exits if none comes. */
+function loginCode(): Promise<DeviceCode> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => process.exit(1), 10_000);
+    process.once("message", (message: LoginMessage) => {
+      clearTimeout(timer);
+      if (message?.type !== "login") process.exit(1);
+      resolve(message.code);
+    });
+  });
 }

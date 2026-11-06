@@ -160,15 +160,8 @@ describe("the wall and Terminate", () => {
     await local.close();
   });
 
-  it("says what to do without a token or with a wrong one", async () => {
-    const missing = await cli(["8080"], {
-      WURMHOL_URL: stack.url,
-      WURMHOL_HOME: env.WURMHOL_HOME!,
-    });
-    expect(missing.code).toBe(1);
-    expect(missing.stderr).toBe(
-      `wurmhol: Run wurmhol login, or set WURMHOL_TOKEN to a token from ${stack.url} (menu → Tokens).\n`,
-    );
+  // Without a token a share waits for approval instead (login.e2e.test.ts, ADR 0026).
+  it("says what to do with a wrong token", async () => {
     const wrong = await cli(["8080"], { ...env, WURMHOL_TOKEN: "wh_not-a-real-token" });
     expect(wrong.code).toBe(1);
     expect(wrong.stderr).toContain("Create a new token");

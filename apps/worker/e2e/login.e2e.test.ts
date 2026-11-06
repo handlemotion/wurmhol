@@ -1,5 +1,6 @@
 // `wurmhol login` (ADR 0008): the real CLI asks for a code on the CLI's host, a signed-in member
 // approves it through the console's API, and the CLI stores an org token it then opens pipes with.
+// `npx wurmhol <port>` with no token does the same through the link it prints (ADR 0026).
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, fstatSync, openSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
@@ -162,10 +163,63 @@ it("login prints the console's /device and a code; approving stores a token that
   const out = await cli(["logout"], env);
   expect(out.code).toBe(0);
   expect(existsSync(file)).toBe(false);
+  // Logged out, a share waits for approval instead of failing; stopping it ends the wait.
   const after = await cli([String(local.port)], env);
-  expect(after.code).toBe(1);
-  expect(after.stderr).toContain("Run wurmhol login");
+  expect({ code: after.code, stderr: after.stderr }).toMatchObject({ code: 0 });
+  expect(after.stdout).toContain(`${stack.url}/device?code=`);
+  expect((await cli(["stop", String(local.port)], env)).code).toBe(0);
+  expect(JSON.parse((await cli(["ls", "--json"], env)).stdout)).toEqual([]);
   await local.close();
+});
+
+it("with no token, a share prints a link; approving it there opens that pipe and logs the computer in", async () => {
+  const env = loginEnv();
+  const local = await localServer((_req, res) => res.end("approved from the link"));
+  const first = await cli([String(local.port), "--json"], env);
+  expect({ code: first.code, stderr: first.stderr }).toMatchObject({ code: 0 });
+  const waiting = JSON.parse(first.stdout) as { url: string; port: number; approval?: boolean };
+  expect(waiting).toMatchObject({ port: local.port, approval: true });
+  expect(waiting.url.startsWith(`${stack.url}/device?code=`)).toBe(true);
+  // Agents re-run commands: the same link, not a second code.
+  const again = await cli([String(local.port), "--json"], env);
+  expect(JSON.parse(again.stdout)).toMatchObject({ url: waiting.url, approval: true });
+
+  const code = new URL(waiting.url).searchParams.get("code")!;
+  const shown = await api<{ name: string; port: number | null }>(
+    stack,
+    ada,
+    `/api/device?code=${code}`,
+  );
+  expect(shown.body).toMatchObject({ name: hostname(), port: local.port });
+  const pipeOf = (person: Person) =>
+    api<{ url: string | null }>(stack, person, `/api/device/pipe?code=${code}`);
+  expect((await pipeOf(ada)).body.url).toBeNull();
+
+  expect((await device(ada, "approve", code)).status).toBe(200);
+  // The page follows the approved code to the pipe it opened.
+  const url = await waitFor(async () => (await pipeOf(ada)).body.url, {
+    timeoutMs: 20_000,
+    intervalMs: 500,
+    what: "the approved share's pipe",
+  });
+  const cookie = await viewerCookie(stack, ada, url);
+  expect(await (await browserFetch(`${url}/`, { cookie })).text()).toBe("approved from the link");
+  // Someone in another org learns nothing from the code.
+  const bo = await signIn(stack);
+  expect((await pipeOf(bo)).body.url).toBeNull();
+
+  // Logged in now: `ls` shows the pipe, and the next share opens with no approval.
+  const listed = JSON.parse((await cli(["ls", "--json"], env)).stdout) as { url: string }[];
+  expect(listed.map((s) => s.url)).toEqual([url]);
+  const other = await localServer((_req, res) => res.end("second"));
+  const next = JSON.parse((await cli([String(other.port), "--json"], env)).stdout) as {
+    url: string;
+    approval?: boolean;
+  };
+  expect(next.approval).toBeUndefined();
+  expect(next.url).not.toBe(url);
+  await stopAll(env);
+  await Promise.all([local.close(), other.close()]);
 });
 
 it("a denied login stores nothing and says so", async () => {

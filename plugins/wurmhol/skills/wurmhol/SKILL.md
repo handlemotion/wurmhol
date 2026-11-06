@@ -18,6 +18,9 @@ signed-in members of the token's org can open.
    If the app's OAuth redirect URI is on `https://oauth.wurmhol.dev`, any number of pipes of it can
    sign in at once: the relay sends each callback back to the pipe that started it.
 3. **Send the user the URL** in your reply, as a plain link. They sign in to open it.
+   With no token on this machine, the first line is an approval link instead
+   (`--json` adds `"approval": true`, stderr says so). Send that link the same way: the user
+   approves this computer there and lands on the pipe. Later shares here need no approval.
 4. **Stop it when the user is done looking:** `npx wurmhol stop <port>`. `npx wurmhol ls` lists
    what is open; `npx wurmhol stop --all` ends every pipe.
 
@@ -26,11 +29,9 @@ signed-in members of the token's org can open.
 Every failure is one line on stderr that names the fix. Do what it says, then run the same
 command again:
 
-- **Token missing or revoked:** in a Claude Code cloud environment, the user makes a token in the
-  console (menu → Tokens) and sets `WURMHOL_TOKEN` under Environment variables, which takes
-  effect in a new session. On a machine that keeps its files (a laptop, SSH, a VM), run
-  `npx wurmhol login` and send the user the URL and code it prints to approve. Tell the user
-  which applies, and stop there.
+- **Token revoked:** unset nothing yourself. If `WURMHOL_TOKEN` is set, the user replaces or
+  removes it in the environment's settings; if it came from an approval, `npx wurmhol logout`,
+  then share again for a new approval link. Tell the user which applies, and stop there.
 - **Proxy refused the connection:** the sandbox only reaches listed hosts. The error names the
   host; the user adds it to the environment's Allowed domains (Network access).
 - **TLS verification failed:** set `NODE_EXTRA_CA_CERTS` to the sandbox's CA bundle and retry.
@@ -42,4 +43,5 @@ command again:
 
 `WURMHOL_TOKEN` (`wh_…`) lets anyone open pipes for the user's org. Check it by presence only
 (`test -n "$WURMHOL_TOKEN"`); keep it out of your output, files, commits and URLs. When it is
-missing, ask the user to set it in the environment rather than paste it into the chat.
+missing, share anyway and send the approval link; never ask the user to paste a token into the
+chat.
