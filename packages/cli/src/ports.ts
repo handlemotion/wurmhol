@@ -69,12 +69,19 @@ function titleOf(html: string) {
 /** Remembers which loopback address each port answered on, as a pipe does. */
 const loopback = new Loopback();
 
-/** `GET path` on the port (127.0.0.1, else ::1), or null when nothing answers HTTP in time. */
-function get(port: number, path: string): Promise<http.IncomingMessage | null> {
+/**
+ * `GET path` on the port (on `host`, else 127.0.0.1, else ::1), or null when nothing answers HTTP
+ * in time.
+ */
+export function get(
+  port: number,
+  path: string,
+  host?: string,
+): Promise<http.IncomingMessage | null> {
   return new Promise((resolve) => {
     const req = http.get(
       {
-        ...loopback.target(port, undefined),
+        ...loopback.target(port, host),
         port,
         path,
         // A `localhost` Host passes dev servers' host checks (Vite's, webpack's).

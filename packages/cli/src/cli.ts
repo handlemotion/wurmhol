@@ -10,6 +10,7 @@
 //   wurmhol init [--skill]        tell the repo's agents how to share
 //   wurmhol host                  connect this computer to the wall; open pipes from the browser
 //                                 (--install runs it at login, --uninstall removes that)
+//   wurmhol doctor [--port N]     check the token, proxy, allowlist and port a pipe needs
 //   wurmhol mcp                   a stdio MCP server with the same tools, for agents
 import { homedir, hostname } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -24,7 +25,7 @@ import {
   sourceField,
 } from "@wurmhol/protocol";
 import pkg from "../package.json" with { type: "json" };
-import { consoleUrl, envToken, findToken, savedLogin, server } from "./config.ts";
+import { allowlistLine, consoleUrl, envToken, findToken, savedLogin, server } from "./config.ts";
 import { credentialsFile, removeCredentials, writeCredentials } from "./credentials.ts";
 import {
   DAEMON_COMMAND,
@@ -33,6 +34,7 @@ import {
   shareRequest,
   startDaemon,
 } from "./daemon.ts";
+import { doctor as runDoctor, formatCheck } from "./doctor.ts";
 import { FixError } from "./errors.ts";
 import { host as runHost } from "./host.ts";
 import { init } from "./init.ts";
@@ -74,6 +76,11 @@ Usage:
     --install                   Run it at login and keep it running (macOS, Linux with
                                 systemd); needs npm install -g wurmhol
     --uninstall                 Stop running it at login
+  wurmhol doctor                Check what a pipe needs: the token, HTTPS_PROXY and its CA,
+                                and that the network allows the CLI's host and the pipe
+                                domain; one line each, ok or the fix. Exits 1 if any fails
+    --port <port>               Also check that the port answers HTTP (127.0.0.1 or ::1)
+    --json                      {checks: [{name, ok, detail, fix}]}
   wurmhol login                 Approve this computer in the browser; stores a token
   wurmhol logout                Delete the stored token
   wurmhol mcp                   Run an MCP server on stdio (open_pipe, list_pipes,
@@ -123,6 +130,7 @@ function saveLogin(granted: { token: string; org: { name: string | null }; name:
 }
 
 async function login() {
+  process.stdout.write(`${allowlistLine()}\n`);
   try {
     const granted = await deviceLogin({
       server: server(),
@@ -312,6 +320,22 @@ async function stop(target: string | undefined, all: boolean) {
   for (const s of chosen) process.stdout.write(`stopped ${s.url}\n`);
 }
 
+/** `wurmhol doctor`: every check, one line each; exits 1 when any fails. */
+async function doctor(portText: string | undefined, json: boolean) {
+  let port: number | undefined;
+  if (portText !== undefined) {
+    port = parsePort(portText) ?? fail(`Not a port: ${portText}. Use --port 5173.`);
+  }
+  const checks = await runDoctor({ port, version: pkg.version });
+  if (json) {
+    process.stdout.write(`${JSON.stringify({ checks })}\n`);
+  } else {
+    process.stdout.write(`${allowlistLine()}\n`);
+    for (const check of checks) process.stdout.write(`${formatCheck(check)}\n`);
+  }
+  if (checks.some((check) => !check.ok)) process.exitCode = 1;
+}
+
 /** Lines `wurmhol logs` prints before it follows. */
 const LOG_LINES = 50;
 
@@ -388,6 +412,7 @@ function parseCommandLine(args = process.argv.slice(2)) {
         uninstall: { type: "boolean", default: false },
         ttl: { type: "string" },
         code: { type: "string" },
+        port: { type: "string" },
         help: { type: "boolean", short: "h", default: false },
         version: { type: "boolean", short: "v", default: false },
       },
@@ -410,6 +435,7 @@ async function main() {
   if (command === "logs") return logs(argument, values.json, values.follow);
   if (command === "init") return init(values.skill);
   if (command === "login") return login();
+  if (command === "doctor") return doctor(values.port, values.json);
   if (command === "host" && values.install) return installHost();
   if (command === "host" && values.uninstall) return uninstallHost();
   if (command === "host") return serveHost(values.code?.trim() || undefined);

@@ -1,7 +1,9 @@
 // Reaching the server from a sandbox: every call goes through HTTPS_PROXY when one is set (and
 // trusts NODE_EXTRA_CA_CERTS, which Node reads itself), and every failure becomes a FixError that
-// says the fix. Used by the pipe's and the host's WebSockets and by login's HTTP calls.
-import type { IncomingMessage } from "node:http";
+// says the fix. Used by the pipe's and the host's WebSockets, and by login's and doctor's HTTP
+// calls.
+import { type IncomingMessage, request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { getProxyForUrl } from "proxy-from-env";
 import WebSocket from "ws";
@@ -83,5 +85,73 @@ export function dial(target: URL, options: DialOptions): Promise<WebSocket> {
     socket.once("error", (error) =>
       reject(explainConnectError(error, { server: options.server, proxy })),
     );
+  });
+}
+
+/** An HTTP answer: from the far end, or from a proxy that refused the tunnel (`proxyStatus`). */
+export interface Answer {
+  status: number;
+  body: string;
+  viaProxy: boolean;
+  /** The proxy's answer to CONNECT, when the call went through one. */
+  proxyStatus: number | undefined;
+}
+
+export interface SendOptions {
+  /** The origin failures name. */
+  server: string;
+  version: string;
+  method?: string;
+  headers?: Record<string, string>;
+  /** Sent as JSON. */
+  json?: unknown;
+}
+
+/**
+ * One HTTP call through the environment's proxy. Rejects with a FixError, whose `cause` is the
+ * connection's own error, when no HTTP answer came.
+ */
+export function send(url: URL, options: SendOptions): Promise<Answer> {
+  const { proxy, agent } = proxyFor(url);
+  const request = url.protocol === "http:" ? httpRequest : httpsRequest;
+  const payload = options.json === undefined ? undefined : JSON.stringify(options.json);
+  const headers: Record<string, string | number> = {
+    ...options.headers,
+    "user-agent": userAgent(options.version),
+  };
+  if (payload !== undefined) {
+    headers["content-type"] = "application/json";
+    headers["content-length"] = Buffer.byteLength(payload);
+  }
+  return new Promise((resolve, reject) => {
+    let proxyStatus: number | undefined;
+    const req = request(
+      url,
+      { method: options.method ?? "GET", headers, agent, timeout: 15_000 },
+      (res) => {
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => (text += chunk));
+        res.on("end", () =>
+          resolve({
+            status: res.statusCode ?? 0,
+            body: text,
+            viaProxy: Boolean(proxy),
+            proxyStatus,
+          }),
+        );
+        res.on("error", reject);
+      },
+    );
+    req.on("proxyConnect", (connect: { statusCode: number }) => (proxyStatus = connect.statusCode));
+    req.on("timeout", () =>
+      req.destroy(Object.assign(new Error("timed out"), { code: "ETIMEDOUT" })),
+    );
+    req.on("error", (error) => {
+      const fix = explainConnectError(error, { server: options.server, proxy });
+      fix.cause = error;
+      reject(fix);
+    });
+    req.end(payload);
   });
 }

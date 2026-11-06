@@ -39,6 +39,10 @@ it("in a Vite project, appends the line with 5173 to CLAUDE.md once, and says th
     { "CLAUDE.md": "# Rules\n" },
   );
   const first = init(dir);
+  // Catches a sandbox learning which hosts to allowlist only after a refused call.
+  expect(first.split("\n")[0]).toBe(
+    "With Limited network access, allowlist api.wurmhol.com (the CLI's host) and *.wurmhol.dev (pipe URLs, to open them from the sandbox).",
+  );
   expect(first).toContain("Added a line to CLAUDE.md (port 5173");
   expect(first).toContain("No token. On this computer, run wurmhol login.");
   expect(first).toContain("api.wurmhol.com under Allowed domains");

@@ -3,7 +3,7 @@
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import skill from "../../../plugins/wurmhol/skills/wurmhol/SKILL.md";
-import { consoleUrl, envToken, savedLogin, server } from "./config.ts";
+import { allowlistLine, consoleUrl, envToken, savedLogin, server } from "./config.ts";
 import { credentialsFile } from "./credentials.ts";
 
 /** The line `init` writes, with the repo's dev port (spec section 7). */
@@ -61,6 +61,7 @@ export function init(writeSkill: boolean) {
     break;
   }
   const say = (line: string) => process.stdout.write(`${line}\n`);
+  say(allowlistLine());
   if (current.includes("npx wurmhol")) {
     say(`${relative(cwd, target)} already mentions wurmhol`);
   } else {
