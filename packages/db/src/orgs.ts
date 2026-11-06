@@ -91,6 +91,15 @@ export async function listMembers(db: Db, orgId: string) {
     .orderBy(asc(members.createdAt));
 }
 
+/** How many members `orgId` has, owners included. */
+export async function countMembers(db: Db, orgId: string) {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(members)
+    .where(eq(members.organizationId, orgId));
+  return row?.n ?? 0;
+}
+
 /**
  * Removes a member. Refuses to remove the last owner, so an org always has someone who can
  * manage it. Returns what happened.
@@ -153,14 +162,25 @@ async function findLiveInvite(db: Db, hash: string) {
 /**
  * Joins `userId` to the invite's org as a member and uses the link up. Single use holds under
  * races: the conditional update claims the link, and only the request that claimed it adds the
- * member. Someone already in the org keeps their role, and the link stays unused.
+ * member. Someone already in the org keeps their role, and the link stays unused. An org at its
+ * plan's member cap (`maxMembers` of the invite's org, null for none) refuses, and the link
+ * stays unused too.
  */
-export async function acceptInvite(db: Db, code: string, userId: string) {
+export async function acceptInvite(
+  db: Db,
+  code: string,
+  userId: string,
+  maxMembers: (orgId: string) => Promise<number | null>,
+) {
   const hash = await sha256Hex(code);
   const invite = await findLiveInvite(db, hash);
   if (!invite) return { status: "invalid" as const };
   if (await findMember(db, userId, invite.orgId)) {
     return { status: "already_member" as const, orgId: invite.orgId };
+  }
+  const cap = await maxMembers(invite.orgId);
+  if (cap !== null && (await countMembers(db, invite.orgId)) >= cap) {
+    return { status: "full" as const, orgId: invite.orgId, cap };
   }
   const claimed = await db
     .update(inviteLinks)

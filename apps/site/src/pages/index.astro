@@ -20,6 +20,33 @@ const tools = [
   ["The agent's preview pane", "Not your browser: no extensions, no phone, nothing to share"],
 ];
 
+const plans = [
+  {
+    name: "Personal",
+    amount: "$12",
+    per: "a year per org",
+    included: ["You and up to 2 others in the org", "Billed yearly"],
+    limits: [
+      ["Open pipes", "3 at a time"],
+      ["Traffic", "25 GB a month"],
+      ["Pipe length", "4 hours, up to 12"],
+    ],
+    primary: false,
+  },
+  {
+    name: "Team",
+    amount: "$15",
+    per: "a month per org",
+    included: ["Any number of people in the org", "Or $150 a year"],
+    limits: [
+      ["Open pipes", "15 at a time"],
+      ["Traffic", "250 GB a month"],
+      ["Pipe length", "4 hours, up to 12"],
+    ],
+    primary: true,
+  },
+];
+
 const faq = [
   {
     q: "Which agents does it work with?",
@@ -40,6 +67,10 @@ const faq = [
   {
     q: "How does a pipe end?",
     a: "When the agent runs wurmhol stop, when anyone in the org ends it from the wall, or when its time is up: 4 hours unless the agent asks for another length with --ttl, up to 12 hours. The URL is never reused.",
+  },
+  {
+    q: "How does the trial work?",
+    a: "Each org's first plan starts with 14 days free. Checkout takes a card, and the plan is charged when the trial ends unless you cancel before. Switch plans or cancel any time from Billing on the wall.",
   },
   {
     q: "Can I run it myself?",
@@ -182,24 +213,37 @@ const faq = [
     <section class="wrap section" id="pricing" aria-labelledby="pricing-title">
       <h2 id="pricing-title">Pricing</h2>
       <div class="body">
-        <div class="price">
-          <div class="price-head">
-            <p class="amount">$12</p>
-            <p class="per">a year per org</p>
-          </div>
-          <ul class="included">
-            <li>Everything included, for every member of the org</li>
-            <li>Billed yearly. No trial: you subscribe before the first pipe</li>
-          </ul>
-          <div class="limits">
-            <p class="limits-title">Fair use, per org</p>
-            <dl>
-              <div><dt>Open pipes</dt><dd>5 at a time</dd></div>
-              <div><dt>Traffic</dt><dd>100 GB a month</dd></div>
-              <div><dt>Pipe length</dt><dd>4 hours, up to 12</dd></div>
-            </dl>
-          </div>
-          <a class="button button-primary" href={SIGN_IN}>Subscribe</a>
+        <div class="prices">
+          {
+            plans.map((plan) => (
+              <div class="price">
+                <p class="plan">{plan.name}</p>
+                <div class="price-head">
+                  <p class="amount">{plan.amount}</p>
+                  <p class="per">{plan.per}</p>
+                </div>
+                <ul class="included">
+                  {plan.included.map((line) => (
+                    <li>{line}</li>
+                  ))}
+                </ul>
+                <div class="limits">
+                  <p class="limits-title">Fair use, per org</p>
+                  <dl>
+                    {plan.limits.map(([what, limit]) => (
+                      <div>
+                        <dt>{what}</dt>
+                        <dd>{limit}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+                <a class={`button ${plan.primary ? "button-primary" : "button-quiet"}`} href={SIGN_IN}>
+                  Start a 14-day trial
+                </a>
+              </div>
+            ))
+          }
         </div>
       </div>
     </section>
@@ -503,6 +547,14 @@ const faq = [
   }
 
   /* Pricing */
+  .prices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+  }
+  .plan {
+    font-weight: 600;
+  }
   .price {
     display: flex;
     flex-direction: column;

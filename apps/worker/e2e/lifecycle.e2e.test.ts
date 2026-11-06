@@ -222,6 +222,32 @@ describe("fair-use limits", () => {
       await stack.stop();
     }
   });
+
+  it("ends shares and refuses new ones once the org's monthly requests are used", async () => {
+    const stack = await startStack({ LIMIT_MONTHLY_REQUESTS: "3" });
+    try {
+      const ada = await signIn(stack);
+      const env = cliEnv(stack, (await createToken(stack, ada)).token);
+      const local = await localServer((_req, res) => res.end("ok"));
+      const started = await share(stack, env, local.port);
+      const cookie = await viewerCookie(stack, ada, started.url);
+      const pid = pidOf(env, started.id);
+      // Usage reaches the Org object at most every few seconds: keep asking until it ends.
+      await waitFor(
+        async () => {
+          await browserFetch(`${started.url}/`, { cookie }).catch(() => null);
+          return !alive(pid);
+        },
+        { what: "the share to end at the request limit", timeoutMs: 20_000, intervalMs: 250 },
+      );
+      const refused = await cli([String(local.port)], env);
+      expect(refused.code).toBe(1);
+      expect(refused.stderr).toContain("this month's request allowance");
+      await local.close();
+    } finally {
+      await stack.stop();
+    }
+  });
 });
 
 describe("a pipe's lifetime", () => {

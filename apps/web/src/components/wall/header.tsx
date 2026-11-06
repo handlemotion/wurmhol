@@ -58,8 +58,9 @@ export function Header({
   const active = me.orgs.find((org) => org.id === me.activeOrgId);
   const [orgAction, setOrgAction] = useState<OrgAction | null>(null);
   const owner = me.role === "owner";
-  // Owners manage billing; with billing off (self-hosted) there is nothing to open.
-  const canBill = owner && me.standing?.reason !== "billing_off";
+  // Owners manage a plan they have in Stripe's portal. Without one, the wall offers the plans;
+  // with billing off (self-hosted) there is nothing to open.
+  const canBill = owner && me.standing?.reason === "subscribed";
   // The same entries as buttons in the middle, and in the phone's menu.
   const links = [
     { id: "members", label: "Members", Icon: IconUsers, onPress: () => onOpen("members") },
@@ -70,7 +71,7 @@ export function Header({
             id: "billing",
             label: "Billing",
             Icon: IconCreditCard,
-            onPress: () => billing.mutate(),
+            onPress: () => billing.mutate(undefined),
             isPending: billing.isPending,
           },
         ]

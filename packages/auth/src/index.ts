@@ -41,19 +41,23 @@ const optionalText = z
   .transform((value) => value || undefined);
 
 /**
- * Billing (ADR 0004): one plan per org, bought before the first pipe; no trial. Yearly is the
- * plan (card fees eat a small monthly charge); a monthly price is optional. All optional: with no
- * `STRIPE_SECRET_KEY` there is no Stripe plugin and pipes never need a plan (self-hosting).
- * Amounts live in Stripe as prices; only their ids are config.
+ * Billing (ADR 0026): two plans per org, Personal (yearly) and Team (monthly, optionally yearly),
+ * each with a trial. All optional: with no `STRIPE_SECRET_KEY` there is no Stripe plugin and pipes
+ * never need a plan (self-hosting). Amounts live in Stripe as prices; only their ids are config.
  */
 const billingFields = {
   STRIPE_SECRET_KEY: optionalText,
   STRIPE_WEBHOOK_SECRET: optionalText,
-  /** Yearly price of the plan: the default, and the only one offered unless a monthly is set. */
-  STRIPE_PRICE_YEARLY: optionalText,
-  /** Optional monthly price. Empty offers yearly only. */
-  STRIPE_PRICE_MONTHLY: optionalText,
+  /** Personal's yearly price. */
+  STRIPE_PRICE_PERSONAL: optionalText,
+  /** Team's monthly price. */
+  STRIPE_PRICE_TEAM_MONTHLY: optionalText,
+  /** Team's yearly price. Empty offers Team monthly only. */
+  STRIPE_PRICE_TEAM_YEARLY: optionalText,
 };
+
+/** Price ids that need `STRIPE_SECRET_KEY`, and the ones it needs. */
+const REQUIRED_PRICES = ["STRIPE_PRICE_PERSONAL", "STRIPE_PRICE_TEAM_MONTHLY"] as const;
 
 /** Auth variables, documented in `apps/worker/.dev.vars.example`. */
 export const authEnvSchema = z
@@ -85,8 +89,8 @@ export const authEnvSchema = z
     if (!env.STRIPE_SECRET_KEY) {
       const stray = [
         "STRIPE_WEBHOOK_SECRET",
-        "STRIPE_PRICE_MONTHLY",
-        "STRIPE_PRICE_YEARLY",
+        ...REQUIRED_PRICES,
+        "STRIPE_PRICE_TEAM_YEARLY",
       ] as const;
       for (const name of stray.filter((n) => env[n] !== undefined)) {
         ctx.addIssue({ code: "custom", path: [name], message: "needs STRIPE_SECRET_KEY" });
@@ -100,12 +104,8 @@ export const authEnvSchema = z
         message: "is required with STRIPE_SECRET_KEY",
       });
     }
-    if (env.STRIPE_PRICE_YEARLY === undefined && env.STRIPE_PRICE_MONTHLY === undefined) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["STRIPE_PRICE_YEARLY"],
-        message: "set a price with STRIPE_SECRET_KEY",
-      });
+    for (const name of REQUIRED_PRICES.filter((n) => env[n] === undefined)) {
+      ctx.addIssue({ code: "custom", path: [name], message: "is required with STRIPE_SECRET_KEY" });
     }
   })
   .transform((env) => ({
@@ -125,12 +125,16 @@ export const authEnvSchema = z
     billing:
       env.STRIPE_SECRET_KEY &&
       env.STRIPE_WEBHOOK_SECRET &&
-      (env.STRIPE_PRICE_YEARLY || env.STRIPE_PRICE_MONTHLY)
+      env.STRIPE_PRICE_PERSONAL &&
+      env.STRIPE_PRICE_TEAM_MONTHLY
         ? {
             secretKey: env.STRIPE_SECRET_KEY,
             webhookSecret: env.STRIPE_WEBHOOK_SECRET,
-            monthlyPriceId: env.STRIPE_PRICE_MONTHLY,
-            yearlyPriceId: env.STRIPE_PRICE_YEARLY,
+            prices: {
+              personal: env.STRIPE_PRICE_PERSONAL,
+              teamMonthly: env.STRIPE_PRICE_TEAM_MONTHLY,
+              teamYearly: env.STRIPE_PRICE_TEAM_YEARLY,
+            },
           }
         : undefined,
   }));
@@ -140,8 +144,30 @@ export type AuthConfig = z.output<typeof authEnvSchema>;
 /** Present only when billing is on (`STRIPE_SECRET_KEY` and friends set). */
 export type BillingConfig = NonNullable<AuthConfig["billing"]>;
 
-/** The one plan's key, as the Stripe plugin stores it in `subscriptions.plan`. */
-export const PLAN_NAME = "wurmhol";
+/** The plans (ADR 0026), by the key the Stripe plugin stores in `subscriptions.plan`. */
+export const PLAN_NAMES = ["personal", "team"] as const;
+export type PlanName = (typeof PLAN_NAMES)[number];
+
+/** Days a new org's first subscription is free. Checkout still takes a card up front. */
+export const TRIAL_DAYS = 14;
+
+/** What an org's limits are: `members` null is any number. */
+export interface OrgLimits {
+  members: number | null;
+  active: number;
+  monthlyBytes: number;
+  monthlyRequests: number;
+}
+
+/** Each plan's limits (ADR 0026). Prices live in Stripe; these are what the plan includes. */
+export const PLAN_LIMITS: Record<PlanName, OrgLimits> = {
+  personal: { members: 3, active: 3, monthlyBytes: 25 * 1000 ** 3, monthlyRequests: 5_000_000 },
+  team: { members: null, active: 15, monthlyBytes: 250 * 1000 ** 3, monthlyRequests: 50_000_000 },
+};
+
+export function isPlanName(value: string): value is PlanName {
+  return (PLAN_NAMES as readonly string[]).includes(value);
+}
 
 /**
  * Session cookies are `__Host-` cookies (spec section 4): Secure, Path=/, no Domain, so no
@@ -176,18 +202,21 @@ function billingPlugin(env: AuthEnv, billing: BillingConfig) {
     subscription: {
       enabled: true,
       plans: [
+        // Yearly only: the plugin's base price is the yearly one, and Checkout never passes
+        // `annual` for it.
+        { name: "personal", priceId: billing.prices.personal, freeTrial: { days: TRIAL_DAYS } },
         {
-          name: PLAN_NAME,
-          // The plugin's base price is the monthly one when there is one; yearly-only plans use
-          // the yearly price as the base (Checkout then never passes `annual`).
-          priceId: billing.monthlyPriceId ?? billing.yearlyPriceId!,
-          annualDiscountPriceId: billing.monthlyPriceId ? billing.yearlyPriceId : undefined,
+          name: "team",
+          priceId: billing.prices.teamMonthly,
+          annualDiscountPriceId: billing.prices.teamYearly,
+          freeTrial: { days: TRIAL_DAYS },
         },
-      ],
+      ] satisfies ({ name: PlanName } & Record<string, unknown>)[],
       // Org subscriptions only (the Worker refuses others), managed by owners.
       authorizeReference: ({ user, referenceId }) => isOwner(env.db, user.id, referenceId),
       getCheckoutSessionParams: () => ({
-        params: { allow_promotion_codes: true, payment_method_collection: "if_required" },
+        // A card up front, trial or not (ADR 0026): Stripe charges it when the trial ends.
+        params: { allow_promotion_codes: true, payment_method_collection: "always" },
       }),
     },
     // The option's type intersects the three tables' field maps and rejects renames; this shape

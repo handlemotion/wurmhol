@@ -7,12 +7,17 @@ this file lists what waits on accounts, dashboards or decisions. Delete an item 
 
 Billing stays off until `STRIPE_SECRET_KEY` is set, so every org can open pipes without a plan.
 
-- [ ] Sandbox profile: one product with a yearly price ($12, ADR 0004), the customer portal turned
-      on, and a webhook endpoint `https://dirt.wurmhol.com/api/auth/stripe/webhook` for
+Plans per ADR 0026. Do it in the sandbox first, then repeat in live mode.
+
+- [ ] Products and prices: Personal ($12 a year) and Team ($15 a month, $150 a year).
+- [ ] Customer portal on, with both products under "customers can switch plans".
+- [ ] Live webhook endpoint `https://dirt.wurmhol.com/api/auth/stripe/webhook` for
       `checkout.session.completed` and `customer.subscription.created`, `.updated`, `.deleted`.
-- [ ] Doppler: `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` in `prd_worker`;
-      `WORKER_VAR_STRIPE_PRICE_YEARLY` in `prd_github` and as a Workers Builds variable.
-- [ ] Repeat with live mode once the sandbox flow is checked end to end.
+      The sandbox uses `stripe listen` locally instead.
+- [ ] Doppler: sandbox `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and the three price ids in
+      `dev_worker`; live `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` in `prd_worker`, and
+      `WORKER_VAR_STRIPE_PRICE_PERSONAL`, `WORKER_VAR_STRIPE_PRICE_TEAM_MONTHLY` and
+      `WORKER_VAR_STRIPE_PRICE_TEAM_YEARLY` in `prd_github` and as Workers Builds variables.
 
 ## Google sign-in
 

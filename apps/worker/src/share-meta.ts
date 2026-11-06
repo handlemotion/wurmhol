@@ -18,7 +18,8 @@ export interface ShareInit {
   viewers: string[] | null;
   /** Where it came from (ADR 0015), as the CLI said; null when it said nothing. */
   source: PipeSource | null;
-  limits: { seconds: number; monthlyBytes: number };
+  /** The org's plan's limits when it started; `monthlyRequests` is absent in pipes from before it. */
+  limits: { seconds: number; monthlyBytes: number; monthlyRequests?: number };
 }
 
 export interface Meta extends ShareInit {

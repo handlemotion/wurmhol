@@ -49,20 +49,38 @@ export function Wall({ me }: { me: Me }) {
   );
 }
 
-/** No plan yet (ADR 0004: no trial): pipes refuse to start until an owner subscribes. */
+/**
+ * No plan yet (ADR 0026): pipes refuse to start until an owner starts a trial of Personal or
+ * Team. Team yearly is a switch in Stripe's portal once the org has a plan.
+ */
 function NeedsPlan({ owner }: { owner: boolean }) {
   const billing = useOpenBilling();
+  const pending = billing.isPending ? billing.variables : undefined;
   return (
     <div className="mx-auto mt-4 flex max-w-xl flex-wrap items-center justify-between gap-3 border border-border p-5">
       <Text>
         {owner
-          ? "Subscribe to open pipes from your agents."
-          : "Pipes start once an owner of this org subscribes."}
+          ? "Start a 14-day trial to open pipes. Personal is for up to 3 people, Team for any number."
+          : "Pipes start once an owner of this org starts a trial."}
       </Text>
       {owner && (
-        <Button isPending={billing.isPending} onPress={() => billing.mutate()}>
-          Subscribe
-        </Button>
+        <div className="flex gap-3">
+          <Button
+            intent="outline"
+            isPending={pending === "personal"}
+            isDisabled={billing.isPending}
+            onPress={() => billing.mutate("personal")}
+          >
+            Personal
+          </Button>
+          <Button
+            isPending={pending === "team"}
+            isDisabled={billing.isPending}
+            onPress={() => billing.mutate("team")}
+          >
+            Team
+          </Button>
+        </div>
       )}
     </div>
   );

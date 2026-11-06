@@ -1,6 +1,6 @@
 // One Org Durable Object per org (spec section 5): the live list of the org's open shares for the
 // wall, pushed to every open wall over WebSockets (hibernation API, no polling), and the counts
-// behind the org's fair-use limits: active shares and bytes relayed this month.
+// behind the org's limits: active shares, and bytes and viewer requests relayed this month.
 //
 // It also holds the org's machines (ADR 0018): one socket per running `wurmhol host`, which
 // reports the ports open on its computer and opens a pipe to one when its owner asks from the
@@ -20,7 +20,20 @@ import {
 export type Reservation =
   | { ok: true }
   | { ok: false; reason: "active_limit"; limit: number }
-  | { ok: false; reason: "monthly_limit"; limit: number };
+  | { ok: false; reason: "monthly_limit"; limit: number }
+  | { ok: false; reason: "request_limit"; limit: number };
+
+/** Relayed this month: bytes both ways, and viewer requests. */
+export interface Usage {
+  bytes: number;
+  requests: number;
+}
+
+/** The monthly caps a share counts against. Pipes from before the request cap have none. */
+export interface MonthlyLimits {
+  monthlyBytes: number;
+  monthlyRequests?: number;
+}
 
 /** Who a machine's socket belongs to: kept on the socket, so it survives hibernation. */
 interface MachineAttachment extends Machine {
@@ -66,7 +79,7 @@ export type OpenPortResult =
 /** How long the wall waits for a machine to open a pipe: the CLI's own connect is 15 s. */
 const OPEN_TIMEOUT_MS = 30_000;
 
-/** Calendar month in UTC: the window of the monthly byte limit. */
+/** Calendar month in UTC: the window of the monthly limits. */
 function month(at = Date.now()) {
   return new Date(at).toISOString().slice(0, 7);
 }
@@ -94,19 +107,28 @@ export class Org extends DurableObject<Env> {
     }
   }
 
-  #usage() {
-    const stored = this.ctx.storage.kv.get<{ month: string; bytes: number }>("usage");
-    return stored && stored.month === month() ? stored.bytes : 0;
+  #usage(): Usage {
+    const stored = this.ctx.storage.kv.get<{ month: string } & Partial<Usage>>("usage");
+    return stored && stored.month === month()
+      ? { bytes: stored.bytes ?? 0, requests: stored.requests ?? 0 }
+      : { bytes: 0, requests: 0 };
   }
 
   /**
-   * Holds a slot for a new share, if the org is under both limits. Atomic: the object handles one
+   * Holds a slot for a new share, if the org is under every limit. Atomic: the object handles one
    * call at a time and `kv` writes are synchronous, so two CLIs starting at once cannot both get
-   * the fifth slot.
+   * the last slot.
    */
-  reserve(card: ShareCard, limits: { active: number; monthlyBytes: number }): Reservation {
-    if (this.#usage() >= limits.monthlyBytes) {
+  reserve(
+    card: ShareCard,
+    limits: { active: number; monthlyBytes: number; monthlyRequests: number },
+  ): Reservation {
+    const usage = this.#usage();
+    if (usage.bytes >= limits.monthlyBytes) {
       return { ok: false, reason: "monthly_limit", limit: limits.monthlyBytes };
+    }
+    if (usage.requests >= limits.monthlyRequests) {
+      return { ok: false, reason: "request_limit", limit: limits.monthlyRequests };
     }
     if (this.#cards().length >= limits.active) {
       return { ok: false, reason: "active_limit", limit: limits.active };
@@ -131,15 +153,19 @@ export class Org extends DurableObject<Env> {
     this.#broadcast({ type: "share.ended", id });
   }
 
-  /** Adds relayed bytes to this month's count. Returns whether the org is now over its limit. */
-  addUsage(bytes: number, monthlyBytes: number) {
-    const total = this.#usage() + bytes;
-    this.ctx.storage.kv.put("usage", { month: month(), bytes: total });
-    return { bytes: total, over: total >= monthlyBytes };
+  /** Adds to this month's counts. Returns whether the org is now over either limit. */
+  addUsage(added: Usage, limits: MonthlyLimits) {
+    const usage = this.#usage();
+    const total = { bytes: usage.bytes + added.bytes, requests: usage.requests + added.requests };
+    this.ctx.storage.kv.put("usage", { month: month(), ...total });
+    const over =
+      total.bytes >= limits.monthlyBytes ||
+      (limits.monthlyRequests !== undefined && total.requests >= limits.monthlyRequests);
+    return { ...total, over };
   }
 
   usage() {
-    return { month: month(), bytes: this.#usage() };
+    return { month: month(), ...this.#usage() };
   }
 
   list() {

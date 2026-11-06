@@ -160,10 +160,15 @@ const configSchema = z
       .optional()
       .transform((value) => value || "https://wurmhol.com/docs")
       .pipe(z.url({ protocol: /^https?$/ })),
-    /** Fair-use limits per org (spec section 4), enforced by the Durable Objects. */
+    /**
+     * Fair-use limits per org with billing off, enforced by the Durable Objects. With billing on,
+     * each plan's limits apply instead (`PLAN_LIMITS`, ADR 0026).
+     */
     LIMIT_ACTIVE_SHARES: positive(5),
     /** Bytes relayed per org per calendar month (UTC), both directions. 100 GB by default. */
     LIMIT_MONTHLY_BYTES: positive(100 * 1000 ** 3),
+    /** Viewer requests per org per calendar month (UTC). 50 million by default. */
+    LIMIT_MONTHLY_REQUESTS: positive(50_000_000),
     /** Longest a share stays open, in seconds; the CLI's `--ttl` may ask up to this. 12 hours. */
     LIMIT_SHARE_SECONDS: positive(12 * 3600),
     /** Days the daily retention job keeps a pipe's history (`shares` rows). 90 by default. */

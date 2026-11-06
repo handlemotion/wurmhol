@@ -186,7 +186,9 @@ const textDecoder = new TextDecoder();
 export class Share extends DurableObject<Env> {
   #streams = new Map<number, HttpStream | WsStream>();
   #members = new Map<string, number>();
+  /** Bytes and viewer requests not yet added to the Org object's monthly counts. */
   #pendingUsage = 0;
+  #pendingRequests = 0;
   #lastUsageFlush = 0;
   /** The last viewer request, kept here and pushed and stored every `LAST_REQUEST_PUSH_MS`. */
   #lastRequestAt: number | null = null;
@@ -442,6 +444,7 @@ export class Share extends DurableObject<Env> {
     }
     this.#touch();
     this.#views.note(meta, viewer);
+    this.#pendingRequests += 1;
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
       return this.#openViewerSocket(request, meta);
     }
@@ -965,16 +968,23 @@ export class Share extends DurableObject<Env> {
     }
   }
 
-  async #flushUsage() {
-    const bytes = this.#pendingUsage;
-    if (!bytes) return;
+  /** Takes the counts not yet sent to the Org object, leaving zero behind. */
+  #takeUsage() {
+    const usage = { bytes: this.#pendingUsage, requests: this.#pendingRequests };
     this.#pendingUsage = 0;
+    this.#pendingRequests = 0;
+    return usage;
+  }
+
+  async #flushUsage() {
+    if (!this.#pendingUsage && !this.#pendingRequests) return;
+    const pending = this.#takeUsage();
     this.#lastUsageFlush = Date.now();
     const meta = this.#meta();
     if (!meta) return;
-    meta.bytes += bytes;
+    meta.bytes += pending.bytes;
     this.#save(meta);
-    const usage = await this.#org(meta.orgId).addUsage(bytes, meta.limits.monthlyBytes);
+    const usage = await this.#org(meta.orgId).addUsage(pending, meta.limits);
     if (usage.over) await this.#end("limit");
   }
 
@@ -1001,11 +1011,10 @@ export class Share extends DurableObject<Env> {
     this.#page.clear();
     await this.ctx.storage.deleteAlarm();
     // The usage still counts, even though the share is gone.
-    const pending = this.#pendingUsage;
-    this.#pendingUsage = 0;
-    meta.bytes += pending;
+    const pending = this.#takeUsage();
+    meta.bytes += pending.bytes;
     const org = this.#org(meta.orgId);
-    if (pending) await org.addUsage(pending, meta.limits.monthlyBytes);
+    if (pending.bytes || pending.requests) await org.addUsage(pending, meta.limits);
     // The view log's last counts go to D1; the object keeps none of it.
     await this.#views.close(meta);
     await org.remove(meta.id);

@@ -40,7 +40,11 @@ export interface Me {
   orgs: { id: string; name: string; role: string; personal: boolean }[];
   activeOrgId: string | null;
   role: Role | null;
-  standing: { ok: boolean; reason: "billing_off" | "subscribed" | "no_subscription" } | null;
+  standing:
+    | { ok: true; reason: "billing_off" }
+    | { ok: true; reason: "subscribed"; plan: string }
+    | { ok: false; reason: "no_subscription" }
+    | null;
 }
 
 export interface Token {
