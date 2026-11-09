@@ -47,7 +47,7 @@
     "@types/node": "^26.6.6",
     "@types/ws": "^8.18.2",
     "@wurmhol/protocol": "workspace:*",
-    "tsdown": "^0.23.5",
+    "tsdown": "^0.23.7",
     "zod": "4.6.7"
   },
   "engines": {
