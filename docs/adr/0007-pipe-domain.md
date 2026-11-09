@@ -36,5 +36,5 @@ a second domain?"): a second domain.
   (a page on one pipe can set a cookie for `wurmhol.dev` until it lands). The PSL asks for more
   than two years of registration left, so renew `wurmhol.dev` for several years before filing.
 - ACM is no longer needed: ADR 0004's fixed costs drop by $10 a month.
-- Self-hosters get the same choice (`docs/self-hosting.md`): a separate domain for pipes by
+- Self-hosters get the same choice ([self-hosting](../../apps/docs/self-hosting/index.mdx)): a separate domain for pipes by
   default, a `pipe.` subdomain with ACM as the alternative.

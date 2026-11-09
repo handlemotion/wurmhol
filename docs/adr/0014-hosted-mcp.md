@@ -177,7 +177,7 @@ Steps 1, 2 and 4 landed as one pull request; 3 is still to do:
    HTTP, covering another org's pipe refused, a removed member refused on their next call, and
    `stop_pipe` reaching the CLI as `terminated`.
 3. Connected apps in the Tokens dialog, and revocation.
-4. Docs: the docs site's MCP page gains "Connect your assistant", and `docs/self-hosting.md` gains
+4. Docs: the docs site's MCP page gains "Connect your assistant", and [self-hosting](../../apps/docs/self-hosting/index.mdx) gains
    its section.
 
 ## Consequences

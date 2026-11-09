@@ -116,7 +116,7 @@ repo's Wrangler config, provisions D1 and Durable Objects, prompts for the secre
 must be self-contained, and `apps/worker` depends on workspace packages. So the button points at
 the repository root, with a root `wrangler.jsonc` whose `main` is `apps/worker/src/index.ts` and
 whose build runs `pnpm install` and builds `apps/web`. Two steps stay manual and go in
-`docs/self-hosting.md` beside the button: the wildcard route and certificate for the pipe domain
+[self-hosting docs](../../apps/docs/self-hosting/index.mdx) beside the button: the wildcard route and certificate for the pipe domain
 (no API the button drives can add a route on someone's zone), and the D1 migrations, until the
 build applies them. Acceptance is the spec's: a second Cloudflare account, from the button, passes
 the v1 list.
