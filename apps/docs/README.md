@@ -4,7 +4,11 @@ The Wurmhol docs, built and hosted by [Mintlify](https://mintlify.com) and serve
 `wurmhol.com/docs` through `apps/site`'s Worker (`apps/site/worker/index.ts`). Mintlify deploys
 on every push to `main`; its Git settings point at this directory.
 
-Preview locally from this directory (Node 20.17+):
+For repository work, use the Node version in [`.nvmrc`](../../.nvmrc) and pnpm version in
+[`package.json`](../../package.json). See the [documentation map](../../docs/README.md) for
+maintainer guides and the agent-documentation pattern.
+
+Preview locally from this directory:
 
 ```bash
 npx mint dev

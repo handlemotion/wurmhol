@@ -9,7 +9,7 @@ organization plugin already has a `logo` column (`organizations.logo`, a URL), u
 asked whether owners could upload a logo, so their orgs are easier to tell apart in the switcher.
 
 A logo upload needs somewhere to keep the image. Today Wurmhol runs on one Worker, D1, Durable
-Objects and static assets (spec section 5, `docs/self-hosting.md`): one Cloudflare account, two
+Objects and static assets (spec section 5, [self-hosting](../../apps/docs/self-hosting/index.mdx)): one Cloudflare account, two
 hostnames, `wrangler deploy`. Every binding we add is one more thing every self-hoster must create
 before the Worker deploys.
 
@@ -36,7 +36,7 @@ switcher already names every org, so a logo is decoration, and decoration should
 required binding to the self-hosting path or a second storage system to the security review. If
 we build it, R2 is the right store (the binary stays out of D1, and the Worker serves it like the
 favicons, members only), and with no `LOGOS` binding the feature is simply off, documented in
-`docs/self-hosting.md` and `.dev.vars.example` alongside `MAIL_FROM`.
+[self-hosting docs](../../apps/docs/self-hosting/index.mdx) and `.dev.vars.example` alongside `MAIL_FROM`.
 
 ## Consequences
 

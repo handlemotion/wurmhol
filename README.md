@@ -27,8 +27,11 @@ It keeps only each page's `<title>` and favicon, for the wall.
 
 ## Repo
 
-`docs/spec/v1.md` is the spec; `AGENTS.md` the rules. Docs, self-hosting included, are at
-https://wurmhol.com/docs (source in `apps/docs`).
+[AGENTS.md](AGENTS.md) holds agent rules and task-specific reading links.
+[Development](docs/development.md) covers setup and testing;
+[Contributing](docs/contributing.md) covers PRs and shipping. The
+[documentation map](docs/README.md) separates current guides from historical specs and ADRs.
+Product docs, self-hosting included, are at https://wurmhol.com/docs (source in `apps/docs`).
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/handlemotion/wurmhol)
 
@@ -48,12 +51,14 @@ domain's wildcard route and the hostname vars are yours to set afterwards: see
 ## Local
 
 ```bash
+pnpm install --frozen-lockfile
 pnpm stack:serve        # http://localhost:8787, pipes at http://<id>.pipe.localhost:8787
 ```
 
-It copies `apps/worker/.dev.vars.example` to `apps/worker/.dev.vars` if there is none. Sign in
-with the magic link printed in `.local/serve/worker.log` (`auth.dev_link`), and run the daily
-retention job with `curl "http://127.0.0.1:8787/cdn-cgi/local/scheduled"`.
+Use the Node version in `.nvmrc` and pnpm version in `package.json`. The stack command applies
+local D1 migrations and creates local signing config when missing. See
+[Development](docs/development.md#run-locally) for sign-in, hot reload, logs, and stopping it;
+[Operations](docs/operations/doppler.md) covers Doppler and the preferred Cloudflare `cf` CLI.
 
 ## Marketing site and docs
 

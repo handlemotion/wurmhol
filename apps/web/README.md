@@ -1,32 +1,31 @@
-# React + TypeScript + Vite
+# Wurmhol web app
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The React/Vite SPA for sign-in and the shares wall. `apps/worker` serves its production build;
+in development Vite proxies `/api` (including the wall WebSocket) and `/open` to the Worker.
 
-Currently, two official plugins are available:
+Before UI work, read [DESIGN.md](../../DESIGN.md) and the design skills it names.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Develop
 
-## React Compiler
+From the repository root, after [setup](../../docs/development.md#setup):
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+pnpm stack:serve
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Then, in a separate shell:
+
+```bash
+pnpm --filter @wurmhol/web dev
+```
+
+The real Worker listens on 8787 and the Vite app on 5173. Keep the Worker running for auth
+and API calls; Vite alone is not the full stack. Stop the Worker with `pnpm stack:serve:stop`.
+For the alternative Doppler-backed Worker, see [Operations](../../docs/operations/doppler.md#local-development).
+
+## Build and verify
+
+`pnpm --filter @wurmhol/web build` creates `apps/web/dist`, the Worker's static assets. Run
+`pnpm check` and `pnpm check-types` from the root. Real browser behavior belongs in the
+Worker's [e2e suites](../worker/e2e/), not mocked component tests; see
+[testing guidance](../../docs/development.md#checks-and-tests).

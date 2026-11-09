@@ -1,58 +1,39 @@
 # Launch to-do
 
-Setup for hosted wurmhol.com that is still open. Code changes go through pull requests as usual;
-this file lists what waits on accounts, dashboards or decisions. Delete an item when it's done.
-
-## Billing (Stripe)
-
-Billing stays off until `STRIPE_SECRET_KEY` is set, so every org can open pipes without a plan.
-
-Plans per ADR 0027. Done in both the sandbox and live: the Friends and Business products and
-prices, the `wurmhol_requests` meter with Business's metered price (10 M free, then $1.50 per
-million), the customer portal (the default configuration) and the live webhook endpoint for
-`dirt.wurmhol.com`. Doppler has the sandbox key and ids in `dev_worker`, and the live key, webhook
-secret and price ids in `prd_worker`. `metering.e2e.test.ts` passes against the sandbox.
-
-Live price ids: Friends `price_1UYfvsPfbaFGc0CuHQXkQDyg`, Business `price_1UYfwJPfbaFGc0CuPvvPImpM`,
-Business requests `price_1UYom5PfbaFGc0CuMAYkRGVm`.
+Outstanding hosted setup that needs accounts, dashboards, or decisions. Code changes go
+through pull requests; operational procedures live in [Operations](docs/operations/doppler.md).
+Verify external account state before acting, and delete an item when it is done.
 
 ## Google sign-in
 
-- [ ] A privacy policy page on wurmhol.com. Google won't publish the OAuth app without one.
-- [ ] Google Cloud project `wurmhol-513804` → Branding: add the privacy policy URL, then publish
-      the app. Until then it is in Testing, and only listed test users can sign in with Google.
+- [ ] Google Cloud project `wurmhol-513804` → Branding: use
+      `https://wurmhol.com/privacy` as the privacy policy URL, then publish the OAuth app.
+      Verify its current publishing status; Testing restricts sign-in to listed test users.
 
 ## Pipe domain (ADR 0007)
 
-Pipes moved to `<id>.wurmhol.dev`. Once they are verified there:
+After verifying pipes at `<id>.wurmhol.dev`, check whether these old resources remain before
+removing or cancelling anything:
 
-- [ ] Cancel Advanced Certificate Manager: wurmhol.com → SSL/TLS → Edge Certificates.
-- [ ] Remove the `*.pipe` DNS record on wurmhol.com and the Worker route `*.pipe.wurmhol.com/*`.
+- [ ] Cancel Advanced Certificate Manager on wurmhol.com if no remaining hostname needs it.
+- [ ] Remove the `*.pipe` DNS record and the Worker route `*.pipe.wurmhol.com/*` if still present.
 
 ## Public Suffix List
 
-Puts `wurmhol.dev` (the pipe domain, ADR 0007) on the PSL so browsers treat every pipe as its own
-site. Wurmhol's own cookies are `__Host-` cookies and don't need it, but until it lands, a page
-served through one pipe can set a cookie for `wurmhol.dev` that other pipes receive.
+Put `wurmhol.dev` on the PSL so browsers treat every pipe as its own site. Wurmhol's own
+`__Host-` cookies do not need it, but without the entry a page on one pipe can set a cookie
+for the domain that other pipes receive.
 
-The entry is committed on `handlemotion/list`, branch `add-wurmhol`, and the pull request is
-held.
+Review the existing work on `handlemotion/list`, branch `add-wurmhol`, before submitting.
+The PSL maintainers expect an established user base, a long enough domain registration, and
+a role contact address:
 
-- [ ] Change the entry on `add-wurmhol` from `pipe.wurmhol.com` to `wurmhol.dev`.
+- [ ] Ensure the entry uses `wurmhol.dev`, not `pipe.wurmhol.com`.
+- [ ] Ensure more than two years of registration remain on `wurmhol.dev`.
+- [ ] Confirm the project meets the maintainers' current established-use guidelines.
+- [ ] Set up a role address such as `security@wurmhol.com`, and use it in "Submitted by".
+- [ ] Open the pull request with the current PSL template, then set `_psl.wurmhol.dev` TXT
+      to that pull request's URL.
 
-The PSL maintainers expect, before they accept a private entry:
-
-- [ ] More than two years of registration left: renew `wurmhol.dev` (Cloudflare Registrar) for
-      several years before filing. It is registered for one.
-- [ ] An established user base (their guidelines say roughly 2,000–3,000 distinct users).
-- [ ] A role contact address, such as `security@wurmhol.com` (Cloudflare Email Routing can forward
-      it). Update the "Submitted by" line on the branch to match.
-- [x] A public abuse and security contact page on wurmhol.com (`SECURITY.md` has the content).
-- [ ] Then open the pull request from `add-wurmhol` with their template, and add the TXT record
-      `_psl.wurmhol.dev` with the pull request's URL as its value.
-
-## Small things
-
-- [x] Marketing site: an `og:image` for link previews.
-- [x] `packages/cli/package.json`: `bin` as `dist/cli.js` (no `./`), which silences npm's
-      "script name was invalid" publish warning. Ride along with the next CLI change.
+The public [security page](apps/site/src/pages/security.astro) and
+[privacy policy](apps/site/src/pages/privacy.astro) are implemented; keep their details current.
