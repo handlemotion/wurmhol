@@ -16,7 +16,7 @@
     "@better-auth/oauth-provider": "^1.7.17",
     "@better-auth/passkey": "^1.7.17",
     "@better-auth/stripe": "^1.7.17",
-    "@simplewebauthn/server": "13.3.3",
+    "@simplewebauthn/server": "14.1.0",
     "@wurmhol/db": "workspace:*",
     "better-auth": "^1.7.17",
     "better-call": "1.4.5",
