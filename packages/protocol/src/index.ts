@@ -9,3 +9,4 @@ export * from "./names.ts";
 export * from "./source.ts";
 export * from "./machine.ts";
 export * from "./wall.ts";
+export * from "./embed.ts";
