@@ -170,9 +170,26 @@ page (its users have no Wurmhol account). A page navigation is redirected to the
 issues a fresh browser grant and redirects to the new `launchUrl`. Without a `launch_url`, and for
 anything that is not a page navigation, the answer is `401 grant required`.
 
-Cross-origin WebSockets from the SaaS's own pages (a socket from `app.dorks.dev` to the tunnel's
-host) cannot carry the host-only cookie and cannot set headers. They are out of the first release;
-section 10 lists the options.
+**Browser WebSockets from the SaaS's own pages** (a socket from `app.dorks.dev` to the tunnel's
+host) cannot carry the host-only cookie and cannot set headers. They carry a client grant in the
+WebSocket subprotocol list instead, the pattern Kubernetes uses for bearer tokens:
+
+- The page offers two entries, `wurmhol.grant` and `wurmhol.grant.<whg_ token>`, beside any of
+  its app's own subprotocols. The SDK's browser helper builds the list.
+- The relay accepts this only on a WebSocket handshake, and only when the request's `Origin` is
+  in the application's `allowed_origins` (set by an app manager; empty refuses every one). This
+  stops another site's page from using a leaked grant from a victim's browser.
+- The relay removes both entries before the handshake reaches the dev server. It answers with the
+  subprotocol the dev server chose, or with `wurmhol.grant` when it chose none, because browsers
+  fail a handshake that names protocols and gets none back. The token is never echoed.
+- The grant is a short-lived client grant, minted per connection by the SaaS backend and handed to
+  its page; it is in page memory, never in a URL, a cookie or storage.
+
+**Third-party iframes are not supported.** A tunnel's page opens in a top-level tab or a popup
+(`window.open(launchUrl)`), never in an iframe on another site. Browsers block or partition
+third-party cookies differently, and a framed tunnel invites clickjacking of the user's own app.
+The grant cookie stays `SameSite=Lax` with no `Partitioned` attribute, so a cross-site frame never
+gets a session and shows the `401` page. Supporting iframes would need its own ADR.
 
 ### 6. Expiry, revocation and reconnect
 
@@ -238,9 +255,13 @@ section 10 lists the options.
   the application's ends that application's; the org's spend cap still ends everything, as today.
   A runaway tenant cannot spend the SaaS's whole cap.
 - **Open tunnels.** Embedded tunnels do not take the org's wall slots (Business's 500 open pipes).
-  They count against a separate fair-use limit, `LIMIT_EMBED_ACTIVE`, whose hosted value is a
-  pricing decision for the owner before launch; an idle session hibernates and costs nothing, so
-  the limit protects against abuse, not cost.
+  They count against a separate fair-use limit per org, `LIMIT_EMBED_ACTIVE`, default and hosted
+  value 1,000 open sessions: twice Business's wall slots, raised for an org on request. An idle
+  session hibernates and costs nothing, so the limit protects against abuse, not cost, and starts
+  low because raising a limit is easy and lowering one breaks a customer.
+- **Defaults for a new application**: open tunnels per tenant 10, no per-tenant or per-application
+  request limit (the org's spend cap applies). App managers lower or raise them; per-tenant
+  values never exceed the application's, nor the application's the org's.
 
 ### 9. What stays the same
 
@@ -248,17 +269,14 @@ Friends and team sharing are untouched: the wall, members' cookies, `/open`, `--
 keys, named pipes, classic tokens, machines, the MCP server and Business metering behave as
 today. Embedded tunnels are additive rows and code paths, selected by the tunnel's host.
 
-### 10. Open questions
+### 10. Settled and deferred
 
-- **Cross-origin browser WebSockets.** Options: a grant in a `Sec-WebSocket-Protocol` entry that
-  the relay strips (and answers with a marker protocol when the dev server picks none, since
-  browsers fail a handshake that drops a requested protocol); or a first-party iframe on the
-  tunnel's host. Decide with Dorks' real client before building.
-- **Embedded in a third-party iframe.** Browsers partition or block third-party cookies; the grant
-  cookie may need `Partitioned` (CHIPS). Verify in Chrome, Safari and Firefox before promising it.
-- **`LIMIT_EMBED_ACTIVE` and per-application defaults on hosted Wurmhol.** Pricing, the owner's
-  call.
-- **Custom domains** (ADR 0031) fit as an application's tunnel zone; designed there, not here.
+Settled above: browser WebSockets from the SaaS's pages use a subprotocol grant checked against
+the application's allowed origins (section 5); third-party iframes are not supported (section 5);
+`LIMIT_EMBED_ACTIVE` is 1,000 and a tenant opens 10 tunnels by default (section 8).
+
+Deferred: **custom domains** (ADR 0031) fit as an application's tunnel zone; designed there, not
+here.
 
 ## Consequences
 
@@ -313,26 +331,26 @@ for self-hosters), which hosted Wurmhol sets only after step 6 passes.
 `pnpm --filter @wurmhol/db db:generate`. Additive only; every table has `org_id` and cascades from
 the org.
 
-| Table            | Columns (beyond `id`, `org_id`, `created_at`)                                                                                                  |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps`           | `name`, `launch_url`, `monthly_requests`, `active_tunnels`, `tenant_monthly_requests`, `tenant_active_tunnels` (limits nullable), `deleted_at` |
-| `app_keys`       | `app_id`, `name`, `hash` (unique), `permissions` (text list), `created_by` (set null), `expires_at`, `last_used_at`, `revoked_at`              |
-| `tenants`        | `app_id`, `external_id` (unique per app), `monthly_requests`, `active_tunnels` (overrides), `disabled_at`                                      |
-| `subjects`       | `app_id`, `tenant_id`, `external_id` (unique per tenant), `kind`, `disabled_at`                                                                |
-| `tunnels`        | `app_id`, `tenant_id`, `owner_subject_id`, `name` (unique, also in `pipe_names`), `stopped_at`, `deleted_at`                                   |
-| `tunnel_access`  | `tunnel_id`, `subject_id` (primary key together)                                                                                               |
-| `connectors`     | `tunnel_id`, `hash` (unique), `expires_at`, `last_used_at`, `revoked_at`                                                                       |
-| `grants`         | `app_id`, `tenant_id`, `tunnel_id`, `subject_id`, `key_id`, `kind`, `hash` (unique, null for browser grants), `expires_at`, `revoked_at`       |
-| `launch_codes`   | `hash` (primary key), `grant_id`, `expires_at`; deleted on use and swept like `oauth_states`                                                   |
-| `grant_events`   | `grant_id`, `key_id`, `subject_id`, `tunnel_id`, `event` (`issued`, `revoked`, `expired`), `at`                                                |
-| `shares` (alter) | nullable `app_id`, `tenant_id`, `tunnel_id`, `connector_id`; index `(tunnel_id, ended_at)`                                                     |
+| Table            | Columns (beyond `id`, `org_id`, `created_at`)                                                                                                                                 |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps`           | `name`, `launch_url`, `allowed_origins` (text list), `monthly_requests`, `active_tunnels`, `tenant_monthly_requests`, `tenant_active_tunnels` (limits nullable), `deleted_at` |
+| `app_keys`       | `app_id`, `name`, `hash` (unique), `permissions` (text list), `created_by` (set null), `expires_at`, `last_used_at`, `revoked_at`                                             |
+| `tenants`        | `app_id`, `external_id` (unique per app), `monthly_requests`, `active_tunnels` (overrides), `disabled_at`                                                                     |
+| `subjects`       | `app_id`, `tenant_id`, `external_id` (unique per tenant), `kind`, `disabled_at`                                                                                               |
+| `tunnels`        | `app_id`, `tenant_id`, `owner_subject_id`, `name` (unique, also in `pipe_names`), `stopped_at`, `deleted_at`                                                                  |
+| `tunnel_access`  | `tunnel_id`, `subject_id` (primary key together)                                                                                                                              |
+| `connectors`     | `tunnel_id`, `hash` (unique), `expires_at`, `last_used_at`, `revoked_at`                                                                                                      |
+| `grants`         | `app_id`, `tenant_id`, `tunnel_id`, `subject_id`, `key_id`, `kind`, `hash` (unique, null for browser grants), `expires_at`, `revoked_at`                                      |
+| `launch_codes`   | `hash` (primary key), `grant_id`, `expires_at`; deleted on use and swept like `oauth_states`                                                                                  |
+| `grant_events`   | `grant_id`, `key_id`, `subject_id`, `tunnel_id`, `event` (`issued`, `revoked`, `expired`), `at`                                                                               |
+| `shares` (alter) | nullable `app_id`, `tenant_id`, `tunnel_id`, `connector_id`; index `(tunnel_id, ended_at)`                                                                                    |
 
 Query helpers in `packages/db` (`useAppKey`, `useConnector`, `findGrant`, `revokeGrants…`) scope
 every query by `org_id` and application. Migration runs while the old Worker serves; the old
 Worker never reads the new columns.
 
 **Step 3: applications and keys in the console.** Worker `/api/apps` (owners only, Business or
-billing off): create, rename, set `launch_url` and limits, delete; make, list and revoke
+billing off): create, rename, set `launch_url`, allowed origins and limits, delete; make, list and revoke
 integration keys (shown once, with permissions). Web app: an Applications page per
 [DESIGN.md](../../DESIGN.md), with tunnels' health and Stop/Delete and no open link. E2E: a member
 who is not an owner is refused; a Friends org gets `402`; a key is shown once and stored hashed.
@@ -359,11 +377,13 @@ or see the session; health has no title or favicon.
 
 **Step 5: grants.** `POST /v1/embed/grants`, `DELETE /v1/embed/grants/:id`, `grant_events`. In the
 Worker's share-host handler (`viewer.ts`), embedded hosts go through a grant path: the launch
-route, the grant cookie (new signer beside `share-cookie.ts`), the grant header, and the redirect
-to `launch_url`. In the Share object: the grant check and cache, `g:<grantId>` socket tags, the
+route, the grant cookie (new signer beside `share-cookie.ts`), the grant header, the subprotocol
+grant on WebSocket handshakes (origin check, both entries stripped, `wurmhol.grant` answered when
+the dev server picks none), and the redirect to `launch_url`. In the Share object: the grant check and cache, `g:<grantId>` socket tags, the
 expiry alarm, and `revokeGrants(ids)` called after D1 on every revoking route. Member cookies and
 access keys refused on embedded meta. E2E: acceptance criteria 1 to 4, including a WebSocket held
-open across a revoke and an expiry.
+open across a revoke and an expiry; a subprotocol grant from an allowed origin connects, from any
+other origin is refused, and the dev server never sees either entry.
 
 **Step 6: usage and limits.** Usage batches carry `appId` and `tenantId`; the Org object keeps
 per-application and per-tenant counts per window and enforces their limits on reserve and on usage,
@@ -382,6 +402,9 @@ sessions; the org's Stripe meter (test mode) receives the sum once.
   as final.
 - Clients: `grantHeaders(token)` and a WebSocket helper that reissues a grant through a callback
   and reconnects on `4401`; `4403` is final.
+- Browsers: `@wurmhol/sdk/browser`, a dependency-free entry with `grantProtocols(token, own?)`
+  (the subprotocol list of section 5) and the same reconnecting WebSocket helper, taking a callback
+  that asks the SaaS backend for a fresh client grant.
 - CLI: `WURMHOL_TOKEN=whc_… wurmhol <port>` opens the connector's tunnel; `--name` and `--only`
   are refused with a fix. `wurmhol login` stays for members.
 - E2E with a compiled Bun binary as in `sdk-bun.e2e.test.ts`, plus a TypeScript example app.
@@ -394,7 +417,7 @@ while building.
 **Step 9: production verification**, per [Contributing](../contributing.md): after the deploy, a
 test application in a Business test org opens a tunnel from a real agent, a grant opens it in a
 browser and from a WebSocket client, a revoke closes both, and the owner's console shows health
-without an open link. Needs the owner's approval for the hosted `LIMIT_EMBED_ACTIVE` value first.
+without an open link.
 
 ### Migration and rollout
 
