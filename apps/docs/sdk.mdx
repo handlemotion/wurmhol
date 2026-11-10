@@ -148,4 +148,24 @@ Node 22 or newer uses the `ws` package. Bun, including a compiled Bun binary, an
 
 ## Custom domains
 
-Pipes on your own hostname, like `preview.acme.dev`, are designed but not built yet ([ADR 0031](https://github.com/handlemotion/wurmhol/blob/main/docs/adr/0031-custom-domains-and-app-api.md)). The options and types exist so your code can be written ahead; until a server supports them, passing `domain` rejects with an `unsupported` error.
+A named pipe lives at `<name>.wurmhol.dev`. To show your own hostname instead, like `preview.acme.dev`, attach it to the name. People still sign in as members of your org, and the pipe, its access key and its limits are the same on both hosts. It needs a token that can list and close every pipe, and an install that has [custom domains](/self-hosting/custom-domains) on.
+
+```ts
+import { Wurmhol } from "@wurmhol/sdk";
+
+const wurmhol = new Wurmhol({ token: process.env.WURMHOL_TOKEN });
+const domain = await wurmhol.domains.add({ hostname: "preview.acme.dev", pipe: "acme-app" });
+domain.dns; // the two DNS records to publish at acme.dev's DNS host
+const active = await wurmhol.domains.waitActive("preview.acme.dev");
+active.url; // https://preview.acme.dev, now the URL of every pipe named acme-app
+```
+
+Two records, because there are two things to prove. A `TXT` record at `_wurmhol.<hostname>` proves you own the name, and a `CNAME` from the hostname to the install's target sends its traffic here and gets it a certificate. A domain is `pending` until the TXT record is seen, `verifying` until the certificate is ready, `active` when both are, and `failed` if it is not active within seven days or is refused. Only `active` is served. Removing the `CNAME` stops it again.
+
+`domains({ token })` is the same client without a `Wurmhol`. `waitActive` takes `timeoutMs`, `intervalMs`, `onUpdate` and a `signal`; every call takes a `signal`. A refusal rejects with a `DomainError`, a `FixError` whose `domainCode` is the server's reason.
+
+There is no `domain` option on `openPipe`: a pipe's custom domain follows its name, so open it with `name: "acme-app"` and its URL is the active domain. Passing `domain` rejects with an `unsupported` error that says so.
+
+From a shell, the same: `wurmhol domain add preview.acme.dev --name acme-app --wait`, then `verify`, `ls` and `rm`.
+
+Over HTTP, on the CLI's host with the same token: `GET /v1/domains`, `POST /v1/domains` with `{ "hostname", "pipe" }`, `GET /v1/domains/<hostname>`, `POST /v1/domains/<hostname>/verify` and `DELETE /v1/domains/<hostname>`. A refusal is `{ "error", "fix", "code" }`, where `code` is one of `custom_domains_off`, `invalid_hostname`, `hostname_reserved`, `hostname_taken`, `pipe_taken`, `pipe_reserved`, `domain_limit`, `not_found`, `dns_unavailable` or `provider_error`.

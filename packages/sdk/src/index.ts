@@ -68,7 +68,15 @@ export type { SocketLike, TunnelSocket, TunnelSocketOptions } from "./browser.ts
 export { FixError } from "./errors.ts";
 export type { ErrorCode } from "./errors.ts";
 
-export type { DomainState, PipeDomain } from "./domains.ts";
+export { DomainError, domains } from "./domains.ts";
+export type {
+  CallOptions,
+  Domain,
+  DomainsClient,
+  DomainsOptions,
+  DomainState,
+  WaitOptions,
+} from "./domains.ts";
 
 export { runtime, selectTransport } from "./transport/index.ts";
 export type { Runtime, TransportChoice } from "./transport/index.ts";

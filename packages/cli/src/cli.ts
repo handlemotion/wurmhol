@@ -12,6 +12,7 @@
 //                                 (--install runs it at login, --uninstall removes that)
 //   wurmhol doctor [--port N]     check the token, proxy, allowlist and port a pipe needs
 //   wurmhol mcp                   a stdio MCP server with the same tools, for agents
+//   wurmhol domain add|ls|verify|rm   your own hostname on a pipe name (ADR 0030)
 import { homedir, hostname } from "node:os";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -36,7 +37,14 @@ import {
   startDaemon,
 } from "./daemon.ts";
 import { doctor as runDoctor, formatCheck } from "./doctor.ts";
-import { FixError, login as deviceLogin, redeem, startLogin } from "@wurmhol/sdk";
+import {
+  type Domain,
+  domains as domainsClient,
+  FixError,
+  login as deviceLogin,
+  redeem,
+  startLogin,
+} from "@wurmhol/sdk";
 import { DEFAULT_CONSOLE, DEFAULT_SERVER, pagePath, pageUrl } from "@wurmhol/sdk/internal";
 import { host as runHost } from "./host.ts";
 import { init } from "./init.ts";
@@ -82,6 +90,14 @@ Usage:
                                 domain; one line each, ok or the fix. Exits 1 if any fails
     --port <port>               Also check that the port answers HTTP (127.0.0.1 or ::1)
     --json                      {checks: [{name, ok, detail, fix}]}
+  wurmhol domain add <hostname> --name <pipe>
+                                Put your own hostname on a pipe name, like
+                                preview.acme.dev on acme-app: prints the two DNS records to
+                                publish; needs a token that can list and close every pipe
+  wurmhol domain verify <hostname>
+                                Check it now (--wait keeps checking until it is active)
+  wurmhol domain ls [--json]    List the org's domains and where each stands
+  wurmhol domain rm <hostname>  Remove one
   wurmhol login                 Approve this computer in the browser; stores a token
   wurmhol logout                Delete the stored token
   wurmhol mcp                   Run an MCP server on stdio (open_pipe, list_pipes,
@@ -406,6 +422,79 @@ async function doctor(portText: string | undefined, json: boolean) {
 /** Lines `wurmhol logs` prints before it follows. */
 const LOG_LINES = 50;
 
+/** One domain, as `wurmhol domain` prints it: the state, and the DNS records still to publish. */
+function formatDomain(domain: Domain) {
+  const lines = [`${domain.hostname}  ${domain.pipe}  ${domain.state}`];
+  if (domain.state === "active" && domain.url) lines.push(`  ${domain.url}`);
+  if (domain.error) lines.push(`  ${domain.error.message} ${domain.error.fix}`);
+  if (domain.state !== "active" && domain.state !== "failed") {
+    for (const record of domain.dns) {
+      const done = record.done ? "ok     " : "publish";
+      const why = record.purpose === "ownership" ? "proves you own it" : "sends traffic to Wurmhol";
+      lines.push(`  ${done}  ${record.type.padEnd(5)} ${record.name}  ${record.value}  (${why})`);
+    }
+  }
+  return lines.join("\n");
+}
+
+/**
+ * `wurmhol domain add|verify|ls|rm` (ADR 0030): a hostname you own on one of your pipe names, so
+ * the pipe's URL is yours. Needs a token of scope `org`.
+ */
+async function domain(
+  action: string | undefined,
+  hostname: string | undefined,
+  options: { name: string | undefined; json: boolean; wait: boolean },
+) {
+  const client = domainsClient({ token: token(), server: server() });
+  const print = (value: Domain) =>
+    process.stdout.write(options.json ? `${JSON.stringify(value)}\n` : `${formatDomain(value)}\n`);
+  const need = () =>
+    hostname ?? fail(`Say which hostname: wurmhol domain ${action} preview.example.com.`);
+  try {
+    if (action === "ls") {
+      const all = await client.list();
+      if (options.json) return void process.stdout.write(`${JSON.stringify({ domains: all })}\n`);
+      return void process.stdout.write(
+        all.length ? `${all.map(formatDomain).join("\n")}\n` : "No custom domains.\n",
+      );
+    }
+    if (action === "add") {
+      const pipe = options.name ?? fail("Say which pipe name: --name acme-app.");
+      const added = await client.add({ hostname: need(), pipe });
+      if (!options.wait) {
+        print(added);
+        if (!options.json) {
+          process.stdout.write(
+            `Publish the records above at ${added.hostname}'s DNS host, then: wurmhol domain verify ${added.hostname} --wait\n`,
+          );
+        }
+        return;
+      }
+      if (!options.json) process.stdout.write(`${formatDomain(added)}\n`);
+    }
+    if (action === "verify" || action === "add") {
+      const host = need();
+      const done = options.wait
+        ? await client.waitActive(host, {
+            onUpdate: (d) => {
+              if (!options.json && d.state !== "active")
+                process.stderr.write(`${d.hostname}  ${d.state}\n`);
+            },
+          })
+        : await client.verify(host);
+      return print(done);
+    }
+    if (action === "rm") {
+      await client.remove(need());
+      return void process.stdout.write(options.json ? '{"ok":true}\n' : `removed ${hostname}\n`);
+    }
+  } catch (error) {
+    fail(error);
+  }
+  fail(`Unknown domain command: ${action ?? "(none)"}. Use add, verify, ls or rm.`);
+}
+
 /** The log `target` names: an open pipe's (the newest one on a port), or an ended pipe's id. */
 function logOf(target: string): string | null {
   const open = listStates().filter((s) => matches(s, target));
@@ -477,6 +566,7 @@ function parseCommandLine(args = process.argv.slice(2)) {
         path: { type: "string" },
         all: { type: "boolean", default: false },
         follow: { type: "boolean", short: "f", default: false },
+        wait: { type: "boolean", default: false },
         skill: { type: "boolean", default: false },
         install: { type: "boolean", default: false },
         uninstall: { type: "boolean", default: false },
@@ -507,6 +597,13 @@ async function main() {
   if (command === "stop") return stop(argument, values.all);
   if (command === "logs") return logs(argument, values.json, values.follow);
   if (command === "init") return init(values.skill);
+  if (command === "domain") {
+    return domain(argument, positionals[2], {
+      name: values.name,
+      json: values.json,
+      wait: values.wait,
+    });
+  }
   if (command === "login") return login();
   if (command === "doctor") return doctor(values.port, values.json);
   if (command === "host" && values.install) return installHost();
