@@ -11,7 +11,8 @@
 // Only response headers are read, never bodies. The code, tokens and the URL are never logged or
 // stored; only the state's hash and the pipe's id are, for minutes.
 import { createDb, recordOAuthState, takeOAuthState } from "@wurmhol/db";
-import { type Config, relayOrigin, shareOrigin } from "./env.ts";
+import { type Config, relayOrigin } from "./env.ts";
+import { viewerOrigin } from "./share-url.ts";
 import { createLogger } from "./log.ts";
 import { errorPage } from "./pages.ts";
 
@@ -47,6 +48,8 @@ export async function noteOAuthRedirect(
   share: { id: string; orgId: string },
   request: Request,
   response: Response,
+  /** The custom domain the flow started on (ADR 0030): where it comes back to. */
+  host: string | null = null,
 ) {
   const state = relayedState(config, response.headers.get("location"), request.url);
   if (!state) return;
@@ -55,6 +58,7 @@ export async function noteOAuthRedirect(
     orgId: share.orgId,
     shareId: share.id,
     expiresAt: new Date(Date.now() + STATE_TTL_MS),
+    host,
   });
   createLogger({ component: "oauth" }).info("oauth.recorded", {
     shareId: share.id,
@@ -72,10 +76,8 @@ export async function handleRelay(request: Request, env: Env, config: Config) {
   }
   const url = new URL(request.url);
   const state = url.searchParams.get("state");
-  const share =
-    state && state.length <= MAX_STATE_LENGTH
-      ? await takeOAuthState(createDb(env.DB), state)
-      : null;
+  const db = createDb(env.DB);
+  const share = state && state.length <= MAX_STATE_LENGTH ? await takeOAuthState(db, state) : null;
   if (!share) {
     log.info("oauth.unknown");
     return errorPage(
@@ -93,7 +95,7 @@ export async function handleRelay(request: Request, env: Env, config: Config) {
   return new Response(null, {
     status: 302,
     headers: {
-      location: `${shareOrigin(config, share)}${url.pathname}${url.search}`,
+      location: `${await viewerOrigin(db, config, share, share.host)}${url.pathname}${url.search}`,
       "cache-control": "no-store",
       "referrer-policy": "no-referrer",
     },

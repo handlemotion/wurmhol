@@ -5,7 +5,7 @@
 import { findMember, findShare } from "@wurmhol/db";
 import { Hono } from "hono";
 import { type AppEnv, resolveSession } from "../context.ts";
-import { shareOrigin } from "../env.ts";
+import { viewerOrigin } from "../share-url.ts";
 import { errorPage } from "../pages.ts";
 import { shareStub } from "../share-do.ts";
 import { sameOriginPath, SHARE_ID } from "@wurmhol/protocol";
@@ -34,7 +34,9 @@ export const open = new Hono<AppEnv>().get("/", async (c) => {
   if (!(await stub.mayView(session.user.id))) return login("not-listed");
 
   const code = await stub.issueCode(session.user.id);
-  const target = new URL(`${RESERVED_PREFIX}auth`, shareOrigin(c.var.config, share));
+  // The host the viewer came from, when it is one of this pipe's own custom domains (ADR 0030).
+  const origin = await viewerOrigin(c.var.db, c.var.config, share, c.req.query("host"));
+  const target = new URL(`${RESERVED_PREFIX}auth`, origin);
   target.searchParams.set("code", code);
   target.searchParams.set("next", next);
   c.header("cache-control", "no-store");

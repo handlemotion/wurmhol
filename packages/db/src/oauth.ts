@@ -39,7 +39,7 @@ export async function takeOAuthState(db: Db, state: string, now = new Date()) {
     });
   if (!taken || taken.expiresAt <= now) return null;
   const [share] = await db
-    .select({ id: shares.id, name: shares.name, endedAt: shares.endedAt })
+    .select({ id: shares.id, orgId: shares.orgId, name: shares.name, endedAt: shares.endedAt })
     .from(shares)
     .where(eq(shares.id, taken.shareId))
     .limit(1);

@@ -568,7 +568,7 @@ export class Share extends DurableObject<Env> {
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
       return this.#openViewerSocket(request, meta, grant);
     }
-    return this.#relay(this.#requestHead(request, meta), request.body, meta);
+    return this.#relay(this.#requestHead(request), request.body, meta);
   }
 
   /**
@@ -740,12 +740,14 @@ export class Share extends DurableObject<Env> {
     this.ctx.waitUntil(this.#org(meta.orgId).update(meta.id, { lastRequestAt: at }));
   }
 
-  #requestHead(request: Request, meta: Meta): RequestHead {
+  #requestHead(request: Request): RequestHead {
     const url = new URL(request.url);
     return {
       method: request.method,
       path: `${url.pathname}${url.search}`,
-      headers: viewerRequestHeaders(request.headers, meta.url),
+      // The host the viewer used, not the pipe's own URL: a pipe with a custom domain (ADR 0030)
+      // answers on both, and an app builds its redirect URIs from what it is told.
+      headers: viewerRequestHeaders(request.headers, request.url),
     };
   }
 
@@ -903,7 +905,7 @@ export class Share extends DurableObject<Env> {
     const id = this.#nextStream();
     const stream: WsStream = { kind: "ws", opened: deferred() };
     this.#streams.set(id, stream);
-    const head = this.#requestHead(request, meta);
+    const head = this.#requestHead(request);
     // A browser's grant entries never reach the dev server (ADR 0032); the app's own do.
     const { grant: offered, own: protocols } = splitGrantProtocols(
       request.headers.get("sec-websocket-protocol"),
