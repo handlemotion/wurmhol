@@ -439,31 +439,37 @@ export class Tunnel {
           maxPayload: MAX_WS_MESSAGE_BYTES,
           lookup: target.lookup,
           autoSelectFamily: target.autoSelectFamily,
+          // Everything is attached from the open event itself: a dev server that speaks first
+          // (a greeting, a replayed state) sends in the same packet as its handshake answer, and
+          // a listener added after the promise settles would miss it.
+          onOpen: (socket) => {
+            if (stream.cancelled || !this.#streams.has(id)) return socket.terminate();
+            stream.socket = socket;
+            this.#send({
+              stream: id,
+              type: "ws-open",
+              payload: {
+                accepted: true,
+                ...(socket.protocol ? { protocol: socket.protocol } : {}),
+              },
+            });
+            socket.on("message", (data, isBinary) => {
+              this.#send({ stream: id, type: "ws-message", payload: { binary: isBinary, data } });
+            });
+            socket.on("close", (code, reason) => {
+              if (!this.#streams.has(id)) return;
+              this.#streams.delete(id);
+              this.#send({
+                stream: id,
+                type: "ws-close",
+                payload: { code, reason: reason.toString() },
+              });
+            });
+            // The close that follows ends the stream; an error alone changes nothing.
+            socket.on("error", () => {});
+          },
         },
       )
-      .then(({ socket }) => {
-        if (stream.cancelled || !this.#streams.has(id)) return socket.terminate();
-        stream.socket = socket;
-        this.#send({
-          stream: id,
-          type: "ws-open",
-          payload: { accepted: true, ...(socket.protocol ? { protocol: socket.protocol } : {}) },
-        });
-        socket.on("message", (data, isBinary) => {
-          this.#send({ stream: id, type: "ws-message", payload: { binary: isBinary, data } });
-        });
-        socket.on("close", (code, reason) => {
-          if (!this.#streams.has(id)) return;
-          this.#streams.delete(id);
-          this.#send({
-            stream: id,
-            type: "ws-close",
-            payload: { code, reason: reason.toString() },
-          });
-        });
-        // The close that follows ends the stream; an error alone changes nothing.
-        socket.on("error", () => {});
-      })
       .catch(() => {
         if (stream.cancelled || !this.#streams.has(id)) return;
         this.#streams.delete(id);

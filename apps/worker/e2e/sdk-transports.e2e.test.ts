@@ -104,6 +104,30 @@ describe.each<TransportChoice>(["node", "builtin"])("transport %s", (transport) 
     }
   });
 
+  it("delivers what a dev server sends the moment a WebSocket opens", async () => {
+    // Catches: listeners attached after the connection settled, losing a greeting that arrives
+    // in the same packet as the handshake answer.
+    const http = createServer();
+    new WebSocketServer({ server: http }).on("connection", (socket) => socket.send("greeting"));
+    await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
+    const port = (http.address() as { port: number }).port;
+    const pipe = await openPipe({ port, token, server: stack.url, transport });
+    try {
+      const cookie = await viewerCookie(stack, ada, pipe.url);
+      const viewer = browserSocket(pipe.url, [], { cookie });
+      const greeting = await new Promise<string>((resolve, reject) => {
+        viewer.once("message", (data: Buffer) => resolve(data.toString()));
+        viewer.once("error", reject);
+      });
+      expect(greeting).toBe("greeting");
+      viewer.close();
+    } finally {
+      await pipe.close();
+      http.closeAllConnections();
+      http.close();
+    }
+  });
+
   it("says the relay's own fix when it refuses, and does not crash when nothing answers", async () => {
     const refused = await openPipe({
       port: 3000,
