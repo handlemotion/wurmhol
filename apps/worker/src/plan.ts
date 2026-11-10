@@ -11,6 +11,8 @@ export interface OrgPlan {
   plan: PlanName | null;
   members: number | null;
   limits: UsageLimits & { active: number };
+  /** Custom domains the org may have (ADR 0030). */
+  customDomains: number;
 }
 
 /** Requests a Business org may make in a billing period without its bill passing `capCents`. */
@@ -26,6 +28,7 @@ export async function orgPlan(db: Db, config: Config, orgId: string): Promise<Or
     return {
       plan: null,
       members: null,
+      customDomains: config.LIMIT_CUSTOM_DOMAINS,
       limits: {
         active: config.LIMIT_ACTIVE_SHARES,
         monthlyBytes: config.LIMIT_MONTHLY_BYTES,
@@ -39,11 +42,12 @@ export async function orgPlan(db: Db, config: Config, orgId: string): Promise<Or
   if (!subscription) return null;
   // A plan this Worker does not know gets Friends' limits, not unlimited ones.
   const plan: PlanName = isPlanName(subscription.plan) ? subscription.plan : "friends";
-  const { members, active, monthlyBytes, monthlyRequests } = PLAN_LIMITS[plan];
+  const { members, active, monthlyBytes, monthlyRequests, customDomains } = PLAN_LIMITS[plan];
   if (plan !== "business") {
     return {
       plan,
       members,
+      customDomains,
       limits: { active, monthlyBytes, monthlyRequests, period: null, meter: null },
     };
   }
@@ -53,6 +57,7 @@ export async function orgPlan(db: Db, config: Config, orgId: string): Promise<Or
   return {
     plan,
     members,
+    customDomains,
     limits: {
       active,
       monthlyBytes,

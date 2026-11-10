@@ -39,6 +39,13 @@
     "SHARE_DOMAIN": "example-pipes.dev",
     // The OAuth callback relay's host (ADR 0010), e.g. `oauth.wurmhol.dev`. Empty: no relay.
     "OAUTH_RELAY_HOST": "",
+    // Custom domains (ADR 0030): the CNAME target customers point their own hostnames at, e.g.
+    // `domains.example-pipes.dev`. Empty: the feature is off. With it set, CLOUDFLARE_ZONE_ID and the
+    // CLOUDFLARE_API_TOKEN secret are required, and the zone needs a `*/*` Worker route.
+    "CUSTOM_DOMAIN_TARGET": "",
+    "CLOUDFLARE_ZONE_ID": "",
+    // Custom domains an org may have with billing off.
+    "LIMIT_CUSTOM_DOMAINS": "10",
     "AUTH_TRUSTED_ORIGINS": "",
     "AUTH_PASSKEY_RP_ID": "",
     "APP_NAME": "Wurmhol",

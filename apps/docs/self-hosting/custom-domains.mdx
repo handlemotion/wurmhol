@@ -1,0 +1,37 @@
+---
+title: "Custom domains"
+description: "Let orgs put their own hostname, like preview.acme.dev, on a pipe name."
+---
+
+Optional. A named pipe lives at `<name>.example-pipes.dev`. With custom domains on, an org can attach a hostname it owns to one of its pipe names, so people see `preview.acme.dev` instead. The pipe behind it, its sign-in wall and its access key are the same on both hosts. Leave `CUSTOM_DOMAIN_TARGET` empty and none of this runs.
+
+It uses [Cloudflare for SaaS](https://developers.cloudflare.com/cloudflare-for-platforms/cloudflare-for-saas/) custom hostnames, which issue and renew each hostname's certificate. Cloudflare's allowance is 100 custom hostnames, then it bills per hostname, so turning this on can cost money.
+
+## Set it up
+
+1. In the zone that serves your pipe domain, enable Cloudflare for SaaS.
+2. Create the fallback origin: an originless, proxied record like `fallback.example-pipes.dev AAAA 100::`, and set it as the zone's fallback origin. Your `*` wildcard record already covers it.
+3. Create the target customers point at, a proxied record like `domains.example-pipes.dev AAAA 100::`. Its first label is reserved: no pipe can take it as a name.
+4. Add a Worker route `*/*` on the zone, to this Worker. Cloudflare sends a customer's hostname through your zone, so the route must match it. The Worker answers any host it does not know with 404 once custom domains are on, so the console is not exposed on arbitrary hosts.
+5. Create an API token with `SSL and Certificates: Edit` on that zone only.
+6. Set the vars and the secret:
+
+| Var                    | Meaning                                                   |
+| ---------------------- | --------------------------------------------------------- |
+| `CUSTOM_DOMAIN_TARGET` | The target from step 3, like `domains.example-pipes.dev`. |
+| `CLOUDFLARE_ZONE_ID`   | The zone's id.                                            |
+| `CLOUDFLARE_API_TOKEN` | Secret. The token from step 5.                            |
+| `LIMIT_CUSTOM_DOMAINS` | Domains per org with billing off. Default 10.             |
+
+All of the first three or none. `CLOUDFLARE_API_URL`, `DNS_RESOLVER_URL` and `CUSTOM_DOMAIN_PENDING_SECONDS` (default seven days) are optional.
+
+## What an org does
+
+`POST /v1/domains` (or `wurmhol domain add`, or the console) returns two DNS records to publish at the hostname's own DNS:
+
+- `TXT _wurmhol.<hostname> "wurmhol-verify=<challenge>"` proves the org owns the hostname. Without it nothing is routed, even if a `CNAME` already points at you, so a name its owner abandoned cannot be claimed by someone else.
+- `CNAME <hostname> <CUSTOM_DOMAIN_TARGET>` sends traffic through Cloudflare, which issues the certificate once it resolves.
+
+The domain is `pending` until the TXT record is seen, `verifying` until Cloudflare reports the hostname and certificate active, then `active`. One that is not `active` within `CUSTOM_DOMAIN_PENDING_SECONDS` is `failed` and its Cloudflare hostname is removed. A daily job re-checks every domain, so removing the `CNAME` stops routing.
+
+The full contract is [ADR 0030](https://github.com/handlemotion/wurmhol/blob/main/docs/adr/0030-custom-domains.md).
