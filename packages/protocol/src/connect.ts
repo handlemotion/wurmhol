@@ -7,7 +7,31 @@ export const CONNECT_HEADERS = {
   viewers: "wurmhol-viewers",
   /** Where the new share came from, as URI-encoded JSON (ADR 0015). */
   source: "wurmhol-source",
+  /** `accessKeyHash` of the key a non-browser client may open the new share with (ADR 0028). */
+  access: "wurmhol-access",
 } as const;
+
+/**
+ * The header a non-browser client sends to a share host to open the pipe without signing in, when
+ * the pipe was opened with an access key (ADR 0028). Like every `x-wurmhol-*` header it stays with
+ * the relay and never reaches the dev server.
+ */
+export const ACCESS_KEY_HEADER = "x-wurmhol-key";
+
+/** What an access key may be: 32 to 128 characters of a URL-safe alphabet, so 128 bits fit. */
+export const ACCESS_KEY_RULE = "32 to 128 letters, digits, - or _";
+
+export function isAccessKey(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{32,128}$/.test(value);
+}
+
+/** The relay keeps only this: the SHA-256 of the key's UTF-8 bytes, as 64 lowercase hex digits. */
+export const ACCESS_KEY_HASH = /^[0-9a-f]{64}$/;
+
+export async function accessKeyHash(key: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 /** Headers on the Worker's `101` answer: the share the socket belongs to. */
 export const SHARE_HEADERS = {

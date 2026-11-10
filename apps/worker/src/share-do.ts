@@ -11,6 +11,8 @@
 import { DurableObject } from "cloudflare:workers";
 import { createDb, findMember, randomSecret, recordShareEnd, sha256Hex } from "@wurmhol/db";
 import {
+  ACCESS_KEY_HEADER,
+  accessKeyHash,
   chunk,
   CLOSE_CODES,
   decodeFrame,
@@ -21,6 +23,7 @@ import {
   HEARTBEAT_MS,
   type Frame,
   HttpStreamOrder,
+  isAccessKey,
   nextStreamId,
   PING_TEXT,
   pipeSetCookie,
@@ -56,6 +59,8 @@ const INTERNAL_HEADERS = {
   init: "x-wurmhol-init",
   /** To the object: the signed-in viewer's user id. */
   viewer: "x-wurmhol-viewer",
+  /** To the object: the access key a non-browser client presented (ADR 0028). */
+  key: "x-wurmhol-access-key",
   /** From the object: the viewer may no longer open the share. */
   refused: "x-wurmhol-refused",
   /** From the object: the share's org, on a response with a `Location` (the OAuth relay's). */
@@ -71,16 +76,22 @@ export function shareStub(env: Env, shareId: string) {
 /**
  * A client's request rebuilt for the object: our own headers are never taken from the client,
  * only the ones set here. `cli` is the CLI's socket, a bodiless GET to `/connect` (with a new
- * share's `ShareInit`, or null to bring one back); `viewer` is a signed-in viewer's request.
+ * share's `ShareInit`, or null to bring one back); `viewer` is a signed-in viewer's request;
+ * `key` is a request that presented the pipe's access key, for the object to check.
  */
 export function toShare(
   raw: Request,
-  internal: { cli: ShareInit | null } | { viewer: string },
+  internal: { cli: ShareInit | null } | { viewer: string } | { key: string },
 ): Request {
   const headers = new Headers(raw.headers);
   for (const name of Object.values(INTERNAL_HEADERS)) headers.delete(name);
+  headers.delete(ACCESS_KEY_HEADER);
   if ("viewer" in internal) {
     headers.set(INTERNAL_HEADERS.viewer, internal.viewer);
+    return new Request(raw, { headers });
+  }
+  if ("key" in internal) {
+    headers.set(INTERNAL_HEADERS.key, internal.key);
     return new Request(raw, { headers });
   }
   headers.set(INTERNAL_HEADERS.cli, "1");
@@ -432,8 +443,18 @@ export class Share extends DurableObject<Env> {
   async #view(request: Request): Promise<Response> {
     const meta = this.#meta();
     if (!meta) return errorPage(410, "This pipe has ended.");
+    const key = request.headers.get(INTERNAL_HEADERS.key);
     const viewer = request.headers.get(INTERNAL_HEADERS.viewer);
-    if (!viewer || !this.mayView(viewer) || !(await this.#isMember(viewer, meta.orgId))) {
+    if (key !== null) {
+      // A client with no browser session: the pipe's access key stands in for the sign-in (ADR
+      // 0028). It opens only this pipe, and the same limits, billing and wall apply.
+      if (!(await this.#acceptsKey(meta, key))) {
+        return new Response("bad access key", {
+          status: 401,
+          headers: { "content-type": "text/plain", "cache-control": "no-store" },
+        });
+      }
+    } else if (!viewer || !this.mayView(viewer) || !(await this.#isMember(viewer, meta.orgId))) {
       return new Response("not a member", {
         status: 403,
         headers: { [INTERNAL_HEADERS.refused]: "1" },
@@ -445,12 +466,22 @@ export class Share extends DurableObject<Env> {
       });
     }
     this.#touch();
-    this.#views.note(meta, viewer);
+    if (viewer) this.#views.note(meta, viewer);
     this.#pendingRequests += 1;
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
       return this.#openViewerSocket(request, meta);
     }
     return this.#relay(this.#requestHead(request, meta), request.body, meta);
+  }
+
+  /** Whether `key` is the one this pipe was opened with; only its hash is kept. */
+  async #acceptsKey(meta: Meta, key: string) {
+    if (!meta.accessHash || !isAccessKey(key)) return false;
+    const presented = new TextEncoder().encode(await accessKeyHash(key));
+    const stored = new TextEncoder().encode(meta.accessHash);
+    return (
+      presented.byteLength === stored.byteLength && crypto.subtle.timingSafeEqual(presented, stored)
+    );
   }
 
   async #isMember(userId: string, orgId: string) {

@@ -2,7 +2,7 @@
 // `__Host-wurmhol` cookie for this share; without it a page navigation goes to the app to sign
 // in (`/open`), and comes back with a one-time code that this swaps for the cookie. The cookie
 // is stripped before anything reaches the dev server.
-import { readCookie, sameOriginPath, SHARE_COOKIE } from "@wurmhol/protocol";
+import { ACCESS_KEY_HEADER, readCookie, sameOriginPath, SHARE_COOKIE } from "@wurmhol/protocol";
 import { loadConfig } from "./env.ts";
 import { createLogger } from "./log.ts";
 import { noteOAuthRedirect } from "./oauth-relay.ts";
@@ -57,6 +57,14 @@ export async function handleShareHost(request: Request, env: Env, shareId: strin
         "referrer-policy": "no-referrer",
       },
     });
+  }
+
+  // A client with no browser session (ADR 0028): a pipe opened with an access key takes it in
+  // place of the sign-in, and the object checks it. Nothing here redirects to the app.
+  const accessKey = request.headers.get(ACCESS_KEY_HEADER);
+  if (accessKey !== null) {
+    if (!(await open())) return ended();
+    return fromShare(await stub.fetch(toShare(request, { key: accessKey }))).response;
   }
 
   const userId = await verifyShareCookie(
