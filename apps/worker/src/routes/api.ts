@@ -29,6 +29,7 @@ import { orgStub, toOrg } from "../org-do.ts";
 import { memberCap } from "../plan.ts";
 import { limitPerMember } from "../rate-limiter.ts";
 import { shareStub } from "../share-do.ts";
+import { apps } from "./apps.ts";
 import { billing } from "./billing.ts";
 import { machines } from "./machines.ts";
 import { org } from "./org.ts";
@@ -192,6 +193,7 @@ export const api = new Hono<AppEnv>()
     const url = new URL(`/join/${code}`, c.var.config.auth.baseURL).toString();
     return c.json({ url, expiresAt: expiresAt.toISOString() }, 201);
   })
+  .route("/apps", apps)
   .route("/machines", machines)
   .route("/", org)
   .route("/", billing);

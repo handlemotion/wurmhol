@@ -9,3 +9,4 @@ export * from "./devices.ts";
 export * from "./retention.ts";
 export * from "./oauth.ts";
 export * from "./github.ts";
+export * from "./embed.ts";

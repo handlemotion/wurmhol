@@ -231,6 +231,16 @@ const configSchema = z
       .transform((value) => value?.trim().toLowerCase() || "true")
       .pipe(z.enum(["true", "false"], 'use "true" or "false"'))
       .transform((value) => value === "true"),
+    /**
+     * Embedded mode (ADR 0032): applications that open private tunnels for a SaaS's own users.
+     * Off by default; `true` turns on `/api/apps`. With billing on, only Business orgs may use it.
+     */
+    EMBEDDED_ENABLED: z
+      .string()
+      .optional()
+      .transform((value) => value?.trim().toLowerCase() || "false")
+      .pipe(z.enum(["true", "false"], 'use "true" or "false"'))
+      .transform((value) => value === "true"),
   })
   .and(z.object({ auth: authEnvSchema, github: githubSchema }))
   .superRefine((config, ctx) => {
