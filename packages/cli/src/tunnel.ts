@@ -4,6 +4,7 @@
 // whichever answers (loopback.ts), unless the owner names another host.
 import http from "node:http";
 import {
+  accessKeyHash,
   chunk,
   CLOSE_CODES,
   CONNECT_HEADERS,
@@ -66,6 +67,8 @@ export interface TunnelOptions {
   name?: string;
   /** Where a new share comes from (ADR 0015); a reconnect keeps what the share started with. */
   source: PipeSource | null;
+  /** The access key a new share lets non-browser clients in with (ADR 0028); only its hash is sent. */
+  accessKey?: string;
   version: string;
   log: Logger;
   onRequest: (event: RequestEvent) => void;
@@ -161,8 +164,9 @@ export class Tunnel {
     return url;
   }
 
-  #dial(): Promise<WebSocket> {
-    const { server, token, version, viewers, source } = this.#options;
+  async #dial(): Promise<WebSocket> {
+    const { server, token, version, viewers, source, accessKey } = this.#options;
+    const access = !this.#share && accessKey ? await accessKeyHash(accessKey) : null;
     return dial(this.#url(), {
       server,
       token,
@@ -173,6 +177,7 @@ export class Tunnel {
         ...(!this.#share && source
           ? { [CONNECT_HEADERS.source]: encodeURIComponent(JSON.stringify(source)) }
           : {}),
+        ...(access ? { [CONNECT_HEADERS.access]: access } : {}),
       },
       maxPayload: 2 * MAX_WS_MESSAGE_BYTES,
       onUpgrade: (response) => {

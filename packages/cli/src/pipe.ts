@@ -2,6 +2,9 @@
 // adds only its state file and log on top (ADR 0008, section 3).
 import { EventEmitter } from "node:events";
 import {
+  ACCESS_KEY_HEADER,
+  ACCESS_KEY_RULE,
+  isAccessKey,
   parseDuration,
   PIPE_NAME_RULE,
   pipeName,
@@ -105,6 +108,15 @@ export interface OpenPipeOptions {
    * one pipe per name is open at a time.
    */
   name?: string;
+  /**
+   * A secret that lets a client with no browser session open the pipe: send it as the
+   * `x-wurmhol-key` header (a bridge in a cloud sandbox, a script, a webhook caller). Without it
+   * only signed-in members of the org get in. 32 to 128 letters, digits, `-` or `_`; make one with
+   * `openssl rand -base64 24 | tr '+/' '-_' | tr -d '='`. The relay keeps only its hash, so keep
+   * the key: it is the one credential for the pipe, and the same key works every time the pipe
+   * reopens. The header never reaches your server.
+   */
+  accessKey?: string;
   /**
    * Where the pipe comes from, shown on the wall: `{ repo: "acme/app", branch: "feat/x",
    * link: "https://…", note: "…" }` and the rest of the fields of `PipeSource`. Every field is
@@ -242,6 +254,9 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
     throw new FixError(`Not a pipe name: ${options.name}. Use ${PIPE_NAME_RULE}.`);
   }
   const source = checkSource(options.source);
+  if (options.accessKey !== undefined && !isAccessKey(options.accessKey)) {
+    throw new FixError(`Not an access key. Use ${ACCESS_KEY_RULE}, sent as ${ACCESS_KEY_HEADER}.`);
+  }
   const { signal } = options;
   signal?.throwIfAborted();
 
@@ -265,6 +280,7 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
     viewers: options.viewers ?? [],
     name,
     source,
+    accessKey: options.accessKey,
     version: pkg.version,
     log,
     onRequest: (event) => pipe?.emit("request", event),
