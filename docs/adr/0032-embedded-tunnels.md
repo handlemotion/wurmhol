@@ -329,7 +329,9 @@ for self-hosters), which hosted Wurmhol sets only after step 6 passes.
 
 **Step 2: schema.** `packages/db/src/schema/app.ts`, then
 `pnpm --filter @wurmhol/db db:generate`. Additive only; every table has `org_id` and cascades from
-the org.
+the org. The tables are named with an `embed_` prefix (`embed_apps`, …). The new `shares` columns
+have no delete action: embedded rows are soft-deleted, so deleting one a session points at is
+refused instead of turning the session into an org pipe.
 
 | Table            | Columns (beyond `id`, `org_id`, `created_at`)                                                                                                                                 |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

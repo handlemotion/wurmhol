@@ -11,6 +11,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { organizations, users } from "./auth.ts";
+import { embedApps, embedConnectors, embedTenants, embedTunnels } from "./embed.ts";
 
 const now = sql`(cast(unixepoch('subsecond') * 1000 as integer))`;
 
@@ -88,10 +89,18 @@ export const shares = sqliteTable(
     agent: text("agent"),
     /** The agent session's page, http(s). */
     agentUrl: text("agent_url"),
+    // An embedded tunnel's session (ADR 0032); all null for a classic pipe. No delete action:
+    // embedded rows are soft-deleted, so deleting one a session points at is refused rather than
+    // turning the session into an org pipe. Deleting the org removes both through `org_id`.
+    appId: text("app_id").references(() => embedApps.id),
+    tenantId: text("tenant_id").references(() => embedTenants.id),
+    tunnelId: text("tunnel_id").references(() => embedTunnels.id),
+    connectorId: text("connector_id").references(() => embedConnectors.id),
   },
   (table) => [
     index("shares_org_idx").on(table.orgId, table.endedAt),
     index("shares_token_idx").on(table.tokenId),
+    index("shares_tunnel_idx").on(table.tunnelId, table.endedAt),
     // Open pipes of a branch, for a pull request opened after its pipe (ADR 0016).
     index("shares_open_branch_idx")
       .on(table.branch)
