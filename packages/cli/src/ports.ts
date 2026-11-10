@@ -7,7 +7,7 @@ import { readFile } from "node:fs/promises";
 import http from "node:http";
 import { promisify } from "node:util";
 import { MACHINE_LIMITS, type MachinePort } from "@wurmhol/protocol";
-import { Loopback } from "./loopback.ts";
+import { Loopback } from "@wurmhol/sdk/internal";
 
 const run = promisify(execFile);
 

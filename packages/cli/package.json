@@ -34,7 +34,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "pnpm --filter @wurmhol/sdk build && tsdown",
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
@@ -47,6 +47,7 @@
     "@types/node": "^26.6.6",
     "@types/ws": "^8.18.2",
     "@wurmhol/protocol": "workspace:*",
+    "@wurmhol/sdk": "workspace:*",
     "tsdown": "^0.23.5",
     "zod": "4.6.7"
   },

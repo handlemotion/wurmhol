@@ -1,0 +1,44 @@
+{
+  "name": "@wurmhol/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Embed Wurmhol pipes in your own app: open and keep open private HTTPS URLs for a local server, sign in with the device flow, and manage the org's pipes. Runs on Node and Bun, including a compiled Bun binary",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "@wurmhol/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./internal": {
+      "@wurmhol/source": "./src/internal.ts",
+      "types": "./dist/internal.d.ts",
+      "default": "./dist/internal.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "https-proxy-agent": "^9.1.0",
+    "proxy-from-env": "^2.1.0",
+    "ws": "^8.22.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
+    "@wurmhol/protocol": "workspace:*",
+    "tsdown": "^0.23.5"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

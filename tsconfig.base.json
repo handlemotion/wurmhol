@@ -4,6 +4,9 @@
     "lib": ["es2024"],
     "module": "preserve",
     "moduleResolution": "bundler",
+    // Workspace packages resolve to their sources when type-checking (no build needed first); npm
+    // consumers and the bundlers use the built `dist`.
+    "customConditions": ["@wurmhol/source"],
     "moduleDetection": "force",
     "strict": true,
     "noUncheckedIndexedAccess": true,

@@ -9,6 +9,6 @@
     // suites run the built `dist/index.js` through the package's exports.
     "paths": { "wurmhol": ["../../packages/cli/src/index.ts"] }
   },
-  "references": [{ "path": "../../packages/cli" }],
+  "references": [{ "path": "../../packages/cli" }, { "path": "../../packages/sdk" }],
   "include": ["e2e"]
 }

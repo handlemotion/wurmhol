@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./packages/cli" },
+    { "path": "./packages/sdk" },
     { "path": "./packages/db" },
     { "path": "./packages/auth" },
     { "path": "./packages/protocol" },

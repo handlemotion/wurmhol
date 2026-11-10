@@ -5,22 +5,7 @@
 //   pipe.on("request", ({ method, path, status, durationMs }) => {});
 //   pipe.on("close", (reason) => {});
 //   await pipe.close();
-import { openPipe as open, type OpenPipeOptions, type Pipe } from "./pipe.ts";
-
-export { FixError } from "./errors.ts";
-export type {
-  CloseReason,
-  OpenPipeOptions,
-  Pipe,
-  PipeEvents,
-  PipeSource,
-  RequestEvent,
-} from "./pipe.ts";
-
-/**
- * Opens a pipe to a local port and resolves once the relay has given it its URL. Rejects with a
- * `FixError` whose message says the fix in one line, as the CLI prints it.
- */
-export function openPipe(options: OpenPipeOptions): Promise<Pipe> {
-  return open(options);
-}
+//
+// The whole SDK (sign-in, a pipe that reopens, the org's pipes) is exported from here too (ADR
+// 0030); `openPipe` and its types are unchanged.
+export * from "@wurmhol/sdk";
