@@ -135,9 +135,14 @@ export async function runDaemon(
     .filter(Boolean);
   let source: Partial<PipeSource>;
   const { server } = connection;
+  const accessKey = process.env.WURMHOL_ACCESS_KEY?.trim() || undefined;
   let token = connection.token ?? "";
   const open = (ttl: number | undefined) =>
-    openPipe({ server, token, port, ttl, viewers, name, source, signal }, { log });
+    openPipe(
+      // The key comes from the environment, never the command line (it would show in `ps`).
+      { server, token, port, ttl, viewers, name, source, signal, accessKey },
+      { log },
+    );
   const hold = (pipe: Pipe) => {
     pipe.on("request", (request) => appendRequest(pipe.id, request, { port }));
     pipe.once("close", (reason) => {

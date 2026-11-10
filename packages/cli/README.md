@@ -52,6 +52,14 @@ minutes, and lets each one through once. The app must send the viewer off with a
 By default every member of the token's org can open a pipe. `--only ana@x.com,bo@y.com` narrows it
 to those members.
 
+A client with no browser session, such as a script or an agent in a cloud sandbox, can be let in with
+an access key: set `WURMHOL_ACCESS_KEY` (32 to 128 letters, digits, `-` or `_`; for example
+`openssl rand -base64 24 | tr '+/' '-_' | tr -d '='`) when you open the pipe, and have the client send
+it as the `x-wurmhol-key` header. The relay keeps only its hash, checks it on every request, and
+strips it before the request reaches your server. Without it, only signed-in members get in, as
+before. Keep the key secret: it is the pipe's only credential for such clients. Plan limits, billing
+and the wall apply as for any request.
+
 `WURMHOL_URL` points at a self-hosted install. Node 22+. MIT.
 
 ## From your own process
@@ -71,7 +79,7 @@ await pipe.close();
 Options: `server` (a self-hosted install), `host` (where the dev server listens, default
 `127.0.0.1`), `ttl` (seconds, or a duration like `"8h"`; `pipe.endsAt` says when it ends),
 `viewers` (emails of the org members who may open it, like `--only`), `name` (a URL that stays
-the same, like `--name`), `signal` (an `AbortSignal`
+the same, like `--name`), `accessKey` (lets clients with no browser session in; see above), `signal` (an `AbortSignal`
 that closes the pipe) and `log` (`(event, fields) => {}`, the connection's connects, drops and
 reconnects; never request contents). `openPipe` rejects with a `FixError` whose message is the
 one-line fix the CLI prints. ESM only.

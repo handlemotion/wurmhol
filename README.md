@@ -68,4 +68,4 @@ to the Mintlify deployment named by `DOCS_HOST` in `apps/site/wrangler.jsonc` (M
 `apps/docs`; turn on **Host at** `/docs` in its custom domain settings). Empty `DOCS_HOST` makes
 `/docs` the 404 page.
 
-License: AGPL-3.0 for the app, MIT for the CLI (`packages/cli/LICENSE`).
+License: AGPL-3.0 for the app, MIT for the CLI and the wire protocol (`packages/cli/LICENSE`, `packages/protocol/LICENSE`).

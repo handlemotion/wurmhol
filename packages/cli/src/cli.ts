@@ -92,6 +92,8 @@ Usage:
 Environment:
   WURMHOL_TOKEN   A token from your org (${DEFAULT_CONSOLE}, menu → Tokens); wins over login
   WURMHOL_HOME    Where wurmhol keeps its state (default ~/.wurmhol)
+  WURMHOL_ACCESS_KEY  Lets clients with no browser session open the pipe: they send it as the
+                      x-wurmhol-key header (32 to 128 of A-Z a-z 0-9 - _); only its hash is kept
   WURMHOL_URL     A self-hosted install (default ${DEFAULT_SERVER})
   WURMHOL_HOST_IGNORE  Ports wurmhol host never lists, like 9229,5555
 

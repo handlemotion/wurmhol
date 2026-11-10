@@ -15,8 +15,12 @@
 // `@wurmhol/protocol`'s `PipeSource`, every field optional and bounded. It goes on the share's
 // history row and its card on the wall.
 //
+// `Wurmhol-Access: <sha-256 hex>` lets a new pipe be opened by a client with no browser session
+// (ADR 0028): the hash of an access key the CLI holds. The relay keeps only the hash.
+//
 // Refusals answer with plain HTTP before the upgrade, as `@wurmhol/protocol`'s `Refusal`.
 import {
+  ACCESS_KEY_HASH,
   CONNECT_HEADERS,
   formatDuration,
   isEndReason,
@@ -142,6 +146,14 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
   }
   const source = readSource(c.req.header(CONNECT_HEADERS.source));
   if (!source.ok) return refuse(400, `bad ${source.field}`, source.fix);
+  const accessHash = c.req.header(CONNECT_HEADERS.access) ?? null;
+  if (accessHash !== null && !ACCESS_KEY_HASH.test(accessHash)) {
+    return refuse(
+      400,
+      "bad access key",
+      "Update the wurmhol CLI: it sent an access key the relay cannot read.",
+    );
+  }
   let viewers: string[] | null = null;
   const named = (c.req.header(CONNECT_HEADERS.viewers) ?? "")
     .split(",")
@@ -206,6 +218,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
     startedAt: started.startedAt.getTime(),
     viewers,
     source: source.source,
+    accessHash,
     limits: {
       seconds,
       monthlyBytes: plan.limits.monthlyBytes,
