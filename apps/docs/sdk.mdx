@@ -1,44 +1,151 @@
 ---
 title: "SDK and API"
-description: "Open pipes from your own code, and list or close your org's pipes over HTTP."
+description: "Put a pipe inside your own app: sign people in, open a pipe that stays open, and list or close your org's pipes."
 ---
 
-For orchestrators that run lots of agents and want to hand people links without going through a terminal. There's no daemon, the pipe lives in your process and closes with it.
+For apps and orchestrators that hand people links without going through a terminal. The pipe lives in your process, there is no daemon, and it closes with your app. ESM only, on Node 22 or newer and on Bun, including a binary made with `bun build --compile`.
+
+```bash
+npm install wurmhol
+```
+
+```ts
+import { Wurmhol, fileTokenStore } from "wurmhol";
+
+const wurmhol = new Wurmhol({
+  tokenStore: fileTokenStore("/path/to/wurmhol-token.json"),
+  client: { name: "my-app", version: "1.0.0" }, // shows in the relay's logs, not on the wall
+});
+
+// First run: the person approves a code in their browser, once.
+if (!(await wurmhol.auth.status())) {
+  await wurmhol.auth.login({
+    name: "My App on this Mac",
+    prompt: (code) => openInBrowser(code.verification_uri_complete),
+  });
+}
+
+// A named pipe keeps its URL, so it can sit in an OAuth redirect list.
+const pipe = wurmhol.pipes.keepOpen({ port: 4748, name: "my-app", accessKey });
+await pipe.ready();
+pipe.url; // https://my-app.wurmhol.dev
+pipe.on("request", ({ method, path, status, durationMs }) => {});
+await pipe.close();
+```
+
+The `request` events stay in your process, we never see them.
+
+## One pipe
+
+`openPipe` opens one pipe and ends when it ends. It is what the CLI uses, and it is also on the client as `wurmhol.pipes.open`.
 
 ```ts
 import { openPipe } from "wurmhol";
 
 const pipe = await openPipe({ port: 5173, token: process.env.WURMHOL_TOKEN });
 pipe.url; // send it to the humans
-pipe.on("request", ({ method, path, status, durationMs }) => {});
+pipe.state; // "open", "reconnecting" or "closed"
+pipe.on("disconnected", ({ code }) => {}); // lost the relay; it redials for up to a minute, same URL
+pipe.on("reconnected", () => {});
 pipe.on("close", (reason) => {}); // "stopped", "expired", "terminated", "revoked", ...
 await pipe.close();
 ```
 
-The `request` events stay in your process, we never see them.
+| Option      | Does                                                                                                                                                     |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `port`      | The dev server's port                                                                                                                                    |
+| `token`     | Your org's token                                                                                                                                         |
+| `host`      | Where the dev server listens, `127.0.0.1` by default                                                                                                     |
+| `ttl`       | Seconds, or a duration like `"8h"`. `pipe.endsAt` says when it ends                                                                                      |
+| `name`      | A URL that stays the same, like `--name`                                                                                                                 |
+| `viewers`   | The org members who can open it, like `--only`                                                                                                           |
+| `accessKey` | Lets a client with no browser session open the pipe, sent as the `x-wurmhol-key` header. 32 to 128 letters, digits, `-` or `_`; the relay keeps its hash |
+| `source`    | Where it came from for the wall, any of `repoHost`, `repo`, `branch`, `commit`, `link`, `note`, `agent`, `agentUrl`. The SDK detects nothing on its own  |
+| `signal`    | An `AbortSignal` that closes the pipe                                                                                                                    |
+| `server`    | Your own install, if you self-host                                                                                                                       |
+| `transport` | `"auto"` (the default), `"node"` or `"builtin"`; see [Runtimes](#runtimes)                                                                               |
+| `client`    | `{ name, version }`: your app, in the `User-Agent` the relay sees                                                                                        |
+| `log`       | `(event, fields) => {}` for connects, drops and reconnects, never request contents                                                                       |
 
-| Option    | Does                                                                                                                                                    |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `port`    | The dev server's port                                                                                                                                   |
-| `token`   | Your org's token                                                                                                                                        |
-| `host`    | Where the dev server listens, `127.0.0.1` by default                                                                                                    |
-| `ttl`     | Seconds, or a duration like `"8h"`. `pipe.endsAt` says when it ends                                                                                     |
-| `name`    | A URL that stays the same, like `--name`                                                                                                                |
-| `viewers` | The org members who can open it, like `--only`                                                                                                          |
-| `source`  | Where it came from for the wall, any of `repoHost`, `repo`, `branch`, `commit`, `link`, `note`, `agent`, `agentUrl`. The SDK detects nothing on its own |
-| `signal`  | An `AbortSignal` that closes the pipe                                                                                                                   |
-| `server`  | Your own install, if you self-host                                                                                                                      |
-| `log`     | `(event, fields) => {}` for connects, drops and reconnects, never request contents                                                                      |
+## A pipe that stays open
 
-`openPipe` rejects with a `FixError` whose message is the same one-line fix the CLI prints. It's ESM only.
+`keepOpen` opens a pipe and opens another when the relay ends it for a reason that is not "stop": its lifetime ran out (`expired`), or the connection was lost for good (`disconnected`). A named pipe comes back at the same URL; an unnamed one gets a new URL, announced by `open` with `reopened: true`.
+
+```ts
+const pipe = wurmhol.pipes.keepOpen({
+  port: 4748,
+  name: "my-app",
+  reopen: { initialDelayMs: 1000, maxDelayMs: 30_000, factor: 2, jitter: 0.2 },
+});
+
+pipe.on("open", ({ url, reopened }) => {});
+pipe.on("reopening", ({ attempt, delayMs, reason }) => {}); // reason: a close reason, or "error"
+pipe.on("closed", ({ reason, error }) => {}); // for good: "stopped", "terminated", "revoked", "gave_up", ...
+await pipe.ready(); // resolves with the first pipe, rejects if it can never open
+```
+
+It gives up, and emits `closed`, when the pipe was stopped or terminated, its token was revoked, the plan's limit was reached, or the relay refuses with a client error such as an unknown token. It keeps trying through a rate limit (429), a timeout and network failures. Pass `reopen: false` to open once, or `reopen.giveUpOn` to choose the reasons yourself. `token` may also be a function, called before every attempt, so a token made while the pipe is down is picked up.
+
+## Signing in
+
+The device flow (RFC 8628) gets a token without the person copying one:
+
+```ts
+const code = await wurmhol.auth.start({ name: "My App on this Mac" });
+openInBrowser(code.verification_uri_complete); // or show code.user_code and code.verification_uri
+await wurmhol.auth.wait(code, { signal }); // polls until approved, then stores the token
+```
+
+`auth.login` does all three. `auth.redeem({ code, name })` redeems a setup code made by Create pipe in the console. `auth.status()` says whether a token is stored, with its org and computer name, never the token. `auth.signOut()` forgets the stored token on this computer; the token itself stays valid until it is revoked in the console.
+
+Tokens live where a **token store** puts them. `memoryTokenStore()` is the default, `fileTokenStore(path)` writes a file readable only by the user (mode 0600, replaced atomically), and the `TokenStore` interface (`load`, `save`, `clear`) is yours to implement with a keychain. A stored token is only used against the server it was saved for. Or skip all of it and pass `token`.
 
 ## Pipes API
 
-To see or close pipes you didn't open yourself, create a token with "Can list and close every pipe in the org" ticked, and call the CLI's host with it.
+To see or close pipes you didn't open yourself, create a token with "Can list and close every pipe in the org" ticked.
+
+```ts
+const pipes = await wurmhol.pipes.list(); // the wall's cards: id, url, port, state, title, views, source, ...
+await wurmhol.pipes.end(pipes[0].id); // like Terminate on the wall
+```
+
+Or over HTTP, on the CLI's host:
 
 ```bash
 curl -H "Authorization: Bearer $WURMHOL_TOKEN" https://api.wurmhol.com/v1/pipes
 curl -X DELETE -H "Authorization: Bearer $WURMHOL_TOKEN" https://api.wurmhol.com/v1/pipes/<id>
 ```
 
-The first lists the org's open pipes, the same ones on the wall, and the second ends one like Terminate does.
+The first lists the org's open pipes, the same ones on the wall, and the second ends one like Terminate does. Ending a pipe that has already ended succeeds; one that never existed is a 404.
+
+## Errors
+
+Everything rejects with a `FixError`: `message` is the one-line fix the CLI prints, for people. `code` is for your code:
+
+| `code`                                          | Meaning                                                                        |
+| ----------------------------------------------- | ------------------------------------------------------------------------------ |
+| `refused`                                       | The relay said no. `status` is its HTTP status, `reason` says why a pipe ended |
+| `invalid_option`, `no_token`                    | Fix the call: a bad name, ttl or key, or no token                              |
+| `auth`                                          | A device flow ended without a token (expired, denied, a used setup code)       |
+| `network`, `dns`, `unreachable`, `tls`, `proxy` | No answer came. A retry may help, except that `tls` and `proxy` need a setting |
+| `unsupported`                                   | The server cannot do what you asked, such as a custom domain before they exist |
+
+`final` is true when retrying cannot help. Aborting with a signal rejects with the signal's reason.
+
+## Runtimes
+
+Node 22 or newer uses the `ws` package. Bun, including a compiled Bun binary, and Deno use a built-in WebSocket client, because Bun's version of `ws` cannot read the relay's handshake or its refusals and ends the process on a failed connection. `transport: "auto"` picks by runtime; `"builtin"` runs the built-in one anywhere. Both go through `HTTPS_PROXY`, trust `NODE_EXTRA_CA_CERTS`, and pass the same tests against the real relay.
+
+## Embedding in an app
+
+- **Run it in a process you control**, not in a webview: the Bun or Node process of your app, or a sidecar in a Tauri or Electron app. A pipe is a long-lived connection to the relay and a client of your local server.
+- **Expose only the port that needs it.** Open the pipe to the one port your remote clients use, never your UI's. With an `accessKey`, authenticate the clients yourself too: the key lets them through the relay, not into your app.
+- **Pick a name and keep it** so the URL survives restarts, and let `keepOpen` handle expiry. The 12 hour limit on a pipe is the relay's; reopening is free and keeps a named pipe's URL.
+- **Let the person sign in once**, with `auth.login` and a `fileTokenStore` in your app's data folder.
+- **Use `client`** so the relay's logs say which app a connection came from.
+
+`packages/sdk/examples/embed.ts` in the repository is a complete app: it compiles with `bun build --compile` and runs as one binary.
+
+## Custom domains
+
+Pipes on your own hostname, like `preview.acme.dev`, are designed but not built yet ([ADR 0031](https://github.com/handlemotion/wurmhol/blob/main/docs/adr/0031-custom-domains-and-app-api.md)). The options and types exist so your code can be written ahead; until a server supports them, passing `domain` rejects with an `unsupported` error.
