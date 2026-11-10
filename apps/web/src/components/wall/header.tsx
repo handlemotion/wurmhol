@@ -4,6 +4,7 @@ import {
   IconChevronsUpDown,
   IconCreditCard,
   IconEllipsis,
+  IconGlobe,
   IconKey,
   IconLogOut,
   IconPlus,
@@ -23,13 +24,19 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "@/components/ui/menu";
-import { useOpenBilling, usePrefetchDialogs, useSignOut, useSwitchOrg } from "@/hooks/use-app";
+import {
+  useAppConfig,
+  useOpenBilling,
+  usePrefetchDialogs,
+  useSignOut,
+  useSwitchOrg,
+} from "@/hooks/use-app";
 import type { Me } from "@/lib/api";
 import { initials } from "@/lib/initials";
 import { type OrgAction, OrgDialog } from "./org-dialogs";
 
 /** The org's dialogs the header opens over the wall. */
-export type WallDialog = "members" | "tokens";
+export type WallDialog = "members" | "tokens" | "domains";
 
 /** What the page shows: the org's pipes, or its embedded apps (ADR 0032). */
 export type WallView = "pipes" | "apps";
@@ -65,6 +72,7 @@ export function Header({
   const signOut = useSignOut();
   const billing = useOpenBilling();
   const prefetchDialogs = usePrefetchDialogs();
+  const customDomains = useAppConfig().data?.customDomains ?? false;
   const active = me.orgs.find((org) => org.id === me.activeOrgId);
   const [orgAction, setOrgAction] = useState<OrgAction | null>(null);
   const owner = me.role === "owner";
@@ -83,6 +91,9 @@ export function Header({
       : []),
     { id: "members", label: "Members", Icon: IconUsers, onPress: () => onOpen("members") },
     { id: "tokens", label: "Tokens", Icon: IconKey, onPress: () => onOpen("tokens") },
+    ...(customDomains
+      ? [{ id: "domains", label: "Domains", Icon: IconGlobe, onPress: () => onOpen("domains") }]
+      : []),
     ...(canBill
       ? [
           {

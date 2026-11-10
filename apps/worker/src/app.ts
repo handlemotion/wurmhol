@@ -56,9 +56,9 @@ function signInMethods(config: Config) {
   };
 }
 
-/** The config the web app reads beyond sign-in: where its Docs links go. */
+/** The config the web app reads beyond sign-in: where its Docs links go, and whether custom domains are on (ADR 0030). */
 function appConfig(config: Config) {
-  return { docsUrl: config.DOCS_URL };
+  return { docsUrl: config.DOCS_URL, customDomains: config.customDomains !== undefined };
 }
 
 /** JSON for inside a `<script>`: `<` escaped, so no value can close the element. */
