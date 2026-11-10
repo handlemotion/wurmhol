@@ -1,6 +1,6 @@
 # 0028: A pipe can take an access key, for clients with no browser session
 
-Status: proposed. Departs from spec v1 section 6 ("Every request to a share host needs the viewer's
+Status: accepted. Departs from spec v1 section 6 ("Every request to a share host needs the viewer's
 cookie") for pipes opened with a key. Pipes without one are unchanged. Spec section 2 rules out
 public links; this is not one.
 
