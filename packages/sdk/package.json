@@ -1,7 +1,6 @@
 {
   "name": "@wurmhol/sdk",
   "version": "0.1.0",
-  "private": true,
   "description": "Embed Wurmhol pipes in your own app: open and keep open private HTTPS URLs for a local server, sign in with the device flow, and manage the org's pipes. Runs on Node and Bun, including a compiled Bun binary",
   "license": "MIT",
   "files": [
@@ -22,6 +21,9 @@
       "default": "./dist/internal.js"
     },
     "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsdown",
