@@ -4,12 +4,26 @@
 // `wurmhol host --code` skips the approval: Create pipe hands it a code already approved by the
 // signed-in member (ADR 0020), redeemed once on the same token endpoint. `wurmhol <port>` with no
 // token starts a code with its port and leaves the waiting to its daemon (ADR 0026).
-import { type Answer, send } from "./dial.ts";
+import { type Answer, send } from "./http.ts";
 import { explainRefusal, FixError } from "./errors.ts";
 
 /** POSTs JSON to `path` on `server`, through the environment's proxy. */
-function postJson(server: string, path: string, body: unknown, version: string): Promise<Answer> {
-  return send(new URL(path, server), { server, version, method: "POST", json: body });
+function postJson(
+  server: string,
+  path: string,
+  body: unknown,
+  version: string,
+  product?: string,
+  signal?: AbortSignal,
+): Promise<Answer> {
+  return send(new URL(path, server), {
+    server,
+    version,
+    product,
+    signal,
+    method: "POST",
+    json: body,
+  });
 }
 
 function parse<T>(answer: Answer): T | null {
@@ -40,6 +54,8 @@ export interface LoginOptions {
   /** The computer's name: the token is named after it. */
   name: string;
   version: string;
+  /** Names the app in the User-Agent. Default `wurmhol`. */
+  product?: string;
   /** Prints the line that tells the human where to go. */
   prompt: (code: DeviceCode) => void;
 }
@@ -63,10 +79,11 @@ export async function startLogin(options: {
   server: string;
   name: string;
   version: string;
+  product?: string;
   port?: number;
 }): Promise<DeviceCode> {
-  const { server, version, name, port } = options;
-  const started = await postJson(server, "/device/code", { name, port }, version);
+  const { server, version, name, port, product } = options;
+  const started = await postJson(server, "/device/code", { name, port }, version, product);
   const code = started.status === 200 ? parse<DeviceCode>(started) : null;
   if (!code?.device_code) {
     throw explainRefusal(started.status, started.body, { server, viaProxy: started.viaProxy });
@@ -78,7 +95,12 @@ export async function startLogin(options: {
 export async function login(options: LoginOptions): Promise<Granted> {
   const code = await startLogin(options);
   options.prompt(code);
-  return awaitLogin({ server: options.server, version: options.version, code });
+  return awaitLogin({
+    server: options.server,
+    version: options.version,
+    product: options.product,
+    code,
+  });
 }
 
 /**
@@ -88,10 +110,11 @@ export async function login(options: LoginOptions): Promise<Granted> {
 export async function awaitLogin(options: {
   server: string;
   version: string;
+  product?: string;
   code: DeviceCode;
   signal?: AbortSignal;
 }): Promise<Granted> {
-  const { server, version, code, signal } = options;
+  const { server, version, code, signal, product } = options;
   let interval = Math.max(code.interval, 1) * 1000;
   const deadline = Date.now() + code.expires_in * 1000;
   while (Date.now() < deadline) {
@@ -101,6 +124,8 @@ export async function awaitLogin(options: {
       "/device/token",
       { device_code: code.device_code },
       version,
+      product,
+      signal,
     );
     if (polled.status === 200) {
       const granted = parse<Granted>(polled);
@@ -117,10 +142,12 @@ export async function awaitLogin(options: {
       interval += 5000;
       continue;
     }
-    if (refused?.fix) throw new FixError(refused.fix, { final: true });
+    if (refused?.fix) throw new FixError(refused.fix, { final: true, code: "auth" });
     throw explainRefusal(polled.status, polled.body, { server, viaProxy: polled.viaProxy });
   }
-  throw new FixError("The code expired before anyone approved it. Run wurmhol login again.");
+  throw new FixError("The code expired before anyone approved it. Run wurmhol login again.", {
+    code: "auth",
+  });
 }
 
 export interface RedeemOptions {
@@ -130,6 +157,7 @@ export interface RedeemOptions {
   /** The computer's name: the token is named after it. */
   name: string;
   version: string;
+  product?: string;
 }
 
 /** What the CLI says when a setup code cannot be redeemed: get a fresh one. */
@@ -144,6 +172,7 @@ export async function redeem(options: RedeemOptions): Promise<Granted> {
     "/device/token",
     { device_code: options.code, name: options.name },
     version,
+    options.product,
   );
   if (answer.status === 200) {
     const granted = parse<Granted>(answer);
@@ -151,8 +180,8 @@ export async function redeem(options: RedeemOptions): Promise<Granted> {
   }
   const refused = parse<{ error?: string; fix?: string }>(answer);
   if (refused?.error === "invalid_grant" || refused?.error === "expired_token") {
-    throw new FixError(STALE_CODE, { final: true });
+    throw new FixError(STALE_CODE, { final: true, code: "auth" });
   }
-  if (refused?.fix) throw new FixError(refused.fix, { final: true });
+  if (refused?.fix) throw new FixError(refused.fix, { final: true, code: "auth" });
   throw explainRefusal(answer.status, answer.body, { server, viaProxy: answer.viaProxy });
 }

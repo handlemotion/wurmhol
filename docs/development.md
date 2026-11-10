@@ -78,7 +78,7 @@ curl -fsS http://127.0.0.1:8787/cdn-cgi/local/scheduled
 | `pnpm --filter @wurmhol/worker test:e2e e2e/relay.e2e.test.ts` | One e2e file                                                 |
 | `pnpm --filter @wurmhol/site build`                            | Astro checks and static site build                           |
 
-E2E setup builds the web app and CLI, then starts real workerd, local D1, Durable Objects,
+The SDK suites (`e2e/sdk*.e2e.test.ts`) also run the built-in WebSocket transport on Node and compile `packages/sdk/examples/embed.ts` with `bun build --compile` (the `bun` devDependency, so no global Bun is needed). E2E setup builds the web app and CLI, then starts real workerd, local D1, Durable Objects,
 and local HTTP servers; no stack needs to be started first. Behavior crossing auth, HTTP,
 sockets, processes, or the database belongs here, not in mocked unit tests.
 
@@ -100,16 +100,17 @@ the hand-off. Documentation-only changes need documentation validation, not unre
 
 ## Package map
 
-| Unit                | Package             | Role                                                                      |
-| ------------------- | ------------------- | ------------------------------------------------------------------------- |
-| `apps/worker`       | `@wurmhol/worker`   | Hono API, auth, billing, relay, Durable Objects; serves the built web app |
-| `apps/web`          | `@wurmhol/web`      | Vite SPA: sign-in and the shares wall                                     |
-| `apps/site`         | `@wurmhol/site`     | Astro marketing site and Worker proxy for hosted docs                     |
-| `apps/docs`         | —                   | Mintlify product and self-hosting documentation                           |
-| `packages/cli`      | `wurmhol`           | Published Node CLI and SDK                                                |
-| `packages/protocol` | `@wurmhol/protocol` | Pure frame codec and stream multiplexer shared by Node and Worker         |
-| `packages/auth`     | `@wurmhol/auth`     | Better Auth configuration                                                 |
-| `packages/db`       | `@wurmhol/db`       | Drizzle schema and D1 migrations                                          |
+| Unit                | Package             | Role                                                                       |
+| ------------------- | ------------------- | -------------------------------------------------------------------------- |
+| `apps/worker`       | `@wurmhol/worker`   | Hono API, auth, billing, relay, Durable Objects; serves the built web app  |
+| `apps/web`          | `@wurmhol/web`      | Vite SPA: sign-in and the shares wall                                      |
+| `apps/site`         | `@wurmhol/site`     | Astro marketing site and Worker proxy for hosted docs                      |
+| `apps/docs`         | —                   | Mintlify product and self-hosting documentation                            |
+| `packages/sdk`      | `@wurmhol/sdk`      | The SDK: tunnel, pipes, device flow, managed pipe (bundled into `wurmhol`) |
+| `packages/cli`      | `wurmhol`           | Published CLI, built on the SDK, which it re-exports                       |
+| `packages/protocol` | `@wurmhol/protocol` | Pure frame codec and stream multiplexer shared by Node and Worker          |
+| `packages/auth`     | `@wurmhol/auth`     | Better Auth configuration                                                  |
+| `packages/db`       | `@wurmhol/db`       | Drizzle schema and D1 migrations                                           |
 
 ## Database changes
 

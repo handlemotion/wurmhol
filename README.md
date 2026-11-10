@@ -39,14 +39,15 @@ The button creates the Worker, D1 and Durable Objects in your Cloudflare account
 domain's wildcard route and the hostname vars are yours to set afterwards: see
 [Self-hosting](https://wurmhol.com/docs/self-hosting).
 
-| Unit                | Package             |
-| ------------------- | ------------------- |
-| `apps/worker`       | `@wurmhol/worker`   |
-| `apps/web`          | `@wurmhol/web`      |
-| `packages/cli`      | `wurmhol` (npm)     |
-| `packages/protocol` | `@wurmhol/protocol` |
-| `packages/auth`     | `@wurmhol/auth`     |
-| `packages/db`       | `@wurmhol/db`       |
+| Unit                | Package                                 |
+| ------------------- | --------------------------------------- |
+| `apps/worker`       | `@wurmhol/worker`                       |
+| `apps/web`          | `@wurmhol/web`                          |
+| `packages/sdk`      | `@wurmhol/sdk` (bundled into `wurmhol`) |
+| `packages/cli`      | `wurmhol` (npm)                         |
+| `packages/protocol` | `@wurmhol/protocol`                     |
+| `packages/auth`     | `@wurmhol/auth`                         |
+| `packages/db`       | `@wurmhol/db`                           |
 
 ## Local
 

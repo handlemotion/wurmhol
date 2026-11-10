@@ -6,10 +6,9 @@ import { spawn } from "node:child_process";
 import pkg from "../package.json" with { type: "json" };
 import { setTimeout as sleep } from "node:timers/promises";
 import { readCredentials, writeCredentials } from "./credentials.ts";
-import { FixError } from "./errors.ts";
-import { awaitLogin, type DeviceCode } from "./login.ts";
+import { awaitLogin, type DeviceCode, FixError, type Pipe, type PipeSource } from "@wurmhol/sdk";
 import { appendLog, appendRequest } from "./logs.ts";
-import { openPipe, type Pipe, type PipeSource } from "./pipe.ts";
+import { openPipe } from "./open.ts";
 import { detectSource } from "./source.ts";
 import { pipeName } from "@wurmhol/protocol";
 import {

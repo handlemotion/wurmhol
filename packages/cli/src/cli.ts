@@ -36,13 +36,12 @@ import {
   startDaemon,
 } from "./daemon.ts";
 import { doctor as runDoctor, formatCheck } from "./doctor.ts";
-import { FixError } from "./errors.ts";
+import { FixError, login as deviceLogin, redeem, startLogin } from "@wurmhol/sdk";
+import { DEFAULT_CONSOLE, DEFAULT_SERVER, pagePath, pageUrl } from "@wurmhol/sdk/internal";
 import { host as runHost } from "./host.ts";
 import { init } from "./init.ts";
-import { login as deviceLogin, redeem, startLogin } from "./login.ts";
 import { followLog, isRequest, type LogRecord, readLog, toRequest } from "./logs.ts";
 import { checkService, installService, stableEntry, uninstallService } from "./service.ts";
-import { DEFAULT_CONSOLE, DEFAULT_SERVER, pagePath, pageUrl } from "./pipe.ts";
 import { alive, listStates, logFile, matches, removeState, type ShareState } from "./state.ts";
 
 /** This file: the daemon and the login service run it again. */
