@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 import { Readable } from "node:stream";
+import Stripe from "stripe";
 import { Agent, request as undiciRequest } from "undici";
 import WebSocket from "ws";
 import { e2eConfig, workerRoot } from "./global-setup.ts";
@@ -496,3 +497,102 @@ export function shareStates(env: Record<string, string>) {
 }
 
 export type { ChildProcess };
+
+const STRIPE_E2E_WEBHOOK_SECRET = "whsec_e2e_wurmhol_webhook_secret";
+const STRIPE_E2E_PRICES = {
+  friends: "price_e2e_friends",
+  business: "price_e2e_business",
+  businessRequests: "price_e2e_business_requests",
+};
+
+/** A stack's billing variables: Better Auth's real Stripe plugin, driven by signed webhooks. */
+export const STRIPE_E2E_VARS = {
+  STRIPE_SECRET_KEY: "sk_test_e2e_not_a_real_key",
+  STRIPE_WEBHOOK_SECRET: STRIPE_E2E_WEBHOOK_SECRET,
+  STRIPE_PRICE_FRIENDS: STRIPE_E2E_PRICES.friends,
+  STRIPE_PRICE_BUSINESS: STRIPE_E2E_PRICES.business,
+  STRIPE_PRICE_BUSINESS_REQUESTS: STRIPE_E2E_PRICES.businessRequests,
+};
+
+/** A Stripe event, signed with the Stripe SDK's own test helper, sent to the plugin's webhook. */
+export async function stripeWebhook(
+  stack: Stack,
+  type: string,
+  object: Record<string, unknown>,
+  secret = STRIPE_E2E_WEBHOOK_SECRET,
+) {
+  const payload = JSON.stringify({
+    id: `evt_${Math.random().toString(36).slice(2)}`,
+    object: "event",
+    type,
+    created: Math.floor(Date.now() / 1000),
+    data: { object },
+  });
+  const signature = new Stripe("sk_test_unused").webhooks.generateTestHeaderString({
+    payload,
+    secret,
+  });
+  return browserFetch(`${stack.url}/api/auth/stripe/webhook`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "stripe-signature": signature },
+    body: payload,
+  });
+}
+
+/** A subscription as Stripe sends it: Business carries its metered price beside the base. */
+export function stripeSubscription(
+  customer: string,
+  status: string,
+  plan: "friends" | "business" = "friends",
+) {
+  const now = Math.floor(Date.now() / 1000);
+  const trial = status === "trialing";
+  const end = now + (plan === "friends" ? 365 : 30) * 86400;
+  const item = (id: string, price: string, interval: string, metered = false) => ({
+    id,
+    price: { id: price, recurring: { interval, usage_type: metered ? "metered" : "licensed" } },
+    ...(metered ? {} : { quantity: 1 }),
+    current_period_start: now,
+    current_period_end: end,
+  });
+  return {
+    id: `sub_e2e_${customer}`,
+    object: "subscription",
+    customer,
+    status,
+    metadata: {},
+    cancel_at_period_end: false,
+    trial_start: trial ? now : null,
+    trial_end: trial ? now + 14 * 86400 : null,
+    items: {
+      data:
+        plan === "friends"
+          ? [item("si_e2e_1", STRIPE_E2E_PRICES.friends, "year")]
+          : [
+              item("si_e2e_1", STRIPE_E2E_PRICES.business, "month"),
+              item("si_e2e_2", STRIPE_E2E_PRICES.businessRequests, "month", true),
+            ],
+    },
+  };
+}
+
+/**
+ * Puts `orgId` on `plan` as Stripe would: its customer, as checkout would have made it, then the
+ * subscription's webhook. `event` is `customer.subscription.updated` to change an existing plan.
+ */
+export async function startPlan(
+  stack: Stack,
+  orgId: string,
+  plan: "friends" | "business",
+  event = "customer.subscription.created",
+) {
+  const customer = `cus_e2e_${orgId.replaceAll("-", "").slice(0, 16)}`;
+  const db = stack.db({ write: true });
+  try {
+    db.prepare("update organizations set stripe_customer_id = ? where id = ?").run(customer, orgId);
+  } finally {
+    db.close();
+  }
+  const response = await stripeWebhook(stack, event, stripeSubscription(customer, "active", plan));
+  if (response.status !== 200) throw new Error(`subscription webhook: ${response.status}`);
+}

@@ -55,6 +55,13 @@ On by default, with nothing to set up. People add `https://api.example.com/mcp` 
 - Assistants register by Client ID Metadata Document: the Worker fetches the HTTPS URL the assistant names as its client id, at most 64 KB, without following redirects.
 - It needs HTTPS, or plain HTTP on `localhost` or `127.0.0.1`. A stack on plain HTTP under any other host, like `api.localhost`, has it off.
 
+## Embedded mode
+
+Applications that open private tunnels for a SaaS's own users ([ADR 0032](https://github.com/handlemotion/wurmhol/blob/main/docs/adr/0032-embedded-tunnels.md)). Still being built.
+
+- `EMBEDDED_ENABLED=true` turns it on. Off by default: `/api/apps` answers 404.
+- With billing on, only orgs on Business may create applications. With billing off, every org may.
+
 ## Takedown
 
 When someone reports a pipe for phishing or abuse, you take it down with one call. Set `OPERATOR_TOKEN` first, a secret of at least 32 random characters (`openssl rand -base64 32`, then `wrangler secret put OPERATOR_TOKEN`). Without it, `/operator/*` answers 404.

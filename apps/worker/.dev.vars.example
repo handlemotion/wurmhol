@@ -37,6 +37,11 @@ ENVIRONMENT=development
 # localhost or 127.0.0.1: a stack on http://api.localhost has it off.
 MCP_ENABLED=
 
+# --- Embedded mode (ADR 0032) ---
+# Optional. `true` turns on applications that open private tunnels for a SaaS's own users
+# (`/api/apps`). Off by default. With billing on, only Business orgs may use it.
+EMBEDDED_ENABLED=
+
 # --- Takedown (ADR 0022) ---
 # Optional secret. At least 32 random characters: openssl rand -base64 32. The bearer token of
 # POST /operator/takedown on BETTER_AUTH_URL's host, which ends a reported pipe, revokes its

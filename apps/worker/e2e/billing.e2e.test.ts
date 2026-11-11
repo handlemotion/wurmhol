@@ -6,7 +6,6 @@
 // sandbox key.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import Stripe from "stripe";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   alive,
@@ -22,18 +21,13 @@ import {
   signIn,
   type Stack,
   startStack,
+  STRIPE_E2E_VARS,
   stopAll,
+  stripeSubscription,
+  stripeWebhook,
   viewerCookie,
   waitFor,
 } from "./support.ts";
-
-const WEBHOOK_SECRET = "whsec_e2e_wurmhol_webhook_secret";
-const PRICES = {
-  friends: "price_e2e_friends",
-  business: "price_e2e_business",
-  businessRequests: "price_e2e_business_requests",
-};
-const stripe = new Stripe("sk_test_unused");
 
 let stack: Stack;
 let ada: Person;
@@ -44,11 +38,7 @@ const customer = `cus_e2e${Date.now()}`;
 
 beforeAll(async () => {
   stack = await startStack({
-    STRIPE_SECRET_KEY: "sk_test_e2e_not_a_real_key",
-    STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET,
-    STRIPE_PRICE_FRIENDS: PRICES.friends,
-    STRIPE_PRICE_BUSINESS: PRICES.business,
-    STRIPE_PRICE_BUSINESS_REQUESTS: PRICES.businessRequests,
+    ...STRIPE_E2E_VARS,
     // Small enough to reach: at a spend cap of the base price, Business stops at 3 requests.
     BUSINESS_INCLUDED_REQUESTS: "3",
   });
@@ -64,53 +54,12 @@ afterAll(async () => {
   await stack.stop();
 });
 
-async function webhook(type: string, object: Record<string, unknown>, secret = WEBHOOK_SECRET) {
-  const payload = JSON.stringify({
-    id: `evt_${Math.random().toString(36).slice(2)}`,
-    object: "event",
-    type,
-    created: Math.floor(Date.now() / 1000),
-    data: { object },
-  });
-  const signature = stripe.webhooks.generateTestHeaderString({ payload, secret });
-  return browserFetch(`${stack.url}/api/auth/stripe/webhook`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "stripe-signature": signature },
-    body: payload,
-  });
+function webhook(type: string, object: Record<string, unknown>, secret?: string) {
+  return stripeWebhook(stack, type, object, secret);
 }
 
-/** A subscription as Stripe sends it: Business carries its metered price beside the base. */
 function subscription(status: string, plan: "friends" | "business" = "friends") {
-  const now = Math.floor(Date.now() / 1000);
-  const trial = status === "trialing";
-  const end = now + (plan === "friends" ? 365 : 30) * 86400;
-  const item = (id: string, price: string, interval: string, metered = false) => ({
-    id,
-    price: { id: price, recurring: { interval, usage_type: metered ? "metered" : "licensed" } },
-    ...(metered ? {} : { quantity: 1 }),
-    current_period_start: now,
-    current_period_end: end,
-  });
-  return {
-    id: "sub_e2e_1",
-    object: "subscription",
-    customer,
-    status,
-    metadata: {},
-    cancel_at_period_end: false,
-    trial_start: trial ? now : null,
-    trial_end: trial ? now + 14 * 86400 : null,
-    items: {
-      data:
-        plan === "friends"
-          ? [item("si_e2e_1", PRICES.friends, "year")]
-          : [
-              item("si_e2e_1", PRICES.business, "month"),
-              item("si_e2e_2", PRICES.businessRequests, "month", true),
-            ],
-    },
-  };
+  return stripeSubscription(customer, status, plan);
 }
 
 interface BillingBody {
