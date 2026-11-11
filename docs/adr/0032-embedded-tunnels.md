@@ -1,6 +1,7 @@
 # 0032: Embedded mode, private tunnels a SaaS opens for its own users
 
-Status: proposed. Design and implementation plan only: nothing here is built. Departs from spec
+Status: accepted. Steps 1 to 8 of the plan below are built; "As built" lists where the build
+differs from this text. Departs from spec
 v1 section 6 ("sign-in and membership check on every request") for embedded tunnels, whose
 viewers are a SaaS's users and not org members. Resolves the open consequence in ADR 0027 ("an
 integrator's own users still have to be org members"). Extends ADR 0028 (access keys), ADR 0030
@@ -277,6 +278,23 @@ the application's allowed origins (section 5); third-party iframes are not suppo
 
 Deferred: **custom domains** (ADR 0031) fit as an application's tunnel zone; designed there, not
 here.
+
+## As built
+
+Where the shipped code differs from the design above, or settled what it left open:
+
+- **Table names** carry an `embed_` prefix (`embed_apps`, `embed_grants`, …).
+- **The new `shares` columns have no delete action.** Embedded rows are soft-deleted, so deleting
+  one a session points at is refused rather than turning the session into an org pipe.
+- **`LIMIT_EMBED_ACTIVE` arrived with step 4**, with the session reservation it guards.
+- **The grant log records `issued` and `revoked`.** Expiry needs no event: the grant's
+  `expires_at` says it.
+- **Revoking a grant is also `POST /tenants/:t/subjects/:s/revoke-grants`**, for every grant of a
+  subject at once.
+- **The console page for applications is not built.** Owners manage applications and keys
+  through `/api/apps`; the page that shows tunnels' health with Stop and Delete is still to do.
+- **Grant rows and the grant log are not pruned** by the daily retention job yet; launch codes
+  are. Their retention, and the hosted privacy policy's list, need a decision.
 
 ## Consequences
 

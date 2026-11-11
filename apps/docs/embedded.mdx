@@ -1,0 +1,187 @@
+---
+title: "Embedded tunnels"
+description: "Give each of your app's users a private tunnel to their own computer, paid for by your org, without adding them to it."
+---
+
+For apps built on Wurmhol: your app opens a tunnel to each user's local server, and only that user reaches it, signed in through your app. Your users need no Wurmhol account and never join your org. Your team manages the tunnels and sees their health, but has no way into them through Wurmhol.
+
+<Note>
+  Embedded tunnels are part of the Business plan. They are not switched on at wurmhol.com yet; on
+  your own install, set `EMBEDDED_ENABLED=true`
+  ([configuration](/self-hosting/configuration#embedded-mode)).
+</Note>
+
+## How it fits together
+
+| Thing           | What it is                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------ |
+| **Org**         | Your Wurmhol org, on Business. It pays, and its owners create applications and their keys.       |
+| **Application** | Your app. Its backend calls Wurmhol with the application's integration key.                      |
+| **Tenant**      | One of your customers or accounts, named by your own id. Tenants never see each other's tunnels. |
+| **Subject**     | One of a tenant's users or services, named by your own id.                                       |
+| **Tunnel**      | A private URL for one tenant, owned by one subject. It keeps its URL while its agent reconnects. |
+
+A tunnel opens only to a **grant**: a short-lived pass your backend issues for one subject on that tunnel's access list. Being in your org, even as its owner, opens nothing.
+
+Use your own opaque ids for tenants and subjects, not emails or names. Wurmhol needs nothing about your users.
+
+## Credentials
+
+| Credential      | Looks like | Who holds it                      | Does                                                  |
+| --------------- | ---------- | --------------------------------- | ----------------------------------------------------- |
+| Integration key | `whk_…`    | Your backend, never anything else | Manages your application's tunnels and issues grants  |
+| Connector       | `whc_…`    | The agent on the user's computer  | Opens that one tunnel, and nothing else               |
+| Grant           | `whg_…`    | A program, or a page's script     | Reaches one tunnel as one subject, for up to 24 hours |
+| Launch link     | a URL      | The user's browser, for 60 s      | Swaps once for a grant cookie on the tunnel's host    |
+
+An owner creates the application and its keys, signed in to the org (`POST /api/apps`, then `POST /api/apps/:id/keys`; a page in the app is coming), choosing what each key may do:
+
+| Permission        | Lets the key                                                                            |
+| ----------------- | --------------------------------------------------------------------------------------- |
+| `tunnels:read`    | List tunnels with their health, usage and grant log                                     |
+| `tunnels:manage`  | Create, stop and delete tunnels, change who may be granted, issue and revoke connectors |
+| `subjects:manage` | Create, update, disable and delete tenants and subjects                                 |
+| `grants:issue`    | Issue and revoke grants                                                                 |
+
+A dashboard's key only needs `tunnels:read`, and then it can never let anyone in. Keys belong to the application, not the person who made them, so they keep working when that person leaves the org. Revoke and rotate them deliberately.
+
+## Set up a tunnel
+
+On your backend:
+
+```ts
+import { WurmholEmbed } from "wurmhol";
+
+const embed = new WurmholEmbed({ key: process.env.WURMHOL_KEY! });
+
+await embed.tenants.put("acct_42");
+await embed.subjects.put("acct_42", "user_7", { kind: "user" });
+
+const { tunnel, connector } = await embed.tunnels.create({ tenant: "acct_42", owner: "user_7" });
+// Store tunnel.id; hand connector.connector to user_7's agent.
+```
+
+On the user's computer, the agent keeps the tunnel open with the connector:
+
+```ts
+import { keepOpen } from "wurmhol";
+
+const pipe = keepOpen({ port: 4748, token: connector });
+await pipe.ready();
+pipe.url; // the tunnel's URL, the same every time
+```
+
+Or from a terminal: `WURMHOL_TOKEN=whc_… npx wurmhol 4748`. A connector takes no `--name`, `--only` or access key: the tunnel already has its URL and its own access list.
+
+## Let a user in
+
+### From a browser
+
+Your backend issues a `browser` grant and sends the user's browser to its launch link. The link works once, within 60 seconds, and sets a cookie on the tunnel's host:
+
+```ts
+const grant = await embed.grants.issue({
+  tunnel: tunnelId,
+  subject: "user_7",
+  kind: "browser",
+  next: "/dashboard",
+});
+res.redirect(grant.launchUrl);
+```
+
+The tunnel opens in a tab or a popup, not in an iframe on another site.
+
+When the grant runs out, or the browser arrives with none, the tunnel sends it to your application's **launch URL** with `?tunnel=<id>&next=<path>`. Sign the user in there, issue a new grant, and redirect to its `launchUrl`. Without a launch URL, the tunnel answers `401`.
+
+### From a program
+
+Issue a `client` grant and send its token as a header, on requests and on a WebSocket's handshake:
+
+```ts
+import { grantHeaders } from "wurmhol";
+
+const { token } = await embed.grants.issue({
+  tunnel: tunnelId,
+  subject: "build_bot",
+  kind: "client",
+});
+await fetch(`${tunnelUrl}/status`, { headers: grantHeaders(token) });
+```
+
+### WebSockets from your own pages
+
+A page can't set headers on a WebSocket, so the grant travels as a subprotocol. List your pages' origins on the application first: a subprotocol grant from any other origin is refused. Your backend issues a `client` grant and hands the token to the page; `tunnelSocket` asks for a new one and reconnects when it expires:
+
+```ts
+import { tunnelSocket } from "@wurmhol/sdk/browser";
+
+const socket = tunnelSocket(`${tunnelUrl.replace("http", "ws")}/live`, {
+  grant: () => fetch("/api/tunnel-grant").then((r) => r.text()),
+  protocols: ["graphql-ws"], // your app's own, if any
+});
+socket.addEventListener("message", (event) => {});
+```
+
+`@wurmhol/sdk/browser` has no dependencies and no Node APIs.
+
+## Expiry and revocation
+
+- A grant lasts 1 hour unless you ask for another lifetime, from 60 seconds up to 24 hours.
+- Revoking a grant stops it at once: its next request is refused, and its open WebSockets close with code `4403`. When a grant expires, its WebSockets close with `4401`; get a new grant and reconnect.
+- These revoke grants too: taking a subject off a tunnel's access list, disabling or deleting the subject or its tenant, and deleting the tunnel or the application.
+- **Stopping** a tunnel ends its session, and its agent stops. The connector stays valid, so the agent can open it again when it restarts. **Deleting** a tunnel ends it for good, and its URL is never reused.
+- Issuing a connector with `rotate: true` revokes the others and ends a session they opened.
+
+Your app's server never sees grants or Wurmhol's cookies. The relay removes them before forwarding.
+
+## What your team sees
+
+Through the org and its keys, your team gets each tunnel's state (`never`, `live`, `away`, `stopped` or `ended`), when its session started, its last request, its bytes, how its last session ended, and a log of every grant issued and revoked. Nothing from inside the tunnel: no page titles, no favicons, no paths, no bodies.
+
+There is no way to open a user's tunnel as an org member. To look at one, your backend has to issue a grant to a subject on its list, which shows in the tunnel's grant log.
+
+Embedded tunnels never appear on the wall, in the pipes API or in the MCP server.
+
+<Warning>
+  This is access isolation, not end-to-end encryption. TLS ends at the relay, so whoever runs the
+  relay could technically read a tunnel's traffic, as with any pipe. Request and response bodies are
+  never logged or stored. See [Privacy](/privacy).
+</Warning>
+
+## Usage and limits
+
+Every request through your tunnels counts toward your org's Business requests and spend cap. Your users pay nothing and need no payment method. Wurmhol also counts each application's and each tenant's usage, so you can see who used what and stop one customer from using everyone's share:
+
+| Limit                  | Set by                                                                    | Default                   |
+| ---------------------- | ------------------------------------------------------------------------- | ------------------------- |
+| Requests a month       | An owner, per application and as a default per tenant                     | None                      |
+| Tunnels open at once   | An owner, per application and as a default per tenant                     | 10 per tenant             |
+| Either, for one tenant | Your backend: `embed.tenants.put(id, { monthlyRequests, activeTunnels })` | The application's default |
+
+At a tenant's or application's limit, only its tunnels end and stay refused, until the next billing period or a higher limit. New limits apply at once. `embed.usage({ tenants: [...] })` reports the counts and the limits in effect.
+
+## API
+
+Your backend calls `https://api.wurmhol.com/v1/embed` with `Authorization: Bearer whk_…`. Each route needs one permission. Refusals are JSON with `error` and `fix`, a sentence that says what to do.
+
+| Route                                                   | Permission        | Does                                                             |
+| ------------------------------------------------------- | ----------------- | ---------------------------------------------------------------- |
+| `PUT /tenants/:tenant`                                  | `subjects:manage` | Create or update: `disabled`, `monthlyRequests`, `activeTunnels` |
+| `DELETE /tenants/:tenant`                               | `subjects:manage` | Disable it and delete its tunnels                                |
+| `PUT /tenants/:tenant/subjects/:subject`                | `subjects:manage` | Create or update: `kind` (`user` or `service`), `disabled`       |
+| `DELETE /tenants/:tenant/subjects/:subject`             | `subjects:manage` | Disable it, revoke its grants, delete its tunnels                |
+| `POST /tenants/:tenant/subjects/:subject/revoke-grants` | `grants:issue`    | Revoke all its grants                                            |
+| `POST /tunnels`                                         | `tunnels:manage`  | `tenant`, `owner`, `access`: a tunnel and its first connector    |
+| `GET /tunnels?tenant=&subject=`                         | `tunnels:read`    | Tunnels with their health                                        |
+| `GET /tunnels/:id`                                      | `tunnels:read`    | One tunnel, with its access list                                 |
+| `POST /tunnels/:id/stop`                                | `tunnels:manage`  | End its session; the agent may reopen it                         |
+| `DELETE /tunnels/:id`                                   | `tunnels:manage`  | Delete it for good                                               |
+| `PUT` or `DELETE /tunnels/:id/access/:subject`          | `tunnels:manage`  | Change who may be granted it                                     |
+| `POST /tunnels/:id/connectors`                          | `tunnels:manage`  | A new connector; `rotate: true` revokes the others               |
+| `DELETE /tunnels/:id/connectors/:connector`             | `tunnels:manage`  | Revoke one                                                       |
+| `GET /tunnels/:id/grants`                               | `tunnels:read`    | The grant log                                                    |
+| `POST /grants`                                          | `grants:issue`    | `tunnel`, `subject`, `kind`, `ttlSeconds`, `next`                |
+| `DELETE /grants/:id`                                    | `grants:issue`    | Revoke it                                                        |
+| `GET /usage?tenant=`                                    | `tunnels:read`    | Usage and limits for the application and named tenants           |
+
+`WurmholEmbed` has a method for each, and turns refusals into a `FixError` with `code: "refused"`, the HTTP `status` and the fix as its message. It refuses to run in a browser: keep the key on your server.

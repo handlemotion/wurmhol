@@ -37,7 +37,7 @@
       },
       {
         "group": "Using it",
-        "pages": ["pipes", "cli", "mcp", "sdk"]
+        "pages": ["pipes", "cli", "mcp", "sdk", "embedded"]
       },
       {
         "group": "Self-hosting",
