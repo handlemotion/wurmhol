@@ -88,7 +88,9 @@ Self-hosters follow [their own deployment guide](../../apps/docs/self-hosting/ma
 
 Cloudflare Workers Builds deploys `main` (build `pnpm --filter @wurmhol/web build`, deploy
 `pnpm --filter @wurmhol/worker deploy:cloudflare`, with `D1_DATABASE_ID`, `WORKER_DOMAIN`,
-`WORKER_ROUTE` and `WORKER_VAR_*` as build variables copied from `prd_github`).
+`WORKER_ROUTE` and `WORKER_VAR_*` as build variables copied from `prd_github`). A `WORKER_ROUTE`
+entry `<pattern>@<zone>` names its zone, as `*/*@wurmhol.dev` (custom domains) must; a deploy
+replaces the Worker's routes with the list, so a route added by hand does not survive one.
 `.github/workflows/production.yml`, on each push to `main` and by hand:
 
 1. **Migrate D1** with `wrangler d1 migrations apply --remote`. Nothing waits for it, so schema
