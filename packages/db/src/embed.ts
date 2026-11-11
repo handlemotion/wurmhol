@@ -221,6 +221,8 @@ export interface EmbedScope {
 const tenantColumns = {
   id: embedTenants.id,
   externalId: embedTenants.externalId,
+  monthlyRequests: embedTenants.monthlyRequests,
+  activeTunnels: embedTenants.activeTunnels,
   disabledAt: embedTenants.disabledAt,
   createdAt: embedTenants.createdAt,
 };
@@ -240,21 +242,33 @@ export async function findEmbedTenant(db: Db, scope: EmbedScope, externalId: str
   return tenant;
 }
 
-/** The tenant named `externalId`, made if new; `disabled` sets or clears its disabled mark. */
+/** What an integration may change on a tenant. Null limits fall back to the application's. */
+export interface EmbedTenantChange {
+  disabled?: boolean;
+  monthlyRequests?: number | null;
+  activeTunnels?: number | null;
+}
+
+/** The tenant named `externalId`, made if new, with `change` applied. */
 export async function putEmbedTenant(
   db: Db,
   scope: EmbedScope,
   externalId: string,
-  disabled?: boolean,
+  change: EmbedTenantChange = {},
 ) {
   await db
     .insert(embedTenants)
     .values({ id: uuidv7(), ...scope, externalId })
     .onConflictDoNothing();
-  if (disabled !== undefined) {
+  const { disabled, ...limits } = change;
+  const set = {
+    ...(disabled === undefined ? {} : { disabledAt: disabled ? new Date() : null }),
+    ...limits,
+  };
+  if (Object.keys(set).length) {
     await db
       .update(embedTenants)
-      .set({ disabledAt: disabled ? new Date() : null })
+      .set(set)
       .where(
         and(
           eq(embedTenants.orgId, scope.orgId),
@@ -872,4 +886,22 @@ export async function embedAppLaunchUrl(db: Db, appId: string) {
     .where(and(eq(embedApps.id, appId), isNull(embedApps.deletedAt)))
     .limit(1);
   return app?.launchUrl ?? null;
+}
+
+/** An application's limits and a tenant's own, as set; null: unset (ADR 0032). */
+export async function embedLimitsOf(db: Db, appId: string, tenantId: string) {
+  const [row] = await db
+    .select({
+      appMonthlyRequests: embedApps.monthlyRequests,
+      appActiveTunnels: embedApps.activeTunnels,
+      tenantMonthlyRequests: embedApps.tenantMonthlyRequests,
+      tenantActiveTunnels: embedApps.tenantActiveTunnels,
+      ownMonthlyRequests: embedTenants.monthlyRequests,
+      ownActiveTunnels: embedTenants.activeTunnels,
+    })
+    .from(embedTenants)
+    .innerJoin(embedApps, eq(embedApps.id, embedTenants.appId))
+    .where(and(eq(embedTenants.id, tenantId), eq(embedTenants.appId, appId)))
+    .limit(1);
+  return row;
 }

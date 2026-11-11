@@ -1256,12 +1256,17 @@ export class Share extends DurableObject<Env> {
       this.#save(meta);
     }
     this.#lastUsageFlush = Date.now();
-    const usage = await this.#org(meta.orgId).addUsage(meta.id, batch, {
-      monthlyBytes: meta.limits.monthlyBytes,
-      monthlyRequests: meta.limits.monthlyRequests ?? Number.POSITIVE_INFINITY,
-      period: null,
-      meter: null,
-    });
+    const usage = await this.#org(meta.orgId).addUsage(
+      meta.id,
+      batch,
+      {
+        monthlyBytes: meta.limits.monthlyBytes,
+        monthlyRequests: meta.limits.monthlyRequests ?? Number.POSITIVE_INFINITY,
+        period: null,
+        meter: null,
+      },
+      meta.embed && { appId: meta.embed.appId, tenantId: meta.embed.tenantId },
+    );
     this.ctx.storage.kv.delete("usage:batch");
     return usage.over;
   }
