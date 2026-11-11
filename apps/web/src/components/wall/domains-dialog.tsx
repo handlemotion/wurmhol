@@ -21,7 +21,7 @@ const STATE: Record<
 };
 
 /**
- * Custom domains (ADR 0030): your own hostname on a pipe name, so the pipe's URL is yours. Add
+ * Custom domains (ADR 0033): your own hostname on a pipe name, so the pipe's URL is yours. Add
  * one, publish the two DNS records it shows, and it goes active once both are seen. Any member
  * may add and remove them, like tokens.
  */
@@ -180,8 +180,14 @@ function DomainRow({ domain }: { domain: Domain }) {
           {domain.error.message} {domain.error.fix}
         </Text>
       )}
+      {remove.error && (
+        // The domain is still set up and may still be served: say so, and why.
+        <Text className="text-xs text-danger-subtle-foreground">
+          Not removed. {message(remove.error)}
+        </Text>
+      )}
       {waiting && (
-        // The two proofs (ADR 0030): the TXT record says the org owns the name, the CNAME sends
+        // The two proofs (ADR 0033): the TXT record says the org owns the name, the CNAME sends
         // its traffic here. A record already seen turns green. The labels share one width so the
         // dividers line up.
         <div className="flex flex-col gap-2 [--copy-label-width:5.5rem]">

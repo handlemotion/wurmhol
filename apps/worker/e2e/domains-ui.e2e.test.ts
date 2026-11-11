@@ -1,4 +1,4 @@
-// The console's Domains dialog in a real browser (ADR 0030): shown only where the install has
+// The console's Domains dialog in a real browser (ADR 0033): shown only where the install has
 // custom domains on, and it walks an owner from adding a hostname to seeing it active.
 import { type Browser, type BrowserContext, chromium, type Page } from "playwright";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -85,4 +85,40 @@ it("walks from adding a hostname to seeing it active", async () => {
   await page.screenshot({
     path: process.env.DOMAINS_SHOTS ? `${process.env.DOMAINS_SHOTS}/active.png` : undefined,
   });
+});
+
+it("moves a domain to active by itself once its records are out, and says when removing fails", async () => {
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Hostname").fill("later.acme-ui.test");
+  await dialog.getByLabel("Pipe name").fill("acme-ui");
+  await dialog.getByRole("button", { name: "Add" }).click();
+  await expect
+    .poll(() => dialog.getByText("_wurmhol.later.acme-ui.test").count())
+    .toBeGreaterThan(0);
+  const db = stack.db();
+  try {
+    const row = db
+      .prepare("select challenge from custom_domains where hostname = ?")
+      .get("later.acme-ui.test") as { challenge: string };
+    resolver.publish("_wurmhol.later.acme-ui.test", `wurmhol-verify=${row.challenge}`);
+  } finally {
+    db.close();
+  }
+  cloudflare.set("later.acme-ui.test", { status: "active", sslStatus: "active" });
+  // Catches: a dialog that only re-reads the stored list, which never moves until the daily job
+  // or a click on Check now.
+  await expect
+    .poll(() => dialog.getByText("Active", { exact: true }).count(), { timeout: 45_000 })
+    .toBe(2);
+
+  cloudflare.setDown(true);
+  try {
+    const row = dialog.getByRole("listitem").filter({ hasText: "later.acme-ui.test" });
+    await row.getByRole("button", { name: "Remove" }).click();
+    // Catches: a removal Cloudflare refused that looks like nothing happened while the domain
+    // stays set up and served.
+    await expect.poll(() => row.getByText("Not removed.").count()).toBe(1);
+  } finally {
+    cloudflare.setDown(false);
+  }
 });

@@ -138,11 +138,11 @@ export interface SignInMethods {
 /** The Worker's config for the app (apps/worker/src/app.ts `appConfig`). */
 export interface AppConfig {
   docsUrl: string;
-  /** Whether this install lets orgs attach their own hostnames to pipe names (ADR 0030). */
+  /** Whether this install lets orgs attach their own hostnames to pipe names (ADR 0033). */
   customDomains: boolean;
 }
 
-/** A custom domain (ADR 0030), as `/api/domains` returns it. */
+/** A custom domain (ADR 0033), as `/api/domains` returns it. */
 export type { Domain } from "@wurmhol/protocol";
 
 /** A `wurmhol login` waiting for approval (apps/worker/src/routes/device.ts). */
