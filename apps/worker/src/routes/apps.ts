@@ -8,11 +8,14 @@ import {
   deleteEmbedApp,
   deleteEmbedTunnels,
   embedTunnelIdsOfApp,
+  findEmbedTunnel,
+  listEmbedTunnels,
   findEmbedApp,
   listEmbedAppKeys,
   listEmbedApps,
   revokeEmbedAppKey,
   revokeEmbedGrants,
+  setEmbedTunnelStopped,
   updateEmbedApp,
 } from "@wurmhol/db";
 import { EMBED_PERMISSIONS, embedPermissions } from "@wurmhol/protocol";
@@ -21,7 +24,8 @@ import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { type AppEnv, requireOwner } from "../context.ts";
-import { endTunnelSessions } from "../ending.ts";
+import { describeTunnels } from "../embed-health.ts";
+import { endTunnelSessions, pushGrantRevocations } from "../ending.ts";
 import { orgStub } from "../org-do.ts";
 import { orgPlan } from "../plan.ts";
 import { limitPerMember } from "../rate-limiter.ts";
@@ -142,7 +146,22 @@ async function ownApp(c: { var: AppEnv["Variables"] }, appId: string) {
 
 export const apps = new Hono<AppEnv>()
   .use(requireEmbedded, requireOwner, requireBusiness)
-  .get("/", async (c) => c.json({ apps: await listEmbedApps(c.var.db, c.var.member.orgId) }))
+  /** The org's applications, each with this window's requests and its open pipes. */
+  .get("/", async (c) => {
+    const orgId = c.var.member.orgId;
+    const apps = await listEmbedApps(c.var.db, orgId);
+    const org = orgStub(c.env, orgId);
+    const withUsage = await Promise.all(
+      apps.map(async (app) => {
+        const usage = await org.embedUsage(app.id);
+        return {
+          ...app,
+          usage: { requests: usage.app.requests, openTunnels: usage.app.openTunnels },
+        };
+      }),
+    );
+    return c.json({ apps: withUsage });
+  })
   .post("/", limitPerMember("manage"), zValidator("json", createBody), async (c) => {
     const app = await createEmbedApp(c.var.db, c.var.member.orgId, c.req.valid("json"));
     c.var.log.info("embed.app_created", { orgId: c.var.member.orgId, appId: app.id });
@@ -178,6 +197,39 @@ export const apps = new Hono<AppEnv>()
     await revokeEmbedGrants(c.var.db, orgId, { tunnelIds: tunnels });
     await endTunnelSessions(c, tunnels, "revoked", "embed delete");
     c.var.log.info("embed.app_deleted", { orgId: c.var.member.orgId, appId });
+    return c.json({ ok: true });
+  })
+  /**
+   * The application's pipes with their health, for its owners to watch and stop. Nothing from
+   * inside them, and no way in: an owner's session opens no embedded pipe (ADR 0032).
+   */
+  .get("/:id/tunnels", async (c) => {
+    const app = await ownApp(c, c.req.param("id"));
+    const scope = { orgId: c.var.member.orgId, appId: app.id };
+    return c.json({ tunnels: await describeTunnels(c, await listEmbedTunnels(c.var.db, scope)) });
+  })
+  /** Ends a pipe's session; its agent stops and may open it again when restarted. */
+  .post("/:id/tunnels/:tunnel/stop", limitPerMember("manage"), async (c) => {
+    const app = await ownApp(c, c.req.param("id"));
+    const orgId = c.var.member.orgId;
+    const tunnel = await findEmbedTunnel(c.var.db, { orgId, appId: app.id }, c.req.param("tunnel"));
+    if (!tunnel) throw new HTTPException(404, { message: "no such pipe" });
+    await setEmbedTunnelStopped(c.var.db, orgId, tunnel.id, true);
+    await endTunnelSessions(c, [tunnel.id], "terminated", "embed stop");
+    c.var.log.info("embed.tunnel_stopped", { orgId, appId: app.id, tunnelId: tunnel.id });
+    return c.json({ ok: true });
+  })
+  /** Deletes a pipe for good: its session, connectors and grants end, its URL is never reused. */
+  .delete("/:id/tunnels/:tunnel", limitPerMember("manage"), async (c) => {
+    const app = await ownApp(c, c.req.param("id"));
+    const orgId = c.var.member.orgId;
+    const tunnel = await findEmbedTunnel(c.var.db, { orgId, appId: app.id }, c.req.param("tunnel"));
+    if (!tunnel) throw new HTTPException(404, { message: "no such pipe" });
+    await deleteEmbedTunnels(c.var.db, orgId, [tunnel.id]);
+    const revoked = await revokeEmbedGrants(c.var.db, orgId, { tunnelIds: [tunnel.id] });
+    await pushGrantRevocations(c, revoked);
+    await endTunnelSessions(c, [tunnel.id], "revoked", "embed delete");
+    c.var.log.info("embed.tunnel_deleted", { orgId, appId: app.id, tunnelId: tunnel.id });
     return c.json({ ok: true });
   })
   .get("/:id/keys", async (c) => {
