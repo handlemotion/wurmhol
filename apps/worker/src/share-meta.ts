@@ -9,7 +9,8 @@ import { orgStub } from "./org-do.ts";
 export interface ShareInit {
   id: string;
   orgId: string;
-  tokenId: string;
+  /** The classic token that opened it; null for an embedded tunnel's session. */
+  tokenId: string | null;
   port: number;
   url: string;
   startedBy: string | null;
@@ -23,6 +24,11 @@ export interface ShareInit {
    * (ADR 0028); null or absent: only signed-in members open it.
    */
   accessHash?: string | null;
+  /**
+   * An embedded tunnel's session (ADR 0032): never on the wall, never opened by a member's cookie
+   * or an access key, and nothing read from its pages. Absent for an org pipe.
+   */
+  embed?: { appId: string; tenantId: string; tunnelId: string; connectorId: string };
   /** The org's plan's limits when it started; `monthlyRequests` is absent in pipes from before it. */
   limits: { seconds: number; monthlyBytes: number; monthlyRequests?: number };
 }

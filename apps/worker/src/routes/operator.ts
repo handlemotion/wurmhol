@@ -1,13 +1,20 @@
 // `/operator/*` on the app's host: the deployment operator's takedown path (ADR 0022). Not an org
 // member's: the caller presents `OPERATOR_TOKEN`, and without one configured the routes are 404.
 import { zValidator } from "@hono/zod-validator";
-import { blockOrg, findShare, latestShareByName, revokeToken, sha256Hex } from "@wurmhol/db";
+import {
+  blockOrg,
+  findShare,
+  latestShareByName,
+  revokeEmbedConnectors,
+  revokeToken,
+  sha256Hex,
+} from "@wurmhol/db";
 import { pipeName, SHARE_ID } from "@wurmhol/protocol";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { z } from "zod";
 import type { AppEnv } from "../context.ts";
-import { endShare, endTokens } from "../ending.ts";
+import { endEmbeddedOfOrg, endShare, endTokens } from "../ending.ts";
 import { type Config, shareLabelFromHost, shareOrigin } from "../env.ts";
 import { orgStub } from "../org-do.ts";
 
@@ -74,6 +81,10 @@ export const operator = new Hono<AppEnv>().use(requireOperator).post(
     // D1 first: a CLI reconnecting while its pipe ends finds its token refused.
     if (block) await blockOrg(db, orgId, note ?? null);
     if (share.tokenId) await revokeToken(db, orgId, share.tokenId);
+    // An embedded tunnel's session: its connector, as a pipe's token (ADR 0032).
+    if (share.tunnelId && share.connectorId) {
+      await revokeEmbedConnectors(db, orgId, share.tunnelId, { id: share.connectorId });
+    }
     const ended = new Set<string>();
     if (!share.endedAt) {
       await endShare(c, share, "revoked", "takedown");
@@ -88,6 +99,7 @@ export const operator = new Hono<AppEnv>().use(requireOperator).post(
         await endShare(c, { id: open.id, orgId }, "revoked", "takedown");
         ended.add(open.id);
       }
+      for (const id of await endEmbeddedOfOrg(c, orgId, "takedown")) ended.add(id);
       await org.dropAll();
     }
     c.var.log.info("operator.takedown", {
@@ -100,6 +112,7 @@ export const operator = new Hono<AppEnv>().use(requireOperator).post(
     return c.json({
       pipe: { id: share.id, url: shareOrigin(c.var.config, share), orgId },
       tokenRevoked: share.tokenId,
+      connectorRevoked: share.connectorId,
       endedPipes: [...ended],
       orgBlocked: block,
     });

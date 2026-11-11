@@ -55,6 +55,14 @@ export interface UsageLimits {
 /** Limits the org's object keeps: the latest the Worker gave it. */
 type StoredLimits = UsageLimits & { active: number };
 
+/** An embedded tunnel's open session (ADR 0032): counted and listed, never a card on the wall. */
+export interface EmbeddedSession {
+  id: string;
+  appId: string;
+  tenantId: string;
+  tunnelId: string;
+}
+
 /** Requests not yet sent to Stripe, per customer and window: `at` is the last one's time. */
 type MeterPending = Record<string, { customer: string; value: number; at: number }>;
 
@@ -212,6 +220,33 @@ export class Org extends DurableObject<Env> {
     return { ok: true };
   }
 
+  /**
+   * Holds a slot for an embedded tunnel's session: the org's usage limits apply as to any pipe,
+   * and its open sessions count against `active` (`LIMIT_EMBED_ACTIVE`), apart from the wall's.
+   */
+  reserveEmbedded(session: EmbeddedSession, limits: StoredLimits): Reservation {
+    this.setLimits({ ...limits, active: this.#limits()?.active ?? limits.active });
+    const usage = this.#usage(limits);
+    if (usage.bytes >= limits.monthlyBytes) {
+      return { ok: false, reason: "monthly_limit", limit: limits.monthlyBytes };
+    }
+    if (usage.requests >= limits.monthlyRequests) {
+      return { ok: false, reason: "request_limit", limit: limits.monthlyRequests };
+    }
+    if (this.listEmbedded().length >= limits.active) {
+      return { ok: false, reason: "active_limit", limit: limits.active };
+    }
+    this.ctx.storage.kv.put(`embed:${session.id}`, session);
+    return { ok: true };
+  }
+
+  /** The org's open embedded sessions. */
+  listEmbedded(): EmbeddedSession[] {
+    return [...this.ctx.storage.kv.list<EmbeddedSession>({ prefix: "embed:" })].map(
+      ([, session]) => session,
+    );
+  }
+
   /** Changes a card (title, favicon, last request, live or away). A removed card stays removed. */
   update(id: string, patch: Partial<Omit<ShareCard, "id">>) {
     const card = this.ctx.storage.kv.get<ShareCard>(`share:${id}`);
@@ -225,6 +260,7 @@ export class Org extends DurableObject<Env> {
   remove(id: string) {
     // Its last batch came before this (the Share object sends them in order, then ends).
     this.ctx.storage.kv.delete(`applied:${id}`);
+    this.ctx.storage.kv.delete(`embed:${id}`);
     if (!this.ctx.storage.kv.delete(`share:${id}`)) return;
     this.#broadcast({ type: "share.ended", id });
   }

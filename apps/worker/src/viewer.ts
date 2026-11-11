@@ -72,7 +72,13 @@ export async function handleShareHost(request: Request, env: Env, shareId: strin
     readCookie(request.headers.get("cookie"), SHARE_COOKIE),
     shareId,
   );
-  if (!userId) return (await open()) ? signIn(request, config.auth.baseURL, shareId) : ended();
+  if (!userId) {
+    const status = await stub.status();
+    if (status.state !== "live" && status.state !== "away") return ended();
+    // An embedded tunnel's users have no Wurmhol account: never send them to its sign-in.
+    if (status.embedded) return grantRequired();
+    return signIn(request, config.auth.baseURL, shareId);
+  }
 
   // The hot path, one trip to the object: it answers an ended or unknown share itself.
   const { response, orgId } = fromShare(await stub.fetch(toShare(request, { viewer: userId })));
@@ -86,6 +92,14 @@ export async function handleShareHost(request: Request, env: Env, shareId: strin
   }
   if (orgId) await noteOAuthRedirect(env, config, { id: shareId, orgId }, request, response);
   return response;
+}
+
+/** An embedded tunnel without a grant (ADR 0032). */
+function grantRequired() {
+  return new Response("grant required", {
+    status: 401,
+    headers: { "content-type": "text/plain", "cache-control": "no-store" },
+  });
 }
 
 /** Step 1: an unknown viewer goes to the app's `/open`; anything else that is not a page, 401. */

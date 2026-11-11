@@ -168,6 +168,11 @@ const configSchema = z
      * each plan's limits apply instead (`PLAN_LIMITS`, ADR 0027).
      */
     LIMIT_ACTIVE_SHARES: positive(5),
+    /**
+     * Open embedded tunnel sessions per org (ADR 0032), apart from the wall's pipes, with billing
+     * on or off. Idle sessions cost nothing; this guards against abuse.
+     */
+    LIMIT_EMBED_ACTIVE: positive(1000),
     /** Bytes relayed per org per calendar month (UTC), both directions. 100 GB by default. */
     LIMIT_MONTHLY_BYTES: positive(100 * 1000 ** 3),
     /** Viewer requests per org per calendar month (UTC). 50 million by default. */

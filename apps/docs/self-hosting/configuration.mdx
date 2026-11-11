@@ -61,6 +61,8 @@ Applications that open private tunnels for a SaaS's own users ([ADR 0032](https:
 
 - `EMBEDDED_ENABLED=true` turns it on. Off by default: `/api/apps` answers 404.
 - With billing on, only orgs on Business may create applications. With billing off, every org may.
+- `LIMIT_EMBED_ACTIVE`, 1,000 by default: embedded tunnels open at once per org, counted apart from its pipes, with billing on or off.
+- An application's backend manages tenants, subjects, tunnels and connectors at `/v1/embed` on the CLI's host, with an integration key from the console.
 
 ## Takedown
 

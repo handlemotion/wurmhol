@@ -324,7 +324,29 @@ export class Share extends DurableObject<Env> {
     const stored = this.#stored();
     if (!stored) return { state: "unknown" as const };
     if (stored.state === "ended") return { state: "ended" as const };
-    return { state: stored.state, orgId: stored.orgId, tokenId: stored.tokenId, port: stored.port };
+    return {
+      state: stored.state,
+      orgId: stored.orgId,
+      tokenId: stored.tokenId,
+      port: stored.port,
+      embedded: Boolean(stored.embed),
+    };
+  }
+
+  /**
+   * An embedded tunnel's session as its integration sees it (ADR 0032): whether its agent is
+   * connected, since when, its last request and its bytes. Nothing from inside the tunnel.
+   */
+  health() {
+    const stored = this.#stored();
+    if (!stored || stored.state === "ended") return null;
+    return {
+      state: stored.state,
+      liveSince: stored.liveSince ?? null,
+      awaySince: stored.awaySince,
+      lastRequestAt: stored.lastRequestAt,
+      bytes: stored.bytes,
+    };
   }
 
   /** A one-time code for `userId` (60 s, single use), after the app checked their membership. */
@@ -421,7 +443,8 @@ export class Share extends DurableObject<Env> {
     this.#armAlarm(meta);
     if (wasAway) this.ctx.waitUntil(this.#org(meta.orgId).update(meta.id, { state: "live" }));
     if (isNew && meta.source) this.ctx.waitUntil(this.preview());
-    if (isNew) {
+    // An embedded tunnel's pages are its user's: the relay reads no title or favicon from them.
+    if (isNew && !meta.embed) {
       // From the alarm, a moment after the socket is up: older CLIs drop a frame that arrives
       // in the same packet as the upgrade.
       meta.probe = { at: Date.now() + PROBE_FIRST_MS, attempt: 0 };
@@ -445,6 +468,14 @@ export class Share extends DurableObject<Env> {
     if (!meta) return errorPage(410, "This pipe has ended.");
     const key = request.headers.get(INTERNAL_HEADERS.key);
     const viewer = request.headers.get(INTERNAL_HEADERS.viewer);
+    if (meta.embed) {
+      // An embedded tunnel opens only to a grant for one of its subjects (ADR 0032): never to an
+      // org member's cookie, nor to an access key.
+      return new Response("grant required", {
+        status: 401,
+        headers: { "content-type": "text/plain", "cache-control": "no-store" },
+      });
+    }
     if (key !== null) {
       // A client with no browser session: the pipe's access key stands in for the sign-in (ADR
       // 0028). It opens only this pipe, and the same limits, billing and wall apply.

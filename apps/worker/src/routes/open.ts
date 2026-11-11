@@ -16,7 +16,8 @@ export const open = new Hono<AppEnv>().get("/", async (c) => {
   const next = sameOriginPath(c.req.query("next"));
   if (!SHARE_ID.test(shareId)) return errorPage(404, "This pipe has ended.");
   const share = await findShare(c.var.db, shareId);
-  if (!share || share.endedAt) return errorPage(410, "This pipe has ended.");
+  // An embedded tunnel's session is no org pipe: membership never opens it (ADR 0032).
+  if (!share || share.endedAt || share.tunnelId) return errorPage(410, "This pipe has ended.");
 
   const here = `/open?${new URLSearchParams({ share: shareId, next })}`;
   const login = (reason?: string) => {

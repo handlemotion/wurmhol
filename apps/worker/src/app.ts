@@ -14,6 +14,7 @@ import { githubRoutes } from "./routes/github.ts";
 import { machineConnect } from "./routes/machines.ts";
 import { serveMcp } from "./routes/mcp.ts";
 import { operator } from "./routes/operator.ts";
+import { embed } from "./routes/embed.ts";
 import { pipes } from "./routes/pipes.ts";
 import { securityHeaders } from "./security-headers.ts";
 
@@ -161,6 +162,7 @@ export const app = new Hono<AppEnv>()
   .route("/device", deviceFlow)
   .use("/v1/*", requestScope, securityHeaders)
   .route("/v1/pipes", pipes)
+  .route("/v1/embed", embed)
   .all("/v1/*", (c) => c.json({ error: "not found" }, 404))
   .use("/operator/*", requestScope, securityHeaders)
   .route("/operator", operator)
