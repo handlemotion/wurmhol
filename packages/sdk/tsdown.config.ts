@@ -1,9 +1,9 @@
 import { defineConfig } from "tsdown";
 
-// The SDK's npm build: ESM for Node 22+ and Bun, with types. The protocol package is private to
+// The SDK's npm build: ESM for Node 22+ and Bun, with types; `browser` has no Node APIs, for pages. The protocol package is private to
 // the workspace, so it is bundled in; `ws` and the proxy helpers stay dependencies.
 export default defineConfig({
-  entry: ["src/index.ts", "src/internal.ts"],
+  entry: ["src/index.ts", "src/internal.ts", "src/embed.ts", "src/browser.ts"],
   format: "esm",
   platform: "node",
   target: "node22",

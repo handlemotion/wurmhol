@@ -20,6 +20,16 @@
       "types": "./dist/internal.d.ts",
       "default": "./dist/internal.js"
     },
+    "./embed": {
+      "@wurmhol/source": "./src/embed.ts",
+      "types": "./dist/embed.d.ts",
+      "default": "./dist/embed.js"
+    },
+    "./browser": {
+      "@wurmhol/source": "./src/browser.ts",
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {

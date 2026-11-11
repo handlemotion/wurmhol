@@ -46,6 +46,25 @@ export {
 } from "./store.ts";
 export type { StoredToken, TokenStore } from "./store.ts";
 
+export { grantHeaders, WurmholEmbed } from "./embed.ts";
+export type {
+  EmbedConnector,
+  EmbedCounts,
+  EmbedGrant,
+  EmbedGrantEvent,
+  EmbedSubject,
+  EmbedTenant,
+  EmbedTunnel,
+  EmbedTunnelState,
+  EmbedUsage,
+  GrantKind,
+  SubjectKind,
+  WurmholEmbedOptions,
+} from "./embed.ts";
+
+export { GRANT_CLOSE_CODES, GRANT_PROTOCOL, grantProtocols, tunnelSocket } from "./browser.ts";
+export type { SocketLike, TunnelSocket, TunnelSocketOptions } from "./browser.ts";
+
 export { FixError } from "./errors.ts";
 export type { ErrorCode } from "./errors.ts";
 
