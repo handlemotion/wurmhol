@@ -34,7 +34,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { COMPUTER_NAME_MAX, isPort } from "@wurmhol/protocol";
 import { type AppEnv, requireMember } from "../context.ts";
-import { shareOrigin } from "../env.ts";
+import { shareUrl } from "../share-url.ts";
 import { limitPerIp, limitPerMember } from "../rate-limiter.ts";
 
 const GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
@@ -262,7 +262,7 @@ export const deviceApproval = new Hono<AppEnv>()
       port,
     });
     c.header("cache-control", "no-store");
-    return c.json({ url: pipe ? shareOrigin(c.var.config, pipe) : null });
+    return c.json({ url: pipe ? await shareUrl(c.var.db, c.var.config, pipe) : null });
   })
   .post("/approve", limitPerMember("manage"), zValidator("json", userCodeBody), async (c) => {
     const claimed = await claim(c, c.req.valid("json").code);

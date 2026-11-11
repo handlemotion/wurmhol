@@ -26,7 +26,7 @@ type DomainsEnv = AppEnv & {
 
 /** The feature is configured, or every call answers that it is off. */
 const requireEnabled = createMiddleware<DomainsEnv>(async (c, next) => {
-  const deps = domainDeps(c.var.config, c.var.db);
+  const deps = domainDeps(c.var.config, c.var.db, c.env);
   if (!deps) {
     return c.json(
       {

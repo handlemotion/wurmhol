@@ -483,6 +483,8 @@ export type HostRole =
   | { role: "connect" }
   | { role: "oauth" }
   | { role: "alias" }
+  /** Any other host, once custom domains are on (ADR 0033): a customer's hostname, or nothing. */
+  | { role: "custom"; hostname: string }
   | { role: "app" };
 
 export function hostRole(config: Config, host: string | null): HostRole {
@@ -493,5 +495,10 @@ export function hostRole(config: Config, host: string | null): HostRole {
   if (label !== null) return { role: "share", label };
   if (config.CONNECT_HOST && hostname === config.CONNECT_HOST) return { role: "connect" };
   if (config.APP_ALIASES.includes(hostname)) return { role: "alias" };
+  // With custom domains on, the zone's `*/*` route sends every host here, so only the app's own
+  // host is the app: any other is looked up as a customer's domain and is not found otherwise.
+  if (config.customDomains && hostname !== new URL(config.auth.baseURL).hostname) {
+    return { role: "custom", hostname };
+  }
   return { role: "app" };
 }

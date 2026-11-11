@@ -26,7 +26,13 @@ export function isNavigation(request: Request) {
   return (request.headers.get("accept") ?? "").includes("text/html");
 }
 
-export async function handleShareHost(request: Request, env: Env, shareId: string) {
+export async function handleShareHost(
+  request: Request,
+  env: Env,
+  shareId: string,
+  /** The custom domain (ADR 0033) the request came to, when it did not come to a `SHARE_DOMAIN` host. */
+  customHost: string | null = null,
+) {
   const config = loadConfig(env);
   if (!shareId) return errorPage(404, "This pipe has ended.");
   const stub = shareStub(env, shareId);
@@ -78,7 +84,7 @@ export async function handleShareHost(request: Request, env: Env, shareId: strin
     // An embedded tunnel is reached through its own host and a grant (`embedded-host.ts`); a
     // session found here anyway is never sent to Wurmhol's sign-in.
     if (status.embedded) return grantRequired();
-    return signIn(request, config.auth.baseURL, shareId);
+    return signIn(request, config.auth.baseURL, shareId, customHost);
   }
 
   // The hot path, one trip to the object: it answers an ended or unknown share itself.
@@ -86,12 +92,14 @@ export async function handleShareHost(request: Request, env: Env, shareId: strin
   if (refusedViewer(response)) {
     // Removed from the org since the cookie was issued: sign in again, as someone who belongs.
     createLogger({ component: "viewer" }).info("viewer.refused", { shareId });
-    const again = signIn(request, config.auth.baseURL, shareId);
+    const again = signIn(request, config.auth.baseURL, shareId, customHost);
     const out = new Response(again.body, again);
     out.headers.append("set-cookie", clearShareCookieHeader());
     return out;
   }
-  if (orgId) await noteOAuthRedirect(env, config, { id: shareId, orgId }, request, response);
+  if (orgId) {
+    await noteOAuthRedirect(env, config, { id: shareId, orgId }, request, response, customHost);
+  }
   return response;
 }
 
@@ -104,7 +112,7 @@ function grantRequired() {
 }
 
 /** Step 1: an unknown viewer goes to the app's `/open`; anything else that is not a page, 401. */
-function signIn(request: Request, appURL: string, shareId: string) {
+function signIn(request: Request, appURL: string, shareId: string, customHost: string | null) {
   if (!isNavigation(request)) {
     return new Response("sign in to view this pipe", {
       status: 401,
@@ -114,6 +122,8 @@ function signIn(request: Request, appURL: string, shareId: string) {
   const url = new URL(request.url);
   const open = new URL("/open", appURL);
   open.searchParams.set("share", shareId);
+  // Back to the host the viewer came to, which `/open` checks is this pipe's own (ADR 0033).
+  if (customHost) open.searchParams.set("host", customHost);
   open.searchParams.set("next", `${url.pathname}${url.search}`);
   return new Response(null, {
     status: 302,

@@ -1,10 +1,17 @@
-import { createDb, findOpenShareByName, pruneExpired } from "@wurmhol/db";
+import {
+  createDb,
+  findActiveDomain,
+  findOpenShareByName,
+  isOrgBlocked,
+  pruneExpired,
+} from "@wurmhol/db";
 import { app } from "./app.ts";
 import { isEmbedTunnelName, SHARE_ID } from "@wurmhol/protocol";
 import { hostRole, loadConfig } from "./env.ts";
 import { createLogger } from "./log.ts";
 import { handleRelay } from "./oauth-relay.ts";
 import { handleEmbeddedHost } from "./embedded-host.ts";
+import { errorPage } from "./pages.ts";
 import { domainDeps, refreshDomains } from "./domains/service.ts";
 import { handleShareHost } from "./viewer.ts";
 
@@ -59,6 +66,22 @@ export default {
     }
     if (host.role === "app") return app.fetch(request, env, ctx);
     if (host.role === "oauth") return handleRelay(request, env, config);
+    if (host.role === "custom") {
+      // A customer's hostname (ADR 0033): routed only when the org proved it owns it and
+      // Cloudflare serves it, to its pipe name's open pipe. Anything else is not found.
+      try {
+        const db = createDb(env.DB);
+        const domain = await findActiveDomain(db, host.hostname);
+        if (!domain || (await isOrgBlocked(db, domain.orgId))) {
+          return errorPage(404, "This address is not connected to a pipe.");
+        }
+        const open = await findOpenShareByName(db, domain.pipeName);
+        return await handleShareHost(request, env, open?.id ?? "", host.hostname);
+      } catch (error) {
+        createLogger({ component: "viewer" }).error("viewer.error", { error, host: host.hostname });
+        return new Response("internal error", { status: 500 });
+      }
+    }
     let shareId = host.label;
     try {
       // A named pipe (ADR 0009): its host serves whichever of the name's pipes is open.
@@ -89,7 +112,7 @@ export default {
       ...pruned,
     });
     // Custom domains (ADR 0033): expire the unfinished, and notice a CNAME that went away.
-    const domains = domainDeps(config, createDb(env.DB));
+    const domains = domainDeps(config, createDb(env.DB), env);
     if (domains) await refreshDomains(domains);
   },
 } satisfies ExportedHandler<Env>;
