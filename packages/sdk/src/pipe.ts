@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import {
   ACCESS_KEY_HEADER,
   ACCESS_KEY_RULE,
+  embedCredentialKind,
   isAccessKey,
   parseDuration,
   PIPE_NAME_RULE,
@@ -84,7 +85,10 @@ export type CloseReason =
 export interface OpenPipeOptions {
   /** The local port the dev server listens on. */
   port: number;
-  /** A token from the org (`wh_…`): the console's menu → Tokens. */
+  /**
+   * A token from the org (`wh_…`): the console's menu → Tokens. Or an embedded tunnel's connector
+   * (`whc_…`), which opens that one tunnel at its own URL and takes no name, viewers or access key.
+   */
   token: string;
   /** A self-hosted install's origin. Default `https://api.wurmhol.com`. */
   server?: string;
@@ -291,6 +295,16 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
     throw new FixError(`Not an access key. Use ${ACCESS_KEY_RULE}, sent as ${ACCESS_KEY_HEADER}.`, {
       code: "invalid_option",
     });
+  }
+  // A connector (ADR 0032) opens its own embedded tunnel at its own URL, to its grants only.
+  if (
+    embedCredentialKind(token) === "connector" &&
+    (name !== undefined || options.viewers?.length || options.accessKey !== undefined)
+  ) {
+    throw new FixError(
+      "A connector opens its own tunnel: leave out name, viewers and accessKey (--name, --only, WURMHOL_ACCESS_KEY).",
+      { code: "invalid_option" },
+    );
   }
   if (options.domain !== undefined) {
     throw new FixError(
