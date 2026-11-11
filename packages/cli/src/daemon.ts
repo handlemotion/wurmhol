@@ -6,10 +6,9 @@ import { spawn } from "node:child_process";
 import pkg from "../package.json" with { type: "json" };
 import { setTimeout as sleep } from "node:timers/promises";
 import { readCredentials, writeCredentials } from "./credentials.ts";
-import { FixError } from "./errors.ts";
-import { awaitLogin, type DeviceCode } from "./login.ts";
+import { awaitLogin, type DeviceCode, FixError, type Pipe, type PipeSource } from "@wurmhol/sdk";
 import { appendLog, appendRequest } from "./logs.ts";
-import { openPipe, type Pipe, type PipeSource } from "./pipe.ts";
+import { openPipe } from "./open.ts";
 import { detectSource } from "./source.ts";
 import { pipeName } from "@wurmhol/protocol";
 import {
@@ -135,9 +134,14 @@ export async function runDaemon(
     .filter(Boolean);
   let source: Partial<PipeSource>;
   const { server } = connection;
+  const accessKey = process.env.WURMHOL_ACCESS_KEY?.trim() || undefined;
   let token = connection.token ?? "";
   const open = (ttl: number | undefined) =>
-    openPipe({ server, token, port, ttl, viewers, name, source, signal }, { log });
+    openPipe(
+      // The key comes from the environment, never the command line (it would show in `ps`).
+      { server, token, port, ttl, viewers, name, source, signal, accessKey },
+      { log },
+    );
   const hold = (pipe: Pipe) => {
     pipe.on("request", (request) => appendRequest(pipe.id, request, { port }));
     pipe.once("close", (reason) => {

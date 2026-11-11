@@ -39,14 +39,15 @@ The button creates the Worker, D1 and Durable Objects in your Cloudflare account
 domain's wildcard route and the hostname vars are yours to set afterwards: see
 [Self-hosting](https://wurmhol.com/docs/self-hosting).
 
-| Unit                | Package             |
-| ------------------- | ------------------- |
-| `apps/worker`       | `@wurmhol/worker`   |
-| `apps/web`          | `@wurmhol/web`      |
-| `packages/cli`      | `wurmhol` (npm)     |
-| `packages/protocol` | `@wurmhol/protocol` |
-| `packages/auth`     | `@wurmhol/auth`     |
-| `packages/db`       | `@wurmhol/db`       |
+| Unit                | Package                                 |
+| ------------------- | --------------------------------------- |
+| `apps/worker`       | `@wurmhol/worker`                       |
+| `apps/web`          | `@wurmhol/web`                          |
+| `packages/sdk`      | `@wurmhol/sdk` (bundled into `wurmhol`) |
+| `packages/cli`      | `wurmhol` (npm)                         |
+| `packages/protocol` | `@wurmhol/protocol`                     |
+| `packages/auth`     | `@wurmhol/auth`                         |
+| `packages/db`       | `@wurmhol/db`                           |
 
 ## Local
 
@@ -68,4 +69,4 @@ to the Mintlify deployment named by `DOCS_HOST` in `apps/site/wrangler.jsonc` (M
 `apps/docs`; turn on **Host at** `/docs` in its custom domain settings). Empty `DOCS_HOST` makes
 `/docs` the 404 page.
 
-License: AGPL-3.0 for the app, MIT for the CLI (`packages/cli/LICENSE`).
+License: AGPL-3.0 for the app, MIT for the CLI and the wire protocol (`packages/cli/LICENSE`, `packages/protocol/LICENSE`).

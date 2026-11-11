@@ -1,6 +1,6 @@
 // Wurmhol's own tables. Every one belongs to an org (`org_id`). Better Auth's tables are in
 // `auth.ts`, generated; never edit that file by hand.
-import { TOKEN_SCOPES, TOKEN_SOURCES } from "@wurmhol/protocol";
+import { DOMAIN_ERROR_CODES, DOMAIN_STATES, TOKEN_SCOPES, TOKEN_SOURCES } from "@wurmhol/protocol";
 import { sql } from "drizzle-orm";
 import {
   index,
@@ -11,6 +11,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { organizations, users } from "./auth.ts";
+import { embedApps, embedConnectors, embedTenants, embedTunnels } from "./embed.ts";
 
 const now = sql`(cast(unixepoch('subsecond') * 1000 as integer))`;
 
@@ -88,10 +89,18 @@ export const shares = sqliteTable(
     agent: text("agent"),
     /** The agent session's page, http(s). */
     agentUrl: text("agent_url"),
+    // An embedded tunnel's session (ADR 0032); all null for a classic pipe. No delete action:
+    // embedded rows are soft-deleted, so deleting one a session points at is refused rather than
+    // turning the session into an org pipe. Deleting the org removes both through `org_id`.
+    appId: text("app_id").references(() => embedApps.id),
+    tenantId: text("tenant_id").references(() => embedTenants.id),
+    tunnelId: text("tunnel_id").references(() => embedTunnels.id),
+    connectorId: text("connector_id").references(() => embedConnectors.id),
   },
   (table) => [
     index("shares_org_idx").on(table.orgId, table.endedAt),
     index("shares_token_idx").on(table.tokenId),
+    index("shares_tunnel_idx").on(table.tunnelId, table.endedAt),
     // Open pipes of a branch, for a pull request opened after its pipe (ADR 0016).
     index("shares_open_branch_idx")
       .on(table.branch)
@@ -187,6 +196,8 @@ export const oauthStates = sqliteTable(
       .notNull()
       .references(() => shares.id, { onDelete: "cascade" }),
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    /** The host the flow started on when it was a custom domain (ADR 0033), where it comes back. */
+    host: text("host"),
   },
   (table) => [
     index("oauth_states_org_idx").on(table.orgId),
@@ -242,3 +253,48 @@ export const spendCaps = sqliteTable("spend_caps", {
   cents: integer("cents").notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).default(now).notNull(),
 });
+
+/**
+ * Custom domains (ADR 0033): a hostname an org owns, attached to one of its pipe names. Only an
+ * `active` row is routed. The hostname is unique across orgs: it is the key, and Cloudflare's zone
+ * holds one custom hostname per name too. Goes with its pipe name, and with its org.
+ */
+export const customDomains = sqliteTable(
+  "custom_domains",
+  {
+    /** Lowercase, no trailing dot (`@wurmhol/protocol`'s `customHostname`). */
+    hostname: text("hostname").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    pipeName: text("pipe_name")
+      .notNull()
+      .references(() => pipeNames.name, { onDelete: "cascade" }),
+    state: text("state", { enum: DOMAIN_STATES }).notNull(),
+    /** Random. The org publishes it as a TXT record to prove it owns the hostname. */
+    challenge: text("challenge").notNull(),
+    /** Cloudflare's id for the custom hostname. Null once it is deleted there. */
+    providerId: text("provider_id"),
+    /** Cloudflare's own words for the hostname and its certificate, as last read. */
+    providerStatus: text("provider_status"),
+    providerSslStatus: text("provider_ssl_status"),
+    /** Why a `failed` domain failed. */
+    errorCode: text("error_code", { enum: DOMAIN_ERROR_CODES }),
+    /** Cloudflare's last words about what is wrong, shown to the org. */
+    errorDetail: text("error_detail"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).default(now).notNull(),
+    /** When the TXT record was first seen. */
+    verifiedAt: integer("verified_at", { mode: "timestamp_ms" }),
+    /** When it first became `active`: the oldest active domain of a name is the pipe's URL. */
+    activatedAt: integer("activated_at", { mode: "timestamp_ms" }),
+    /** A `pending` domain is removed at this time. */
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
+    /** The last time the domain was checked against DNS and Cloudflare. */
+    checkedAt: integer("checked_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    index("custom_domains_org_idx").on(table.orgId),
+    index("custom_domains_name_idx").on(table.pipeName, table.state),
+    index("custom_domains_check_idx").on(table.state, table.checkedAt),
+  ],
+);

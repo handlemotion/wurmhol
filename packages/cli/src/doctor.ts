@@ -5,8 +5,8 @@ import { readFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { parseRefusal } from "@wurmhol/protocol";
 import { consoleUrl, findToken, pipeDomain, server } from "./config.ts";
-import { type Answer, proxyFor, send } from "./dial.ts";
-import { explainRefusal, FixError, isTlsError } from "./errors.ts";
+import { FixError } from "@wurmhol/sdk";
+import { type Answer, explainRefusal, isTlsError, proxyFor, send } from "@wurmhol/sdk/internal";
 import { get } from "./ports.ts";
 import { listStates } from "./state.ts";
 

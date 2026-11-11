@@ -4,6 +4,7 @@
 // whichever answers (loopback.ts), unless the owner names another host.
 import http from "node:http";
 import {
+  accessKeyHash,
   chunk,
   CLOSE_CODES,
   CONNECT_HEADERS,
@@ -28,11 +29,11 @@ import {
   WAITING_HEADER,
   type WsOpenPayload,
 } from "@wurmhol/protocol";
-import WebSocket from "ws";
 import { dial } from "./dial.ts";
 import { FixError } from "./errors.ts";
 import { Loopback, refused } from "./loopback.ts";
 import type { CloseReason, PipeSource } from "./pipe.ts";
+import { selectTransport, type Transport, type WsConnection, WS_OPEN } from "./transport/index.ts";
 
 export interface ShareInfo {
   id: string;
@@ -66,7 +67,13 @@ export interface TunnelOptions {
   name?: string;
   /** Where a new share comes from (ADR 0015); a reconnect keeps what the share started with. */
   source: PipeSource | null;
+  /** The access key a new share lets non-browser clients in with (ADR 0028); only its hash is sent. */
+  accessKey?: string;
   version: string;
+  /** The WebSocket implementation; default: chosen by runtime. */
+  transport?: Transport;
+  /** Names the embedding app in the User-Agent. */
+  product?: string;
   log: Logger;
   onRequest: (event: RequestEvent) => void;
   /** The share ended for good (stopped, terminated, expired, revoked, or the CLI gave up). */
@@ -94,7 +101,10 @@ interface LocalHttp {
 
 interface LocalWs {
   kind: "ws";
-  socket: WebSocket;
+  /** Null until the dev server accepted the upgrade. */
+  socket: WsConnection | null;
+  /** The relay closed it, or the tunnel ended, before the dev server answered. */
+  cancelled: boolean;
 }
 
 function waitingPage(port: number) {
@@ -110,7 +120,7 @@ function pairs(rawHeaders: string[]): HeaderList {
 
 export class Tunnel {
   readonly #options: TunnelOptions;
-  #socket: WebSocket | null = null;
+  #socket: WsConnection | null = null;
   #share: ShareInfo | null = null;
   #streams = new Map<number, LocalHttp | LocalWs>();
   #stopping = false;
@@ -138,7 +148,7 @@ export class Tunnel {
   async stop() {
     this.#stopping = true;
     const socket = this.#socket;
-    if (!socket || socket.readyState !== WebSocket.OPEN) return this.#finish("stopped");
+    if (!socket || socket.readyState !== WS_OPEN) return this.#finish("stopped");
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, 3000);
       socket.once("close", () => {
@@ -161,8 +171,9 @@ export class Tunnel {
     return url;
   }
 
-  #dial(): Promise<WebSocket> {
-    const { server, token, version, viewers, source } = this.#options;
+  async #dial(): Promise<WsConnection> {
+    const { server, token, version, viewers, source, accessKey } = this.#options;
+    const access = !this.#share && accessKey ? await accessKeyHash(accessKey) : null;
     return dial(this.#url(), {
       server,
       token,
@@ -173,8 +184,11 @@ export class Tunnel {
         ...(!this.#share && source
           ? { [CONNECT_HEADERS.source]: encodeURIComponent(JSON.stringify(source)) }
           : {}),
+        ...(access ? { [CONNECT_HEADERS.access]: access } : {}),
       },
       maxPayload: 2 * MAX_WS_MESSAGE_BYTES,
+      transport: this.#options.transport,
+      product: this.#options.product,
       onUpgrade: (response) => {
         const id = response.headers[SHARE_HEADERS.id];
         const shareUrl = response.headers[SHARE_HEADERS.url];
@@ -187,11 +201,11 @@ export class Tunnel {
     });
   }
 
-  #attach(socket: WebSocket) {
+  #attach(socket: WsConnection) {
     this.#socket = socket;
     this.#disconnectedAt = null;
     this.#awaitingPong = false;
-    socket.on("message", (data, isBinary) => this.#onMessage(data as Buffer, isBinary));
+    socket.on("message", (data, isBinary) => this.#onMessage(data, isBinary));
     socket.on("close", (code, reason) => this.#onClose(socket, code, reason.toString()));
     socket.on("error", (error) => this.#options.log("socket.error", { message: error.message }));
     if (this.#heartbeat) clearInterval(this.#heartbeat);
@@ -217,7 +231,7 @@ export class Tunnel {
 
   #send(frame: Frame) {
     const socket = this.#socket;
-    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    if (!socket || socket.readyState !== WS_OPEN) return false;
     socket.send(encodeFrame(frame));
     return true;
   }
@@ -256,15 +270,17 @@ export class Tunnel {
     const stream = this.#streams.get(frame.stream);
     if (!stream) return;
     if (stream.kind === "ws") {
+      const { socket } = stream;
       if (frame.type === "ws-message") {
-        if (stream.socket.readyState === WebSocket.OPEN) {
-          stream.socket.send(frame.payload.data, { binary: frame.payload.binary });
+        if (socket?.readyState === WS_OPEN) {
+          socket.send(frame.payload.data, { binary: frame.payload.binary });
         }
       } else if (frame.type === "ws-close") {
+        stream.cancelled = true;
         try {
-          stream.socket.close(sendableCloseCode(frame.payload.code), frame.payload.reason);
+          socket?.close(sendableCloseCode(frame.payload.code), frame.payload.reason);
         } catch {
-          stream.socket.terminate();
+          socket?.terminate();
         }
         this.#streams.delete(frame.stream);
       }
@@ -411,59 +427,80 @@ export class Tunnel {
     // `__proto__` must not write to the object's prototype.
     const headers = new Map(localSocketHeaders(open.headers ?? [], port));
     const { host, ...target } = this.#loopback.target(port, this.#options.host);
-    const socket = new WebSocket(
-      `ws://${host.includes(":") ? `[${host}]` : host}:${port}${open.path ?? "/"}`,
-      open.protocols ?? [],
-      {
-        ...target,
-        headers: Object.fromEntries(headers),
-        perMessageDeflate: false,
-        maxPayload: MAX_WS_MESSAGE_BYTES,
-      },
-    );
-    socket.binaryType = "nodebuffer";
-    let opened = false;
-    this.#streams.set(id, { kind: "ws", socket });
-    socket.once("open", () => {
-      opened = true;
-      this.#send({
-        stream: id,
-        type: "ws-open",
-        payload: { accepted: true, ...(socket.protocol ? { protocol: socket.protocol } : {}) },
-      });
-    });
-    socket.on("message", (data: Buffer, isBinary) => {
-      this.#send({ stream: id, type: "ws-message", payload: { binary: isBinary, data } });
-    });
-    socket.on("close", (code, reason) => {
-      if (!this.#streams.has(id)) return;
-      this.#streams.delete(id);
-      if (opened)
-        this.#send({ stream: id, type: "ws-close", payload: { code, reason: reason.toString() } });
-    });
-    socket.on("error", () => {
-      if (!opened) {
+    const stream: LocalWs = { kind: "ws", socket: null, cancelled: false };
+    this.#streams.set(id, stream);
+    const transport = this.#options.transport ?? selectTransport();
+    transport
+      .connect(
+        new URL(`ws://${host.includes(":") ? `[${host}]` : host}:${port}${open.path ?? "/"}`),
+        {
+          headers: Object.fromEntries(headers),
+          protocols: open.protocols ?? [],
+          maxPayload: MAX_WS_MESSAGE_BYTES,
+          lookup: target.lookup,
+          autoSelectFamily: target.autoSelectFamily,
+          // Everything is attached from the open event itself: a dev server that speaks first
+          // (a greeting, a replayed state) sends in the same packet as its handshake answer, and
+          // a listener added after the promise settles would miss it.
+          onOpen: (socket) => {
+            if (stream.cancelled || !this.#streams.has(id)) return socket.terminate();
+            stream.socket = socket;
+            this.#send({
+              stream: id,
+              type: "ws-open",
+              payload: {
+                accepted: true,
+                ...(socket.protocol ? { protocol: socket.protocol } : {}),
+              },
+            });
+            socket.on("message", (data, isBinary) => {
+              this.#send({ stream: id, type: "ws-message", payload: { binary: isBinary, data } });
+            });
+            socket.on("close", (code, reason) => {
+              if (!this.#streams.has(id)) return;
+              this.#streams.delete(id);
+              this.#send({
+                stream: id,
+                type: "ws-close",
+                payload: { code, reason: reason.toString() },
+              });
+            });
+            // The close that follows ends the stream; an error alone changes nothing.
+            socket.on("error", () => {});
+          },
+        },
+      )
+      .catch(() => {
+        if (stream.cancelled || !this.#streams.has(id)) return;
         this.#streams.delete(id);
         this.#send({ stream: id, type: "ws-open", payload: { accepted: false } });
-      }
-    });
+      });
   }
 
   #dropStreams() {
     for (const [id, stream] of this.#streams) {
       if (stream.kind === "http") this.#cancelHttp(id, stream);
-      else stream.socket.terminate();
+      else {
+        stream.cancelled = true;
+        stream.socket?.terminate();
+      }
     }
     this.#streams.clear();
   }
 
-  #onClose(socket: WebSocket, code: number, reason: string) {
+  #onClose(socket: WsConnection, code: number, reason: string) {
     if (this.#socket !== socket) return;
     this.#socket = null;
     this.#dropStreams();
-    this.#options.log("disconnected", { code, reason });
-    if (this.#stopping) return;
     const ended = endReasonFor(code);
+    // `reconnecting`: the connection was lost and the tunnel will redial; false when the pipe is
+    // ending on purpose or the relay ended it.
+    this.#options.log("disconnected", {
+      code,
+      reason,
+      reconnecting: !this.#stopping && !ended,
+    });
+    if (this.#stopping) return;
     if (ended) return this.#finish(ended);
     void this.#reconnect();
   }

@@ -4,6 +4,7 @@
 import {
   ArrowLeft,
   ArrowUpRight,
+  Blocks,
   Check,
   ChevronDown,
   ChevronRight,
@@ -20,6 +21,7 @@ import {
   Ellipsis,
   ExternalLink,
   Eye,
+  Globe,
   Info,
   KeyRound,
   Laptop,
@@ -33,6 +35,7 @@ import {
   TriangleAlert,
   UserRound,
   Users,
+  Waypoints,
   X,
   type LucideIcon,
   type LucideProps,
@@ -46,6 +49,7 @@ function thin(Icon: LucideIcon, name: string) {
 
 export const IconArrowLeft = thin(ArrowLeft, "IconArrowLeft");
 export const IconArrowUpRight = thin(ArrowUpRight, "IconArrowUpRight");
+export const IconBlocks = thin(Blocks, "IconBlocks");
 export const IconCheck = thin(Check, "IconCheck");
 export const IconChevronDown = thin(ChevronDown, "IconChevronDown");
 export const IconChevronRight = thin(ChevronRight, "IconChevronRight");
@@ -62,6 +66,7 @@ export const IconDoorOpen = thin(DoorOpen, "IconDoorOpen");
 export const IconEllipsis = thin(Ellipsis, "IconEllipsis");
 export const IconExternalLink = thin(ExternalLink, "IconExternalLink");
 export const IconEye = thin(Eye, "IconEye");
+export const IconGlobe = thin(Globe, "IconGlobe");
 export const IconInfo = thin(Info, "IconInfo");
 export const IconKey = thin(KeyRound, "IconKey");
 export const IconLaptop = thin(Laptop, "IconLaptop");
@@ -75,4 +80,5 @@ export const IconTrash = thin(Trash2, "IconTrash");
 export const IconTriangleAlert = thin(TriangleAlert, "IconTriangleAlert");
 export const IconUser = thin(UserRound, "IconUser");
 export const IconUsers = thin(Users, "IconUsers");
+export const IconWaypoints = thin(Waypoints, "IconWaypoints");
 export const IconX = thin(X, "IconX");

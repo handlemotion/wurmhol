@@ -10,7 +10,7 @@ import { oauthStates, shares } from "./schema/index.ts";
  */
 export async function recordOAuthState(
   db: Db,
-  input: { state: string; orgId: string; shareId: string; expiresAt: Date },
+  input: { state: string; orgId: string; shareId: string; expiresAt: Date; host?: string | null },
 ) {
   await db
     .insert(oauthStates)
@@ -19,6 +19,7 @@ export async function recordOAuthState(
       orgId: input.orgId,
       shareId: input.shareId,
       expiresAt: input.expiresAt,
+      host: input.host ?? null,
     })
     .onConflictDoNothing();
 }
@@ -31,12 +32,16 @@ export async function takeOAuthState(db: Db, state: string, now = new Date()) {
   const [taken] = await db
     .delete(oauthStates)
     .where(eq(oauthStates.hash, await sha256Hex(state)))
-    .returning({ shareId: oauthStates.shareId, expiresAt: oauthStates.expiresAt });
+    .returning({
+      shareId: oauthStates.shareId,
+      expiresAt: oauthStates.expiresAt,
+      host: oauthStates.host,
+    });
   if (!taken || taken.expiresAt <= now) return null;
   const [share] = await db
-    .select({ id: shares.id, name: shares.name, endedAt: shares.endedAt })
+    .select({ id: shares.id, orgId: shares.orgId, name: shares.name, endedAt: shares.endedAt })
     .from(shares)
     .where(eq(shares.id, taken.shareId))
     .limit(1);
-  return share ?? null;
+  return share ? { ...share, host: taken.host } : null;
 }

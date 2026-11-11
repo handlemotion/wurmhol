@@ -41,6 +41,65 @@ export interface Me {
   activeOrgId: string | null;
   role: Role | null;
   standing: Standing | null;
+  /** The org's owner may manage embedded apps here (ADR 0032): Business, on an install that has them. */
+  apps: boolean;
+}
+
+/** What an integration key may do (ADR 0032). */
+export type AppPermission = "tunnels:read" | "tunnels:manage" | "subjects:manage" | "grants:issue";
+
+/** An embedded application, with this window's requests and its open pipes. */
+export interface App {
+  id: string;
+  name: string;
+  launchUrl: string | null;
+  allowedOrigins: string[];
+  monthlyRequests: number | null;
+  activeTunnels: number | null;
+  tenantMonthlyRequests: number | null;
+  tenantActiveTunnels: number | null;
+  createdAt: string;
+  usage: { requests: number; openTunnels: number };
+}
+
+/** The settings an owner changes on an application. */
+export type AppSettings = Pick<
+  App,
+  | "name"
+  | "launchUrl"
+  | "allowedOrigins"
+  | "monthlyRequests"
+  | "activeTunnels"
+  | "tenantMonthlyRequests"
+  | "tenantActiveTunnels"
+>;
+
+export interface AppKey {
+  id: string;
+  name: string;
+  permissions: AppPermission[];
+  createdAt: string;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  createdBy: string | null;
+}
+
+/** An embedded pipe's lifecycle and health: never anything from inside it. */
+export interface AppTunnel {
+  id: string;
+  url: string;
+  tenant: string;
+  owner: string;
+  state: "never" | "live" | "away" | "stopped" | "ended";
+  createdAt: string;
+  stoppedAt: string | null;
+  session: {
+    id: string;
+    startedAt: string;
+    lastRequestAt: string | null;
+    bytes: number;
+  } | null;
+  lastEnd: { reason: string | null; at: string } | null;
 }
 
 /** Whether the org may open pipes (ADR 0027): billing off, or a plan in good standing. */
@@ -79,7 +138,12 @@ export interface SignInMethods {
 /** The Worker's config for the app (apps/worker/src/app.ts `appConfig`). */
 export interface AppConfig {
   docsUrl: string;
+  /** Whether this install lets orgs attach their own hostnames to pipe names (ADR 0033). */
+  customDomains: boolean;
 }
+
+/** A custom domain (ADR 0033), as `/api/domains` returns it. */
+export type { Domain } from "@wurmhol/protocol";
 
 /** A `wurmhol login` waiting for approval (apps/worker/src/routes/device.ts). */
 export interface DeviceLogin {

@@ -9,11 +9,13 @@ import { limitAuth } from "./rate-limiter.ts";
 import { account, api } from "./routes/api.ts";
 import { connect } from "./routes/connect.ts";
 import { deviceApproval, deviceFlow } from "./routes/device.ts";
+import { domainsConsole, domainsV1 } from "./routes/domains.ts";
 import { open } from "./routes/open.ts";
 import { githubRoutes } from "./routes/github.ts";
 import { machineConnect } from "./routes/machines.ts";
 import { serveMcp } from "./routes/mcp.ts";
 import { operator } from "./routes/operator.ts";
+import { embed } from "./routes/embed.ts";
 import { pipes } from "./routes/pipes.ts";
 import { securityHeaders } from "./security-headers.ts";
 
@@ -54,9 +56,9 @@ function signInMethods(config: Config) {
   };
 }
 
-/** The config the web app reads beyond sign-in: where its Docs links go. */
+/** The config the web app reads beyond sign-in: where its Docs links go, and whether custom domains are on (ADR 0033). */
 function appConfig(config: Config) {
-  return { docsUrl: config.DOCS_URL };
+  return { docsUrl: config.DOCS_URL, customDomains: config.customDomains !== undefined };
 }
 
 /** JSON for inside a `<script>`: `<` escaped, so no value can close the element. */
@@ -161,6 +163,8 @@ export const app = new Hono<AppEnv>()
   .route("/device", deviceFlow)
   .use("/v1/*", requestScope, securityHeaders)
   .route("/v1/pipes", pipes)
+  .route("/v1/embed", embed)
+  .route("/v1/domains", domainsV1)
   .all("/v1/*", (c) => c.json({ error: "not found" }, 404))
   .use("/operator/*", requestScope, securityHeaders)
   .route("/operator", operator)
@@ -211,6 +215,7 @@ export const app = new Hono<AppEnv>()
   .on(["GET", "POST"], "/api/auth/*", limitAuth, (c) => c.var.auth.handler(c.req.raw))
   .route("/api/device", deviceApproval)
   .route("/api/github", githubRoutes)
+  .route("/api/domains", domainsConsole)
   .route("/api", account)
   .route("/api", api)
   .all("/api/*", (c) => c.json({ error: "not found" }, 404))

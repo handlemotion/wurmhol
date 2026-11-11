@@ -9,8 +9,17 @@
 // of HTML responses and the favicon are kept, while the share is open: at its end the object
 // keeps a tombstone (`state`, `endReason`) and nothing else. The viewer's IP is not forwarded.
 import { DurableObject } from "cloudflare:workers";
-import { createDb, findMember, randomSecret, recordShareEnd, sha256Hex } from "@wurmhol/db";
 import {
+  createDb,
+  findLiveEmbedGrant,
+  findMember,
+  randomSecret,
+  recordShareEnd,
+  sha256Hex,
+} from "@wurmhol/db";
+import {
+  ACCESS_KEY_HEADER,
+  accessKeyHash,
   chunk,
   CLOSE_CODES,
   decodeFrame,
@@ -21,6 +30,12 @@ import {
   HEARTBEAT_MS,
   type Frame,
   HttpStreamOrder,
+  isAccessKey,
+  embedCredentialKind,
+  GRANT_CLOSE,
+  GRANT_HEADER,
+  grantProtocolAnswer,
+  splitGrantProtocols,
   nextStreamId,
   PING_TEXT,
   pipeSetCookie,
@@ -56,6 +71,14 @@ const INTERNAL_HEADERS = {
   init: "x-wurmhol-init",
   /** To the object: the signed-in viewer's user id. */
   viewer: "x-wurmhol-viewer",
+  /** To the object: the access key a non-browser client presented (ADR 0028). */
+  key: "x-wurmhol-access-key",
+  /** To the object: the grant id a browser's grant cookie names (ADR 0032). */
+  grantId: "x-wurmhol-grant-id",
+  /** To the object: a program's grant token, from its header or a WebSocket subprotocol. */
+  grantToken: "x-wurmhol-grant-token",
+  /** To the object: set when the grant came as a subprotocol, with the page's `Origin`. */
+  grantOrigin: "x-wurmhol-grant-origin",
   /** From the object: the viewer may no longer open the share. */
   refused: "x-wurmhol-refused",
   /** From the object: the share's org, on a response with a `Location` (the OAuth relay's). */
@@ -71,16 +94,36 @@ export function shareStub(env: Env, shareId: string) {
 /**
  * A client's request rebuilt for the object: our own headers are never taken from the client,
  * only the ones set here. `cli` is the CLI's socket, a bodiless GET to `/connect` (with a new
- * share's `ShareInit`, or null to bring one back); `viewer` is a signed-in viewer's request.
+ * share's `ShareInit`, or null to bring one back); `viewer` is a signed-in viewer's request;
+ * `key` is a request that presented the pipe's access key, for the object to check.
  */
 export function toShare(
   raw: Request,
-  internal: { cli: ShareInit | null } | { viewer: string },
+  internal:
+    | { cli: ShareInit | null }
+    | { viewer: string }
+    | { key: string }
+    | { grant: { id: string } | { token: string; origin?: string } },
 ): Request {
   const headers = new Headers(raw.headers);
   for (const name of Object.values(INTERNAL_HEADERS)) headers.delete(name);
+  headers.delete(ACCESS_KEY_HEADER);
+  headers.delete(GRANT_HEADER);
+  if ("grant" in internal) {
+    const { grant } = internal;
+    if ("id" in grant) headers.set(INTERNAL_HEADERS.grantId, grant.id);
+    else {
+      headers.set(INTERNAL_HEADERS.grantToken, grant.token);
+      if (grant.origin !== undefined) headers.set(INTERNAL_HEADERS.grantOrigin, grant.origin);
+    }
+    return new Request(raw, { headers });
+  }
   if ("viewer" in internal) {
     headers.set(INTERNAL_HEADERS.viewer, internal.viewer);
+    return new Request(raw, { headers });
+  }
+  if ("key" in internal) {
+    headers.set(INTERNAL_HEADERS.key, internal.key);
     return new Request(raw, { headers });
   }
   headers.set(INTERNAL_HEADERS.cli, "1");
@@ -112,6 +155,20 @@ export function fromShare(response: Response): { response: Response; orgId: stri
   const out = new Response(response.body, response);
   out.headers.delete(INTERNAL_HEADERS.org);
   return { response: out, orgId };
+}
+
+/**
+ * How long a checked grant stays good before D1 is asked again (ADR 0032): a revocation's push
+ * makes it immediate; this bounds one that got lost. Open sockets are checked as often.
+ */
+const GRANT_RECHECK_MS = 60_000;
+
+/** A grant this object checked: its id, its expiry, and when it was checked. */
+interface CheckedGrant {
+  id: string;
+  expiresAt: number;
+  checkedAt: number;
+  allowedOrigins: string[];
 }
 
 /** How long a viewer's membership check stays good before D1 is asked again. */
@@ -186,6 +243,8 @@ const textDecoder = new TextDecoder();
 export class Share extends DurableObject<Env> {
   #streams = new Map<number, HttpStream | WsStream>();
   #members = new Map<string, number>();
+  /** Grants checked lately, by id and by token: `id:<id>` or `token:<token's hash>`. */
+  #grants = new Map<string, CheckedGrant>();
   /** Bytes and viewer requests not yet added to the Org object's monthly counts. */
   #pendingUsage = 0;
   #pendingRequests = 0;
@@ -295,7 +354,7 @@ export class Share extends DurableObject<Env> {
     const probe = meta.probe?.at ?? Infinity;
     const silent =
       meta.state === "live" ? (this.#cliSeenAt(meta) ?? Date.now()) + CLI_SILENT_MS : Infinity;
-    void this.ctx.storage.setAlarm(Math.min(expires, away, probe, silent));
+    void this.ctx.storage.setAlarm(Math.min(expires, away, probe, silent, this.#nextGrantCheck()));
   }
 
   /** When the live CLI was last heard from (a heartbeat, a frame, its connect), or null. */
@@ -313,7 +372,42 @@ export class Share extends DurableObject<Env> {
     const stored = this.#stored();
     if (!stored) return { state: "unknown" as const };
     if (stored.state === "ended") return { state: "ended" as const };
-    return { state: stored.state, orgId: stored.orgId, tokenId: stored.tokenId, port: stored.port };
+    return {
+      state: stored.state,
+      orgId: stored.orgId,
+      tokenId: stored.tokenId,
+      port: stored.port,
+      embedded: Boolean(stored.embed),
+      tunnelId: stored.embed?.tunnelId ?? null,
+      appId: stored.embed?.appId ?? null,
+    };
+  }
+
+  /**
+   * An embedded tunnel's session as its integration sees it (ADR 0032): whether its agent is
+   * connected, since when, its last request and its bytes. Nothing from inside the tunnel.
+   */
+  health() {
+    const stored = this.#stored();
+    if (!stored || stored.state === "ended") return null;
+    return {
+      state: stored.state,
+      liveSince: stored.liveSince ?? null,
+      awaySince: stored.awaySince,
+      lastRequestAt: stored.lastRequestAt,
+      bytes: stored.bytes,
+    };
+  }
+
+  /**
+   * Moves the open pipe to `url`, its new public URL (a custom domain of its name became active or
+   * stopped being, ADR 0033). The CLI is given it when it next connects. False when it has ended.
+   */
+  setUrl(url: string) {
+    const meta = this.#meta();
+    if (!meta) return false;
+    if (meta.url !== url) this.#save({ ...meta, url });
+    return true;
   }
 
   /** A one-time code for `userId` (60 s, single use), after the app checked their membership. */
@@ -410,7 +504,8 @@ export class Share extends DurableObject<Env> {
     this.#armAlarm(meta);
     if (wasAway) this.ctx.waitUntil(this.#org(meta.orgId).update(meta.id, { state: "live" }));
     if (isNew && meta.source) this.ctx.waitUntil(this.preview());
-    if (isNew) {
+    // An embedded tunnel's pages are its user's: the relay reads no title or favicon from them.
+    if (isNew && !meta.embed) {
       // From the alarm, a moment after the socket is up: older CLIs drop a frame that arrives
       // in the same packet as the upgrade.
       meta.probe = { at: Date.now() + PROBE_FIRST_MS, attempt: 0 };
@@ -432,8 +527,42 @@ export class Share extends DurableObject<Env> {
   async #view(request: Request): Promise<Response> {
     const meta = this.#meta();
     if (!meta) return errorPage(410, "This pipe has ended.");
+    const key = request.headers.get(INTERNAL_HEADERS.key);
     const viewer = request.headers.get(INTERNAL_HEADERS.viewer);
-    if (!viewer || !this.mayView(viewer) || !(await this.#isMember(viewer, meta.orgId))) {
+    let grant: CheckedGrant | null = null;
+    if (meta.embed) {
+      // An embedded tunnel opens only to a grant for one of its subjects (ADR 0032): never to an
+      // org member's cookie, nor to an access key.
+      grant = await this.#checkGrant(request, meta);
+      if (!grant) {
+        return new Response("grant required", {
+          status: 401,
+          headers: {
+            "content-type": "text/plain",
+            "cache-control": "no-store",
+            [INTERNAL_HEADERS.refused]: "1",
+          },
+        });
+      }
+    } else if (
+      request.headers.has(INTERNAL_HEADERS.grantId) ||
+      request.headers.has(INTERNAL_HEADERS.grantToken)
+    ) {
+      return new Response("not a tunnel", { status: 401 });
+    }
+    if (key !== null) {
+      // A client with no browser session: the pipe's access key stands in for the sign-in (ADR
+      // 0028). It opens only this pipe, and the same limits, billing and wall apply.
+      if (!(await this.#acceptsKey(meta, key))) {
+        return new Response("bad access key", {
+          status: 401,
+          headers: { "content-type": "text/plain", "cache-control": "no-store" },
+        });
+      }
+    } else if (
+      !grant &&
+      (!viewer || !this.mayView(viewer) || !(await this.#isMember(viewer, meta.orgId)))
+    ) {
       return new Response("not a member", {
         status: 403,
         headers: { [INTERNAL_HEADERS.refused]: "1" },
@@ -445,12 +574,130 @@ export class Share extends DurableObject<Env> {
       });
     }
     this.#touch();
-    this.#views.note(meta, viewer);
+    if (viewer) this.#views.note(meta, viewer);
     this.#pendingRequests += 1;
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
-      return this.#openViewerSocket(request, meta);
+      return this.#openViewerSocket(request, meta, grant);
     }
-    return this.#relay(this.#requestHead(request, meta), request.body, meta);
+    return this.#relay(this.#requestHead(request), request.body, meta);
+  }
+
+  /**
+   * The live grant a request to this embedded tunnel carries, or null. A cookie's grant id or a
+   * token is looked up in D1 at most once a `GRANT_RECHECK_MS`; the grant must be for this
+   * tunnel. A token that came as a WebSocket subprotocol also needs the page's origin to be one
+   * the application allows, so another site cannot use a grant it obtained.
+   */
+  async #checkGrant(request: Request, meta: Meta): Promise<CheckedGrant | null> {
+    const id = request.headers.get(INTERNAL_HEADERS.grantId);
+    const token = request.headers.get(INTERNAL_HEADERS.grantToken);
+    const origin = request.headers.get(INTERNAL_HEADERS.grantOrigin);
+    let cacheKey: string;
+    if (id) cacheKey = `id:${id}`;
+    else if (token && embedCredentialKind(token) === "grant") {
+      cacheKey = `token:${await sha256Hex(token)}`;
+    } else return null;
+    const now = Date.now();
+    let grant = this.#grants.get(cacheKey);
+    if (!grant || now - grant.checkedAt >= GRANT_RECHECK_MS) {
+      const found = await findLiveEmbedGrant(
+        createDb(this.env.DB),
+        id ? { id } : { token: token! },
+      );
+      if (!found || found.tunnelId !== meta.embed?.tunnelId || found.orgId !== meta.orgId) {
+        this.#grants.delete(cacheKey);
+        return null;
+      }
+      grant = {
+        id: found.id,
+        expiresAt: found.expiresAt.getTime(),
+        checkedAt: now,
+        allowedOrigins: found.allowedOrigins,
+      };
+      this.#grants.set(cacheKey, grant);
+    }
+    if (grant.expiresAt <= now) {
+      this.#grants.delete(cacheKey);
+      return null;
+    }
+    if (origin !== null && !grant.allowedOrigins.includes(origin)) return null;
+    return grant;
+  }
+
+  /**
+   * Revoked grants stop now (ADR 0032): dropped from the cache, and every WebSocket opened under
+   * one closed with `4403`. Called by the Worker after D1 has the revocation.
+   */
+  revokeGrants(ids: string[]) {
+    const revoked = new Set(ids);
+    for (const [key, grant] of this.#grants) if (revoked.has(grant.id)) this.#grants.delete(key);
+    for (const id of ids) {
+      this.#closeGrantSockets(id, GRANT_CLOSE.revoked);
+      this.ctx.storage.kv.delete(`grant:${id}`);
+    }
+  }
+
+  /** Closes the viewer sockets opened under a grant, and their streams to the CLI. */
+  #closeGrantSockets(grantId: string, close: { code: number; reason: string }) {
+    for (const socket of this.ctx.getWebSockets(`g:${grantId}`)) {
+      const tag = this.ctx.getTags(socket).find((t) => t.startsWith("v:"));
+      try {
+        socket.close(close.code, close.reason);
+      } catch {
+        // Already closed.
+      }
+      if (tag) {
+        const stream = Number(tag.slice(2));
+        this.#backlogs.delete(stream);
+        this.#closeCliStream(stream, 1000, close.reason);
+      }
+    }
+  }
+
+  /**
+   * The grants open sockets were opened under (`grant:<id>`, its expiry): closes those whose
+   * grant expired (`4401`) or no longer checks out in D1 (`4403`), and forgets grants with no
+   * socket left. Runs from the alarm, at least every `GRANT_RECHECK_MS` while any are open.
+   */
+  async #checkGrantSockets(meta: Meta) {
+    const now = Date.now();
+    const db = createDb(this.env.DB);
+    for (const [key, expiresAt] of this.ctx.storage.kv.list<number>({ prefix: "grant:" })) {
+      const id = key.slice("grant:".length);
+      if (!this.ctx.getWebSockets(`g:${id}`).length) {
+        this.ctx.storage.kv.delete(key);
+        continue;
+      }
+      if (expiresAt <= now) {
+        this.#closeGrantSockets(id, GRANT_CLOSE.expired);
+        this.ctx.storage.kv.delete(key);
+        continue;
+      }
+      const live = await findLiveEmbedGrant(db, { id });
+      if (!live || live.tunnelId !== meta.embed?.tunnelId) {
+        this.#closeGrantSockets(id, GRANT_CLOSE.revoked);
+        this.ctx.storage.kv.delete(key);
+      }
+    }
+  }
+
+  /** When the alarm must next look at grant sockets: the soonest expiry, or a recheck. */
+  #nextGrantCheck() {
+    let next = Infinity;
+    for (const [, expiresAt] of this.ctx.storage.kv.list<number>({ prefix: "grant:" })) {
+      next = Math.min(next, expiresAt, Date.now() + GRANT_RECHECK_MS);
+    }
+    return next;
+  }
+
+  /** Whether `key` is the one this pipe was opened with; only its hash is kept. */
+  async #acceptsKey(meta: Meta, key: string) {
+    if (!meta.accessHash || !isAccessKey(key)) return false;
+    const presented = new TextEncoder().encode(await accessKeyHash(key));
+    const stored = new TextEncoder().encode(meta.accessHash);
+    return (
+      presented.byteLength === stored.byteLength && crypto.subtle.timingSafeEqual(presented, stored)
+    );
   }
 
   async #isMember(userId: string, orgId: string) {
@@ -504,12 +751,14 @@ export class Share extends DurableObject<Env> {
     this.ctx.waitUntil(this.#org(meta.orgId).update(meta.id, { lastRequestAt: at }));
   }
 
-  #requestHead(request: Request, meta: Meta): RequestHead {
+  #requestHead(request: Request): RequestHead {
     const url = new URL(request.url);
     return {
       method: request.method,
       path: `${url.pathname}${url.search}`,
-      headers: viewerRequestHeaders(request.headers, meta.url),
+      // The host the viewer used, not the pipe's own URL: a pipe with a custom domain (ADR 0033)
+      // answers on both, and an app builds its redirect URIs from what it is told.
+      headers: viewerRequestHeaders(request.headers, request.url),
     };
   }
 
@@ -663,15 +912,16 @@ export class Share extends DurableObject<Env> {
     }
   }
 
-  async #openViewerSocket(request: Request, meta: Meta) {
+  async #openViewerSocket(request: Request, meta: Meta, grant: CheckedGrant | null) {
     const id = this.#nextStream();
     const stream: WsStream = { kind: "ws", opened: deferred() };
     this.#streams.set(id, stream);
-    const head = this.#requestHead(request, meta);
-    const protocols = (request.headers.get("sec-websocket-protocol") ?? "")
-      .split(",")
-      .map((p) => p.trim())
-      .filter(Boolean);
+    const head = this.#requestHead(request);
+    // A browser's grant entries never reach the dev server (ADR 0032); the app's own do.
+    const { grant: offered, own: protocols } = splitGrantProtocols(
+      request.headers.get("sec-websocket-protocol"),
+    );
+    head.headers = head.headers.filter(([name]) => name.toLowerCase() !== "sec-websocket-protocol");
     try {
       this.#send({
         stream: id,
@@ -706,9 +956,15 @@ export class Share extends DurableObject<Env> {
     }
     const { 0: client, 1: server } = new WebSocketPair();
     // Tagged with its stream, so frames find it again after this object hibernates.
-    this.ctx.acceptWebSocket(server, [`v:${id}`]);
+    this.ctx.acceptWebSocket(server, grant ? [`v:${id}`, `g:${grant.id}`] : [`v:${id}`]);
+    if (grant) {
+      // The alarm closes it when its grant expires, and rechecks it in the meantime.
+      this.ctx.storage.kv.put(`grant:${grant.id}`, grant.expiresAt);
+      this.#armAlarm(meta);
+    }
     const headers = new Headers();
-    if (opened.protocol) headers.set("sec-websocket-protocol", opened.protocol);
+    const protocol = offered ? grantProtocolAnswer(opened.protocol) : opened.protocol;
+    if (protocol) headers.set("sec-websocket-protocol", protocol);
     return new Response(null, { status: 101, webSocket: client, headers });
   }
 
@@ -955,6 +1211,8 @@ export class Share extends DurableObject<Env> {
         this.#save(live);
         this.ctx.waitUntil(this.#page.probe(attempt));
       }
+      const embedded = this.#meta();
+      if (embedded?.embed) await this.#checkGrantSockets(embedded);
       const current = this.#meta();
       if (current) this.#armAlarm(current);
     }
@@ -1011,12 +1269,17 @@ export class Share extends DurableObject<Env> {
       this.#save(meta);
     }
     this.#lastUsageFlush = Date.now();
-    const usage = await this.#org(meta.orgId).addUsage(meta.id, batch, {
-      monthlyBytes: meta.limits.monthlyBytes,
-      monthlyRequests: meta.limits.monthlyRequests ?? Number.POSITIVE_INFINITY,
-      period: null,
-      meter: null,
-    });
+    const usage = await this.#org(meta.orgId).addUsage(
+      meta.id,
+      batch,
+      {
+        monthlyBytes: meta.limits.monthlyBytes,
+        monthlyRequests: meta.limits.monthlyRequests ?? Number.POSITIVE_INFINITY,
+        period: null,
+        meter: null,
+      },
+      meta.embed && { appId: meta.embed.appId, tenantId: meta.embed.tenantId },
+    );
     this.ctx.storage.kv.delete("usage:batch");
     return usage.over;
   }

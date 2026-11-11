@@ -11,10 +11,10 @@ import { z } from "zod";
 import pkg from "../package.json" with { type: "json" };
 import { findToken, server } from "./config.ts";
 import { writeCredentials } from "./credentials.ts";
-import { FixError } from "./errors.ts";
-import { awaitLogin, startLogin } from "./login.ts";
+import { awaitLogin, FixError, type Pipe, startLogin } from "@wurmhol/sdk";
+import { pagePath, pageUrl } from "@wurmhol/sdk/internal";
 import { appendRequest, recentRequests } from "./logs.ts";
-import { openPipe, pagePath, pageUrl, type Pipe } from "./pipe.ts";
+import { openPipe } from "./open.ts";
 import { listStates, matches } from "./state.ts";
 
 const INSTRUCTIONS = `Wurmhol gives a local dev server a private HTTPS URL that only members of the user's org can open, in their own browser, on any device.

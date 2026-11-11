@@ -154,6 +154,33 @@ jobs:
           echo "::error::npm did not serve wurmhol@$version within 15 minutes of publishing"
           exit 1
 
+      # The SDK publishes the same way (trusted publisher on npmjs.com: workflow production.yml, environment production).
+      - name: Publish the SDK when the version is new
+        working-directory: packages/sdk
+        run: |
+          set -o pipefail
+          version="$(node -p 'require("./package.json").version')"
+          on_npm() { npm view "@wurmhol/sdk@$version" version --prefer-online >/dev/null 2>&1; }
+          if on_npm; then
+            echo "@wurmhol/sdk@$version is already on npm"
+            exit 0
+          fi
+          pnpm build
+          log="$RUNNER_TEMP/npm-publish-sdk.log"
+          if ! npm publish --access public 2>&1 | tee "$log"; then
+            grep -q 'previously staged version' "$log" || exit 1
+            echo "An earlier run published @wurmhol/sdk@$version; npm is still processing it"
+          fi
+          for _ in $(seq 60); do
+            if on_npm; then
+              echo "@wurmhol/sdk@$version is on npm"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::npm did not serve @wurmhol/sdk@$version within 15 minutes of publishing"
+          exit 1
+
       # Re-runs finish a release whose publish succeeded. Versions with no changelog section
       # (the first, published by hand) get no release.
       - name: Tag and GitHub release

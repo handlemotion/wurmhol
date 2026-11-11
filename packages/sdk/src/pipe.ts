@@ -2,6 +2,10 @@
 // adds only its state file and log on top (ADR 0008, section 3).
 import { EventEmitter } from "node:events";
 import {
+  ACCESS_KEY_HEADER,
+  ACCESS_KEY_RULE,
+  embedCredentialKind,
+  isAccessKey,
   parseDuration,
   PIPE_NAME_RULE,
   pipeName,
@@ -13,6 +17,7 @@ import {
 import pkg from "../package.json" with { type: "json" };
 import { FixError } from "./errors.ts";
 import { type RequestEvent, Tunnel } from "./tunnel.ts";
+import { selectTransport, type TransportChoice } from "./transport/index.ts";
 
 /** The CLI dials api.wurmhol.com; people sign in and make tokens at the console (ADR 0006). */
 export const DEFAULT_SERVER = "https://api.wurmhol.com";
@@ -56,7 +61,7 @@ function checkSource(raw: Partial<PipeSource> | undefined): PipeSource | null {
     const value = raw[field];
     if (value === null || value === undefined) continue;
     const checked = sourceField(field, value);
-    if (checked === null) throw new FixError(SOURCE_FIXES[field]);
+    if (checked === null) throw new FixError(SOURCE_FIXES[field], { code: "invalid_option" });
     source[field] = checked;
     any = true;
   }
@@ -80,7 +85,10 @@ export type CloseReason =
 export interface OpenPipeOptions {
   /** The local port the dev server listens on. */
   port: number;
-  /** A token from the org (`wh_…`): the console's menu → Tokens. */
+  /**
+   * A token from the org (`wh_…`): the console's menu → Tokens. Or an embedded tunnel's connector
+   * (`whc_…`), which opens that one tunnel at its own URL and takes no name, viewers or access key.
+   */
   token: string;
   /** A self-hosted install's origin. Default `https://api.wurmhol.com`. */
   server?: string;
@@ -106,11 +114,36 @@ export interface OpenPipeOptions {
    */
   name?: string;
   /**
+   * A secret that lets a client with no browser session open the pipe: send it as the
+   * `x-wurmhol-key` header (a bridge in a cloud sandbox, a script, a webhook caller). Without it
+   * only signed-in members of the org get in. 32 to 128 letters, digits, `-` or `_`; make one with
+   * `openssl rand -base64 24 | tr '+/' '-_' | tr -d '='`. The relay keeps only its hash, so keep
+   * the key: it is the one credential for the pipe, and the same key works every time the pipe
+   * reopens. The header never reaches your server.
+   */
+  accessKey?: string;
+  /**
    * Where the pipe comes from, shown on the wall: `{ repo: "acme/app", branch: "feat/x",
    * link: "https://…", note: "…" }` and the rest of the fields of `PipeSource`. Every field is
    * optional; an invalid one rejects with a fix. The CLI fills it from git and the environment.
    */
   source?: Partial<PipeSource>;
+  /**
+   * Not supported: a custom domain follows the pipe's name (ADR 0033). Attach the hostname to a
+   * name with `domains().add`, then open the pipe with that `name`. A value here rejects with a
+   * `FixError` coded `unsupported` that says so.
+   */
+  domain?: string;
+  /**
+   * Which WebSocket implementation to use. Default `"auto"`: the `ws` package on Node, a built-in
+   * client on Bun (compiled binaries included) and Deno (ADR 0030).
+   */
+  transport?: TransportChoice;
+  /**
+   * Names the app in the `User-Agent` the relay sees: `{ name: "dorks", version: "1.2.0" }`.
+   * Default `@wurmhol/sdk` and the SDK's version.
+   */
+  client?: { name: string; version: string };
   /** Aborting rejects a pending `openPipe`, or closes an open pipe. */
   signal?: AbortSignal;
   /**
@@ -126,11 +159,18 @@ export interface Internals {
   log?: (shareId: string | null, event: string, fields: Record<string, unknown>) => void;
 }
 
+/** `open`: serving. `reconnecting`: the relay connection dropped; the pipe is redialing. */
+export type PipeState = "open" | "reconnecting" | "closed";
+
 export interface PipeEvents {
   /** A viewer request the dev server answered. Never sent anywhere: it stays in this process. */
   request: (event: RequestEvent) => void;
   /** The pipe ended for good. Emitted once. */
   close: (reason: CloseReason) => void;
+  /** The connection to the relay dropped. The pipe redials for up to a minute, same URL. */
+  disconnected: (info: { code: number; reason: string }) => void;
+  /** The pipe redialed and is serving again. */
+  reconnected: () => void;
 }
 
 /** An open pipe. Emits `request` per answered viewer request and `close` once when it ends. */
@@ -142,6 +182,7 @@ export interface Pipe {
   readonly port: number;
   /** When the relay ends the pipe (reason `expired`). */
   readonly endsAt: Date;
+  readonly state: PipeState;
   on<E extends keyof PipeEvents>(event: E, listener: PipeEvents[E]): this;
   once<E extends keyof PipeEvents>(event: E, listener: PipeEvents[E]): this;
   off<E extends keyof PipeEvents>(event: E, listener: PipeEvents[E]): this;
@@ -154,6 +195,7 @@ class OpenPipe implements Pipe {
   readonly url: string;
   readonly port: number;
   readonly endsAt: Date;
+  state: PipeState = "open";
   readonly #events = new EventEmitter();
   readonly #tunnel: Tunnel;
   readonly #closed: Promise<CloseReason>;
@@ -203,7 +245,9 @@ class OpenPipe implements Pipe {
 export function pagePath(path: string): string {
   const resolved = sameOriginPath(path);
   if (path.length > 2000 || (resolved === "/" && path.trim() !== "/")) {
-    throw new FixError(`Not a path on the pipe: ${path.slice(0, 80)}. Use one like /checkout.`);
+    throw new FixError(`Not a path on the pipe: ${path.slice(0, 80)}. Use one like /checkout.`, {
+      code: "invalid_option",
+    });
   }
   return resolved;
 }
@@ -218,7 +262,7 @@ export function originOf(server: string) {
   try {
     return new URL(server).origin;
   } catch {
-    throw new FixError(`WURMHOL_URL is not a URL: ${server}`);
+    throw new FixError(`WURMHOL_URL is not a URL: ${server}`, { code: "invalid_option" });
   }
 }
 
@@ -231,17 +275,44 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
   const token = options.token?.trim();
   if (!token) {
     const console = options.server ? server : DEFAULT_CONSOLE;
-    throw new FixError(`Set WURMHOL_TOKEN to a token from ${console} (menu → Tokens).`);
+    throw new FixError(`Set WURMHOL_TOKEN to a token from ${console} (menu → Tokens).`, {
+      code: "no_token",
+    });
   }
   const ttl = typeof options.ttl === "string" ? parseDuration(options.ttl) : options.ttl;
   if (ttl !== undefined && (ttl === null || !Number.isSafeInteger(ttl) || ttl < 1)) {
-    throw new FixError(`Not a lifetime: ${options.ttl}. Use one like 90m or 8h.`);
+    throw new FixError(`Not a lifetime: ${options.ttl}. Use one like 90m or 8h.`, {
+      code: "invalid_option",
+    });
   }
   const name = options.name === undefined ? undefined : pipeName(options.name);
   if (name === null) {
-    throw new FixError(`Not a pipe name: ${options.name}. Use ${PIPE_NAME_RULE}.`);
+    throw new FixError(`Not a pipe name: ${options.name}. Use ${PIPE_NAME_RULE}.`, {
+      code: "invalid_option",
+    });
   }
   const source = checkSource(options.source);
+  if (options.accessKey !== undefined && !isAccessKey(options.accessKey)) {
+    throw new FixError(`Not an access key. Use ${ACCESS_KEY_RULE}, sent as ${ACCESS_KEY_HEADER}.`, {
+      code: "invalid_option",
+    });
+  }
+  // A connector (ADR 0032) opens its own embedded tunnel at its own URL, to its grants only.
+  if (
+    embedCredentialKind(token) === "connector" &&
+    (name !== undefined || options.viewers?.length || options.accessKey !== undefined)
+  ) {
+    throw new FixError(
+      "A connector opens its own tunnel: leave out name, viewers and accessKey (--name, --only, WURMHOL_ACCESS_KEY).",
+      { code: "invalid_option" },
+    );
+  }
+  if (options.domain !== undefined) {
+    throw new FixError(
+      "A custom domain follows the pipe's name: attach it with `domains().add({ hostname, pipe: name })` (or `wurmhol domain add`), then open the pipe with that `name` and without `domain`.",
+      { code: "unsupported" },
+    );
+  }
   const { signal } = options;
   signal?.throwIfAborted();
 
@@ -265,12 +336,30 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
     viewers: options.viewers ?? [],
     name,
     source,
-    version: pkg.version,
-    log,
+    accessKey: options.accessKey,
+    version: options.client?.version ?? pkg.version,
+    transport: selectTransport(options.transport),
+    product: options.client?.name ?? "wurmhol-sdk",
+    log: (event, fields = {}) => {
+      if (pipe) {
+        if (event === "disconnected" && fields.reconnecting === true) {
+          pipe.state = "reconnecting";
+          pipe.emit("disconnected", {
+            code: Number(fields.code ?? 1006),
+            reason: String(fields.reason ?? ""),
+          });
+        } else if (event === "reconnected") {
+          pipe.state = "open";
+          pipe.emit("reconnected");
+        }
+      }
+      log(event, fields);
+    },
     onRequest: (event) => pipe?.emit("request", event),
     onEnd: (reason) => {
       log("ended", { reason });
       signal?.removeEventListener("abort", onAbort);
+      if (pipe) pipe.state = "closed";
       markClosed(reason);
       pipe?.emit("close", reason);
     },

@@ -3,18 +3,19 @@ title: "CLI"
 description: "Every command, flag and variable of `npx wurmhol`."
 ---
 
-| Command                         | Does                                                                                |
-| ------------------------------- | ----------------------------------------------------------------------------------- |
-| `wurmhol <port>`                | Open a pipe to a port, print its link and return; with no token, an approval link   |
-| `wurmhol ls`                    | List open pipes and when each one ends                                              |
-| `wurmhol stop <port\|id\|name>` | End one, or every one with `--all`                                                  |
-| `wurmhol logs <port\|id\|name>` | Recent requests and connection events; `--follow`, `--json`                         |
-| `wurmhol init`                  | Tell this repo's agents how to share, `--skill` adds the skill                      |
-| `wurmhol host`                  | Connect this computer, to open pipes from Create pipe; `--install` keeps it running |
-| `wurmhol doctor`                | Check the token, proxy, allowed hosts and, with `--port`, the dev server            |
-| `wurmhol login`                 | Approve this computer in the browser and save a token                               |
-| `wurmhol logout`                | Delete the saved token                                                              |
-| `wurmhol mcp`                   | Run the [MCP server](/mcp) on stdio                                                 |
+| Command                              | Does                                                                                |
+| ------------------------------------ | ----------------------------------------------------------------------------------- |
+| `wurmhol <port>`                     | Open a pipe to a port, print its link and return; with no token, an approval link   |
+| `wurmhol ls`                         | List open pipes and when each one ends                                              |
+| `wurmhol stop <port\|id\|name>`      | End one, or every one with `--all`                                                  |
+| `wurmhol logs <port\|id\|name>`      | Recent requests and connection events; `--follow`, `--json`                         |
+| `wurmhol init`                       | Tell this repo's agents how to share, `--skill` adds the skill                      |
+| `wurmhol host`                       | Connect this computer, to open pipes from Create pipe; `--install` keeps it running |
+| `wurmhol doctor`                     | Check the token, proxy, allowed hosts and, with `--port`, the dev server            |
+| `wurmhol domain add\|verify\|ls\|rm` | Put your own hostname on a pipe name, see [Custom domains](/sdk#custom-domains)     |
+| `wurmhol login`                      | Approve this computer in the browser and save a token                               |
+| `wurmhol logout`                     | Delete the saved token                                                              |
+| `wurmhol mcp`                        | Run the [MCP server](/mcp) on stdio                                                 |
 
 ## With no token
 

@@ -25,11 +25,14 @@ import {
   type WallEvent,
 } from "@wurmhol/protocol";
 
+/** Whose limit a refusal is: the org's, or an embedded application's or tenant's (ADR 0032). */
+export type LimitScope = "org" | "app" | "tenant";
+
 export type Reservation =
   | { ok: true }
-  | { ok: false; reason: "active_limit"; limit: number }
-  | { ok: false; reason: "monthly_limit"; limit: number }
-  | { ok: false; reason: "request_limit"; limit: number };
+  | { ok: false; reason: "active_limit"; limit: number; scope?: LimitScope }
+  | { ok: false; reason: "monthly_limit"; limit: number; scope?: LimitScope }
+  | { ok: false; reason: "request_limit"; limit: number; scope?: LimitScope };
 
 /** Relayed in the current window: bytes both ways, and viewer requests. */
 export interface Usage {
@@ -54,6 +57,31 @@ export interface UsageLimits {
 
 /** Limits the org's object keeps: the latest the Worker gave it. */
 type StoredLimits = UsageLimits & { active: number };
+
+/** Open tunnels a tenant may have when neither it nor its application sets a number (ADR 0032). */
+export const TENANT_ACTIVE_DEFAULT = 10;
+
+/** An application's own limits, and its defaults for tenants; null: unset. */
+export interface AppLimits {
+  monthlyRequests: number | null;
+  activeTunnels: number | null;
+  tenantMonthlyRequests: number | null;
+  tenantActiveTunnels: number | null;
+}
+
+/** A tenant's own limits; null: its application's default. */
+export interface TenantLimits {
+  monthlyRequests: number | null;
+  activeTunnels: number | null;
+}
+
+/** An embedded tunnel's open session (ADR 0032): counted and listed, never a card on the wall. */
+export interface EmbeddedSession {
+  id: string;
+  appId: string;
+  tenantId: string;
+  tunnelId: string;
+}
 
 /** Requests not yet sent to Stripe, per customer and window: `at` is the last one's time. */
 type MeterPending = Record<string, { customer: string; value: number; at: number }>;
@@ -212,6 +240,128 @@ export class Org extends DurableObject<Env> {
     return { ok: true };
   }
 
+  /**
+   * Holds a slot for an embedded tunnel's session: the org's usage limits apply as to any pipe,
+   * its open sessions count against `active` (`LIMIT_EMBED_ACTIVE`) apart from the wall's, and
+   * its application's and tenant's own limits apply on top (ADR 0032). The limits given are the
+   * current ones from D1, kept for usage checks between starts.
+   */
+  reserveEmbedded(
+    session: EmbeddedSession,
+    limits: StoredLimits,
+    app: AppLimits,
+    tenant: TenantLimits,
+  ): Reservation {
+    this.setLimits({ ...limits, active: this.#limits()?.active ?? limits.active });
+    this.setAppLimits(session.appId, app);
+    this.setTenantLimits(session.tenantId, tenant);
+    const usage = this.#usage(limits);
+    if (usage.bytes >= limits.monthlyBytes) {
+      return { ok: false, reason: "monthly_limit", limit: limits.monthlyBytes };
+    }
+    if (usage.requests >= limits.monthlyRequests) {
+      return { ok: false, reason: "request_limit", limit: limits.monthlyRequests };
+    }
+    const over = this.#embedOver(session);
+    if (over) return { ok: false, reason: "request_limit", limit: over.limit, scope: over.scope };
+    const open = this.listEmbedded();
+    if (open.length >= limits.active) {
+      return { ok: false, reason: "active_limit", limit: limits.active };
+    }
+    const own = this.#tenantLimits(session.appId, session.tenantId);
+    const appActive = this.#appLimits(session.appId)?.activeTunnels ?? null;
+    if (appActive !== null && open.filter((s) => s.appId === session.appId).length >= appActive) {
+      return { ok: false, reason: "active_limit", limit: appActive, scope: "app" };
+    }
+    if (open.filter((s) => s.tenantId === session.tenantId).length >= own.activeTunnels) {
+      return { ok: false, reason: "active_limit", limit: own.activeTunnels, scope: "tenant" };
+    }
+    this.ctx.storage.kv.put(`embed:${session.id}`, session);
+    return { ok: true };
+  }
+
+  /** An application's limits, from a start or an app manager's change; they apply at once. */
+  setAppLimits(appId: string, limits: AppLimits) {
+    this.ctx.storage.kv.put(`limits:app:${appId}`, limits);
+  }
+
+  /** A tenant's own limits, from a start or its integration's change; they apply at once. */
+  setTenantLimits(tenantId: string, limits: TenantLimits) {
+    this.ctx.storage.kv.put(`limits:tenant:${tenantId}`, limits);
+  }
+
+  #appLimits(appId: string) {
+    return this.ctx.storage.kv.get<AppLimits>(`limits:app:${appId}`) ?? null;
+  }
+
+  /** A tenant's limits in effect: its own, else its application's default, else the code's. */
+  #tenantLimits(appId: string, tenantId: string) {
+    const app = this.#appLimits(appId);
+    const own = this.ctx.storage.kv.get<TenantLimits>(`limits:tenant:${tenantId}`);
+    return {
+      activeTunnels: own?.activeTunnels ?? app?.tenantActiveTunnels ?? TENANT_ACTIVE_DEFAULT,
+      monthlyRequests: own?.monthlyRequests ?? app?.tenantMonthlyRequests ?? null,
+    };
+  }
+
+  /** An application's or tenant's usage in the org's current window. */
+  #scoped(kind: "app" | "tenant", id: string): Usage {
+    const stored = this.ctx.storage.kv.get<{ month: string } & Usage>(`usage:${kind}:${id}`);
+    return stored && stored.month === windowOf(this.#limits())
+      ? { bytes: stored.bytes, requests: stored.requests }
+      : { bytes: 0, requests: 0 };
+  }
+
+  /** Whose monthly request limit a session's application or tenant has reached, if any. */
+  #embedOver(session: Pick<EmbeddedSession, "appId" | "tenantId">) {
+    const app = this.#appLimits(session.appId)?.monthlyRequests ?? null;
+    if (app !== null && this.#scoped("app", session.appId).requests >= app) {
+      return { scope: "app" as const, limit: app };
+    }
+    const tenant = this.#tenantLimits(session.appId, session.tenantId).monthlyRequests;
+    if (tenant !== null && this.#scoped("tenant", session.tenantId).requests >= tenant) {
+      return { scope: "tenant" as const, limit: tenant };
+    }
+    return null;
+  }
+
+  /**
+   * An application's usage this window, with its open tunnels, and each named tenant's beside
+   * the limits in effect for it. Nothing from inside any tunnel.
+   */
+  embedUsage(appId: string, tenantIds: string[] = []) {
+    const open = this.listEmbedded();
+    const app = this.#appLimits(appId);
+    return {
+      month: windowOf(this.#limits()),
+      app: {
+        ...this.#scoped("app", appId),
+        openTunnels: open.filter((s) => s.appId === appId).length,
+        limits: {
+          monthlyRequests: app?.monthlyRequests ?? null,
+          activeTunnels: app?.activeTunnels ?? null,
+        },
+      },
+      tenants: Object.fromEntries(
+        tenantIds.map((tenantId) => [
+          tenantId,
+          {
+            ...this.#scoped("tenant", tenantId),
+            openTunnels: open.filter((s) => s.tenantId === tenantId).length,
+            limits: this.#tenantLimits(appId, tenantId),
+          },
+        ]),
+      ),
+    };
+  }
+
+  /** The org's open embedded sessions. */
+  listEmbedded(): EmbeddedSession[] {
+    return [...this.ctx.storage.kv.list<EmbeddedSession>({ prefix: "embed:" })].map(
+      ([, session]) => session,
+    );
+  }
+
   /** Changes a card (title, favicon, last request, live or away). A removed card stays removed. */
   update(id: string, patch: Partial<Omit<ShareCard, "id">>) {
     const card = this.ctx.storage.kv.get<ShareCard>(`share:${id}`);
@@ -225,6 +375,7 @@ export class Org extends DurableObject<Env> {
   remove(id: string) {
     // Its last batch came before this (the Share object sends them in order, then ends).
     this.ctx.storage.kv.delete(`applied:${id}`);
+    this.ctx.storage.kv.delete(`embed:${id}`);
     if (!this.ctx.storage.kv.delete(`share:${id}`)) return;
     this.#broadcast({ type: "share.ended", id });
   }
@@ -234,17 +385,40 @@ export class Org extends DurableObject<Env> {
    * sent is a retry and changes nothing. `fallback` is what the share started with, for an org
    * whose object has no limits stored yet. Returns whether the org is now over a limit.
    */
-  async addUsage(shareId: string, batch: UsageBatch, fallback: UsageLimits) {
+  async addUsage(
+    shareId: string,
+    batch: UsageBatch,
+    fallback: UsageLimits,
+    embed?: Pick<EmbeddedSession, "appId" | "tenantId">,
+  ) {
     const limits = this.#limits() ?? fallback;
     const usage = this.#usage(limits);
+    const over = (total: Usage) =>
+      this.#over(total, limits) || (embed ? this.#embedOver(embed) !== null : false);
     if (batch.seq <= (this.ctx.storage.kv.get<number>(`applied:${shareId}`) ?? 0)) {
-      return { ...usage, over: this.#over(usage, limits) };
+      return { ...usage, over: over(usage) };
     }
     const total = { bytes: usage.bytes + batch.bytes, requests: usage.requests + batch.requests };
-    this.ctx.storage.kv.put("usage", { month: windowOf(limits), ...total });
+    const window = windowOf(limits);
+    this.ctx.storage.kv.put("usage", { month: window, ...total });
+    if (embed) {
+      // Attributed to its application and tenant as well, in the same window (ADR 0032). The
+      // org's count above is what Stripe bills; these only attribute it and hold its limits.
+      for (const [kind, id] of [
+        ["app", embed.appId],
+        ["tenant", embed.tenantId],
+      ] as const) {
+        const scoped = this.#scoped(kind, id);
+        this.ctx.storage.kv.put(`usage:${kind}:${id}`, {
+          month: window,
+          bytes: scoped.bytes + batch.bytes,
+          requests: scoped.requests + batch.requests,
+        });
+      }
+    }
     this.ctx.storage.kv.put(`applied:${shareId}`, batch.seq);
     if (limits.meter && batch.requests > 0) await this.#meter(limits, batch.requests);
-    return { ...total, over: this.#over(total, limits) };
+    return { ...total, over: over(total) };
   }
 
   usage() {
