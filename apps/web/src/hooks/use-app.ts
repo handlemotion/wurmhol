@@ -1,7 +1,14 @@
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import type { Machine, Role, ShareCard, TokenExpiry, TokenScope } from "@wurmhol/protocol";
-import { api, type AppConfig, type Member, type SignInMethods, type Token } from "@/lib/api";
+import {
+  api,
+  type AppConfig,
+  type Domain,
+  type Member,
+  type SignInMethods,
+  type Token,
+} from "@/lib/api";
 import { connectMachines, earlyShares, takeWall } from "@/lib/live";
 import { meQuery } from "@/lib/me";
 
@@ -11,6 +18,7 @@ export const keys = {
   config: ["app-config"] as const,
   tokens: ["tokens"] as const,
   members: ["members"] as const,
+  domains: ["domains"] as const,
 };
 
 export function useMe() {
@@ -280,5 +288,73 @@ export function useSetSpendCap() {
     mutationFn: (cents: number) =>
       api<{ cents: number }>("/api/billing/spend-cap", { method: "PUT", body: { cents } }),
     onSuccess: () => client.invalidateQueries({ queryKey: ["billing"] }),
+  });
+}
+
+/** At most this many domains are checked per refresh, to stay well inside the `manage` rate limit. */
+const DOMAIN_CHECKS_PER_REFRESH = 3;
+
+/**
+ * The org's custom domains (ADR 0033). While one is still on its way to active, every refresh first
+ * checks a few of those against DNS and Cloudflare (taking turns), then reads the list: reading
+ * alone never moves a domain, only a check does.
+ */
+export function useDomains(enabled: boolean) {
+  const client = useQueryClient();
+  const [turn] = useState(() => ({ next: 0 }));
+  return useQuery({
+    queryKey: keys.domains,
+    queryFn: async () => {
+      const waiting = (
+        client.getQueryData<{ domains: Domain[] }>(keys.domains)?.domains ?? []
+      ).filter((d) => d.state === "pending" || d.state === "verifying");
+      if (waiting.length) {
+        const start = turn.next % waiting.length;
+        const picked = [...waiting.slice(start), ...waiting.slice(0, start)].slice(
+          0,
+          DOMAIN_CHECKS_PER_REFRESH,
+        );
+        turn.next = start + picked.length;
+        // A check that fails (DNS down, rate limited) only means the list shows the last state.
+        await Promise.allSettled(
+          picked.map((d) =>
+            api(`/api/domains/${encodeURIComponent(d.hostname)}/verify`, { method: "POST" }),
+          ),
+        );
+      }
+      return api<{ domains: Domain[] }>("/api/domains");
+    },
+    enabled,
+    refetchInterval: (query) =>
+      query.state.data?.domains.some((d) => d.state === "pending" || d.state === "verifying")
+        ? 15_000
+        : false,
+  });
+}
+
+export function useAddDomain() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { hostname: string; pipe: string }) =>
+      api<{ domain: Domain }>("/api/domains", { method: "POST", body }),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.domains }),
+  });
+}
+
+/** Looks at a domain now, instead of waiting for the next refresh. */
+export function useVerifyDomain() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (hostname: string) =>
+      api<{ domain: Domain }>(`/api/domains/${hostname}/verify`, { method: "POST" }),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.domains }),
+  });
+}
+
+export function useRemoveDomain() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (hostname: string) => api(`/api/domains/${hostname}`, { method: "DELETE" }),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.domains }),
   });
 }

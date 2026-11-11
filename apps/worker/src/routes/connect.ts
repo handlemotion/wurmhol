@@ -49,7 +49,8 @@ import { TRIAL_DAYS } from "@wurmhol/auth";
 import { type Context, Hono } from "hono";
 import { bearerToken, refuse } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
-import { reservedPipeName, shareOrigin } from "../env.ts";
+import { reservedPipeNames, shareOrigin } from "../env.ts";
+import { shareUrl } from "../share-url.ts";
 import { orgStub, type Reservation } from "../org-do.ts";
 import { type OrgPlan, orgPlan } from "../plan.ts";
 import { checkRateLimit } from "../rate-limiter.ts";
@@ -148,7 +149,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
       `Names like ${name} are kept for embedded tunnels. Pick another --name.`,
     );
   }
-  if (name && name === reservedPipeName(config)) {
+  if (name && reservedPipeNames(config).includes(name)) {
     return refuse(409, "name reserved", `The pipe name ${name} is reserved. Pick another --name.`);
   }
   const source = readSource(c.req.header(CONNECT_HEADERS.source));
@@ -220,7 +221,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
     orgId: token.orgId,
     tokenId: token.id,
     port,
-    url: shareOrigin(config, { id: started.id, name }),
+    url: await shareUrl(db, config, { id: started.id, name }),
     startedBy: starter?.name || starter?.email || null,
     startedAt: started.startedAt.getTime(),
     viewers,

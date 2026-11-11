@@ -3,7 +3,7 @@ import Doc from "../layouts/Doc.astro";
 
 // Every row says what the code in this repository does today (docs/adr/0008 lists the sources).
 // When the code changes what it keeps, this page changes in the same pull request.
-const UPDATED = "November 5, 2026";
+const UPDATED = "November 11, 2026";
 const REPO = "https://github.com/handlemotion/wurmhol";
 const SELF_HOSTING = "/docs/self-hosting";
 const CONTACT = `${REPO}/issues/new`;
@@ -66,6 +66,18 @@ const kept = [
     detail:
       "The <title> of the last HTML page and the favicon the dev server serves, so the pipe has a recognizable card on the org's wall.",
     kept: "Deleted when the pipe ends",
+  },
+  {
+    what: "Embedded tunnels' customers and users",
+    detail:
+      "When an app built on Wurmhol opens private tunnels for its own users: the ids the app gives its customers and their users (opaque to us, and never their names or emails unless the app chooses to use those), each tunnel's owner and who may be let in, and hashes of the keys, connectors and passes that open them. Those users have no Wurmhol account.",
+    kept: "Until the app's org is deleted. An app removing one of its users disables that user, whose id stays until then",
+  },
+  {
+    what: "Who was let into a tunnel",
+    detail:
+      "For each pass an app issues to one of its users: which user and tunnel, which of the app's keys issued it, when it was issued, revoked or ran out. Never what they did in the tunnel, no IP address or user agent. Only the app's org sees it.",
+    kept: "90 days after the pass ended, then deleted",
   },
   {
     what: "Sign-in through the OAuth relay",

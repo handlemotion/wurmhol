@@ -159,6 +159,8 @@ export interface OrgLimits {
   active: number;
   monthlyBytes: number;
   monthlyRequests: number;
+  /** Custom domains (ADR 0033). */
+  customDomains: number;
 }
 
 /**
@@ -166,8 +168,20 @@ export interface OrgLimits {
  * Business's `monthlyRequests` is a placeholder: its owner's spend cap sets the real one.
  */
 export const PLAN_LIMITS: Record<PlanName, OrgLimits> = {
-  friends: { members: 10, active: 25, monthlyBytes: 100 * 1000 ** 3, monthlyRequests: 2_000_000 },
-  business: { members: null, active: 500, monthlyBytes: 10 * 1000 ** 4, monthlyRequests: 0 },
+  friends: {
+    members: 10,
+    active: 25,
+    monthlyBytes: 100 * 1000 ** 3,
+    monthlyRequests: 2_000_000,
+    customDomains: 0,
+  },
+  business: {
+    members: null,
+    active: 500,
+    monthlyBytes: 10 * 1000 ** 4,
+    monthlyRequests: 0,
+    customDomains: 20,
+  },
 };
 
 /** Business's spend cap before its owner sets one, in cents a month, base price included. */

@@ -360,3 +360,72 @@ describe("operator takedown", () => {
     expect(again.code).not.toBe(0);
   });
 });
+
+describe("the console", () => {
+  // Catches: the Apps link shown to someone who can't use it, or hidden from an owner who can.
+  it("offers apps to owners, and to no member", async () => {
+    const me = await api<{ apps: boolean; role: string }>(stack, owner, "/api/me");
+    expect(me.body).toMatchObject({ apps: true, role: "owner" });
+    const invite = await api<{ url: string }>(stack, owner, "/api/invites", { method: "POST" });
+    const member = await signIn(stack);
+    const code = invite.body.url.split("/join/")[1];
+    await api(stack, member, `/api/invites/${code}/accept`, { method: "POST" });
+    const theirs = await api<{ apps: boolean; role: string }>(stack, member, "/api/me");
+    expect(theirs.body).toMatchObject({ apps: false, role: "member" });
+    expect((await api(stack, member, "/api/apps")).status).toBe(403);
+  });
+
+  it("shows an app's pipes and usage, and stops and deletes them, never opens them", async () => {
+    const { appId, key: appKey } = await makeKey(owner, ALL);
+    const as = { token: appKey };
+    await embed("/tenants/console", { ...as, method: "PUT", body: {} });
+    await embed("/tenants/console/subjects/dana", { ...as, method: "PUT", body: { kind: "user" } });
+    const made = await embed<{ tunnel: Tunnel; connector: { connector: string } }>("/tunnels", {
+      ...as,
+      method: "POST",
+      body: { tenant: "console", owner: "dana" },
+    });
+    const env = agentEnv(made.body.connector.connector);
+    const opened = await share(stack, env, local.port);
+
+    const listed = await api<{ apps: { id: string; usage: { openTunnels: number } }[] }>(
+      stack,
+      owner,
+      "/api/apps",
+    );
+    expect(listed.body.apps.find((app) => app.id === appId)?.usage.openTunnels).toBe(1);
+    const tunnels = await api<{ tunnels: Tunnel[] }>(stack, owner, `/api/apps/${appId}/tunnels`);
+    expect(tunnels.body.tunnels).toEqual([
+      expect.objectContaining({
+        id: made.body.tunnel.id,
+        state: "live",
+        tenant: "console",
+        owner: "dana",
+      }),
+    ]);
+    expect(JSON.stringify(tunnels.body)).not.toMatch(/title|favicon|whc_|whg_/);
+
+    const pid = pidOf(env, opened.id);
+    const stop = await api(stack, owner, `/api/apps/${appId}/tunnels/${made.body.tunnel.id}/stop`, {
+      method: "POST",
+    });
+    expect(stop.status).toBe(200);
+    await waitFor(() => !alive(pid), { what: "the agent to stop" });
+    const stopped = await api<{ tunnels: Tunnel[] }>(stack, owner, `/api/apps/${appId}/tunnels`);
+    expect(stopped.body.tunnels[0]?.state).toBe("stopped");
+
+    const removed = await api(stack, owner, `/api/apps/${appId}/tunnels/${made.body.tunnel.id}`, {
+      method: "DELETE",
+    });
+    expect(removed.status).toBe(200);
+    const after = await api<{ tunnels: Tunnel[] }>(stack, owner, `/api/apps/${appId}/tunnels`);
+    expect(after.body.tunnels).toEqual([]);
+    expect((await cli([String(local.port)], env)).code).not.toBe(0);
+  });
+
+  it("finds no other org's app's pipes", async () => {
+    const { appId } = await makeKey(owner, ALL);
+    const stranger = await signIn(stack);
+    expect((await api(stack, stranger, `/api/apps/${appId}/tunnels`)).status).toBe(404);
+  });
+});

@@ -60,12 +60,21 @@ export const account = new Hono<AppEnv>()
           })
         : null,
     ]);
+    // Embedded applications (ADR 0032): for owners, when the install has them and the org may
+    // use them (Business, or billing off).
+    const apps = Boolean(
+      c.var.config.EMBEDDED_ENABLED &&
+      session.member?.role === "owner" &&
+      standing?.ok &&
+      (standing.reason === "billing_off" || standing.plan === "business"),
+    );
     return c.json({
       user: session.user,
       orgs,
       activeOrgId: session.member?.orgId ?? null,
       role: session.member?.role ?? null,
       standing,
+      apps,
     });
   })
   /** Which org an invite link is for, so the join page can name it. */

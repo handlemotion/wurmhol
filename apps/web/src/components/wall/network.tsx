@@ -163,7 +163,7 @@ const content = {
  * unfolding edge) while its content fades in, and folds back into it on close, the pill fading
  * in over the fold's second half; the real pill returns once the card has gone.
  */
-function Swap(props: {
+export function Swap(props: {
   open: boolean;
   pill: React.ReactNode;
   card: React.ReactNode;

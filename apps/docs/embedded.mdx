@@ -132,7 +132,7 @@ socket.addEventListener("message", (event) => {});
 - **Stopping** a tunnel ends its session, and its agent stops. The connector stays valid, so the agent can open it again when it restarts. **Deleting** a tunnel ends it for good, and its URL is never reused.
 - Issuing a connector with `rotate: true` revokes the others and ends a session they opened.
 
-Your app's server never sees grants or Wurmhol's cookies. The relay removes them before forwarding.
+Your app's server never sees grants or Wurmhol's cookies. The relay removes them before forwarding. Grants and their log are deleted 90 days after a grant ended.
 
 ## What your team sees
 

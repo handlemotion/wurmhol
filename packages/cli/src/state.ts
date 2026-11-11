@@ -94,7 +94,12 @@ export function matches(state: ShareState, target: string) {
   return (
     state.id === target ||
     (/^\d+$/.test(wanted) && state.port === Number(wanted)) ||
-    // A named pipe, by the first label of its host.
-    (!state.approval && new URL(state.url).hostname.split(".")[0] === wanted)
+    (!state.approval &&
+      // A named pipe, by the name it was opened with: its URL may be a custom domain (ADR 0033),
+      // whose first label is not the name. A state written before the name was kept goes by the
+      // first label of its host.
+      (state.request
+        ? state.request.name === wanted
+        : new URL(state.url).hostname.split(".")[0] === wanted))
   );
 }
