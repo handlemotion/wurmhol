@@ -16,7 +16,6 @@ import {
   isOrgBlocked,
   issueEmbedGrant,
   listEmbedGrantEvents,
-  latestSharesOfTunnels,
   listEmbedTunnelAccess,
   listEmbedTunnels,
   openSharesOfTunnels,
@@ -44,12 +43,12 @@ import { createMiddleware } from "hono/factory";
 import { z } from "zod";
 import { refuse } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
+import { describeTunnels } from "../embed-health.ts";
 import { endShare, endTunnelSessions, pushGrantRevocations } from "../ending.ts";
 import { shareOrigin } from "../env.ts";
 import { orgStub } from "../org-do.ts";
 import { orgPlan } from "../plan.ts";
 import { checkRateLimit } from "../rate-limiter.ts";
-import { shareStub } from "../share-do.ts";
 
 interface EmbedKey extends EmbedScope {
   keyId: string;
@@ -113,56 +112,6 @@ async function liveSubject(c: { var: EmbedEnv["Variables"] }, tenantId: string, 
   if (!EXTERNAL_ID.test(id)) return undefined;
   const subject = await findEmbedSubject(c.var.db, c.var.key, tenantId, id);
   return subject && !subject.disabledAt ? subject : undefined;
-}
-
-type Tunnel = NonNullable<Awaited<ReturnType<typeof findEmbedTunnel>>>;
-
-/** Tunnels as the integration sees them: lifecycle and health, never their pages. */
-async function describeTunnels(c: { env: Env; var: EmbedEnv["Variables"] }, tunnels: Tunnel[]) {
-  const latest = await latestSharesOfTunnels(
-    c.var.db,
-    tunnels.map((tunnel) => tunnel.id),
-  );
-  return Promise.all(
-    tunnels.map(async (tunnel) => {
-      const session = latest.get(tunnel.id);
-      const open = session && !session.endedAt;
-      const health = open ? await shareStub(c.env, session.id).health() : null;
-      const state = health
-        ? health.state
-        : tunnel.stoppedAt
-          ? "stopped"
-          : session
-            ? "ended"
-            : "never";
-      return {
-        id: tunnel.id,
-        url: shareOrigin(c.var.config, { id: tunnel.id, name: tunnel.name }),
-        tenant: tunnel.tenant,
-        owner: tunnel.owner,
-        state,
-        createdAt: tunnel.createdAt.toISOString(),
-        stoppedAt: tunnel.stoppedAt?.toISOString() ?? null,
-        session:
-          health && session
-            ? {
-                id: session.id,
-                startedAt: session.startedAt.toISOString(),
-                liveSince: health.liveSince ? new Date(health.liveSince).toISOString() : null,
-                awaySince: health.awaySince ? new Date(health.awaySince).toISOString() : null,
-                lastRequestAt: health.lastRequestAt
-                  ? new Date(health.lastRequestAt).toISOString()
-                  : null,
-                bytes: health.bytes,
-              }
-            : null,
-        lastEnd:
-          session?.endedAt && !health
-            ? { reason: session.endReason, at: session.endedAt.toISOString() }
-            : null,
-      };
-    }),
-  );
 }
 
 /** Ends the tunnels' sessions, revokes their grants, and deletes them for good. */
