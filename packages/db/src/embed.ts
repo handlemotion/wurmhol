@@ -3,16 +3,21 @@
 import {
   EMBED_CREDENTIAL_PREFIXES,
   type EmbedPermission,
+  type GrantKind,
+  LAUNCH_CODE_TTL_SECONDS,
   type SubjectKind,
 } from "@wurmhol/protocol";
-import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, desc, eq, exists, gt, inArray, isNull, ne, type SQL } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import type { Db } from "./client.ts";
-import { newEmbedCredential, randomEmbedTunnelName, sha256Hex } from "./crypto.ts";
+import { newEmbedCredential, randomEmbedTunnelName, randomSecret, sha256Hex } from "./crypto.ts";
 import {
   embedAppKeys,
   embedApps,
   embedConnectors,
+  embedGrantEvents,
+  embedGrants,
+  embedLaunchCodes,
   embedSubjects,
   embedTenants,
   embedTunnelAccess,
@@ -687,4 +692,184 @@ export async function useEmbedConnector(db: Db, presented: string): Promise<Embe
     name: row.name,
     stopped: row.stoppedAt !== null,
   };
+}
+
+// --- Grants: one subject's traffic to one tunnel ---------------------------------------------
+
+/**
+ * A new grant for a subject on a tunnel's list, logged. A `client` grant returns its token
+ * (`whg_`); a `browser` grant returns a one-time launch code instead. Plaintexts are returned
+ * once and never stored. The route checks the subject is on the list first.
+ */
+export async function issueEmbedGrant(
+  db: Db,
+  scope: EmbedScope,
+  input: {
+    tenantId: string;
+    tunnelId: string;
+    subjectId: string;
+    keyId: string;
+    kind: GrantKind;
+    expiresAt: Date;
+  },
+) {
+  const id = uuidv7();
+  const token = input.kind === "client" ? await newEmbedCredential("grant") : null;
+  await db.insert(embedGrants).values({ id, ...scope, ...input, hash: token?.hash ?? null });
+  await db.insert(embedGrantEvents).values({
+    id: uuidv7(),
+    orgId: scope.orgId,
+    grantId: id,
+    tunnelId: input.tunnelId,
+    subjectId: input.subjectId,
+    keyId: input.keyId,
+    event: "issued",
+  });
+  let launchCode: string | null = null;
+  if (input.kind === "browser") {
+    launchCode = randomSecret(32);
+    await db.insert(embedLaunchCodes).values({
+      hash: await sha256Hex(launchCode),
+      orgId: scope.orgId,
+      grantId: id,
+      expiresAt: new Date(Date.now() + LAUNCH_CODE_TTL_SECONDS * 1000),
+    });
+  }
+  return { id, token: token?.value ?? null, launchCode, expiresAt: input.expiresAt };
+}
+
+/** Swaps a launch code for its grant's id, once; null when unknown, used or expired. */
+export async function takeEmbedLaunchCode(db: Db, code: string) {
+  const [taken] = await db
+    .delete(embedLaunchCodes)
+    .where(eq(embedLaunchCodes.hash, await sha256Hex(code)))
+    .returning({ grantId: embedLaunchCodes.grantId, expiresAt: embedLaunchCodes.expiresAt });
+  return taken && taken.expiresAt.getTime() > Date.now() ? taken.grantId : null;
+}
+
+/**
+ * A grant that still opens its tunnel, by id (a browser's cookie) or by its token's hash (a
+ * program): unrevoked and unexpired, its subject and tenant enabled, its subject still on the
+ * tunnel's list, its tunnel and application not deleted. Undefined otherwise. Carries the
+ * application's allowed origins, for a browser WebSocket's subprotocol grant.
+ */
+export async function findLiveEmbedGrant(db: Db, by: { id: string } | { token: string }) {
+  const match: SQL =
+    "id" in by ? eq(embedGrants.id, by.id) : eq(embedGrants.hash, await sha256Hex(by.token));
+  const [grant] = await db
+    .select({
+      id: embedGrants.id,
+      orgId: embedGrants.orgId,
+      tunnelId: embedGrants.tunnelId,
+      subjectId: embedGrants.subjectId,
+      kind: embedGrants.kind,
+      expiresAt: embedGrants.expiresAt,
+      allowedOrigins: embedApps.allowedOrigins,
+    })
+    .from(embedGrants)
+    .innerJoin(embedSubjects, eq(embedSubjects.id, embedGrants.subjectId))
+    .innerJoin(embedTenants, eq(embedTenants.id, embedGrants.tenantId))
+    .innerJoin(embedTunnels, eq(embedTunnels.id, embedGrants.tunnelId))
+    .innerJoin(embedApps, eq(embedApps.id, embedGrants.appId))
+    .where(
+      and(
+        match,
+        isNull(embedGrants.revokedAt),
+        gt(embedGrants.expiresAt, new Date()),
+        isNull(embedSubjects.disabledAt),
+        isNull(embedTenants.disabledAt),
+        isNull(embedTunnels.deletedAt),
+        isNull(embedApps.deletedAt),
+        exists(
+          db
+            .select({ one: embedTunnelAccess.tunnelId })
+            .from(embedTunnelAccess)
+            .where(
+              and(
+                eq(embedTunnelAccess.tunnelId, embedGrants.tunnelId),
+                eq(embedTunnelAccess.subjectId, embedGrants.subjectId),
+              ),
+            ),
+        ),
+      ),
+    )
+    .limit(1);
+  return grant;
+}
+
+/** Which grants to revoke: one of an application, or every grant of tunnels or of a subject. */
+export type GrantRevocation =
+  | { appId: string; grantId: string }
+  | { tunnelIds: string[] }
+  | { subjectId: string; tunnelId?: string };
+
+/** Revokes live grants and logs it. Returns each revoked grant with its tunnel. */
+export async function revokeEmbedGrants(
+  db: Db,
+  orgId: string,
+  which: GrantRevocation,
+  keyId: string | null = null,
+) {
+  if ("tunnelIds" in which && !which.tunnelIds.length) return [];
+  const scoped =
+    "grantId" in which
+      ? and(eq(embedGrants.id, which.grantId), eq(embedGrants.appId, which.appId))
+      : "tunnelIds" in which
+        ? inArray(embedGrants.tunnelId, which.tunnelIds)
+        : and(
+            eq(embedGrants.subjectId, which.subjectId),
+            which.tunnelId ? eq(embedGrants.tunnelId, which.tunnelId) : undefined,
+          );
+  const revoked = await db
+    .update(embedGrants)
+    .set({ revokedAt: new Date() })
+    .where(and(eq(embedGrants.orgId, orgId), isNull(embedGrants.revokedAt), scoped))
+    .returning({
+      id: embedGrants.id,
+      tunnelId: embedGrants.tunnelId,
+      subjectId: embedGrants.subjectId,
+    });
+  if (revoked.length) {
+    await db.insert(embedGrantEvents).values(
+      revoked.map((grant) => ({
+        id: uuidv7(),
+        orgId,
+        grantId: grant.id,
+        tunnelId: grant.tunnelId,
+        subjectId: grant.subjectId,
+        keyId,
+        event: "revoked" as const,
+      })),
+    );
+  }
+  return revoked;
+}
+
+/** A tunnel's grant log, newest first, with the subject's external id. */
+export async function listEmbedGrantEvents(db: Db, orgId: string, tunnelId: string) {
+  return db
+    .select({
+      grantId: embedGrantEvents.grantId,
+      event: embedGrantEvents.event,
+      at: embedGrantEvents.at,
+      subject: embedSubjects.externalId,
+      keyId: embedGrantEvents.keyId,
+      expiresAt: embedGrants.expiresAt,
+    })
+    .from(embedGrantEvents)
+    .innerJoin(embedSubjects, eq(embedSubjects.id, embedGrantEvents.subjectId))
+    .innerJoin(embedGrants, eq(embedGrants.id, embedGrantEvents.grantId))
+    .where(and(eq(embedGrantEvents.orgId, orgId), eq(embedGrantEvents.tunnelId, tunnelId)))
+    .orderBy(desc(embedGrantEvents.at))
+    .limit(500);
+}
+
+/** An application's launch URL, where a browser without a grant is sent; null when unset. */
+export async function embedAppLaunchUrl(db: Db, appId: string) {
+  const [app] = await db
+    .select({ launchUrl: embedApps.launchUrl })
+    .from(embedApps)
+    .where(and(eq(embedApps.id, appId), isNull(embedApps.deletedAt)))
+    .limit(1);
+  return app?.launchUrl ?? null;
 }

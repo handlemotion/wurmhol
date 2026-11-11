@@ -12,6 +12,7 @@ import {
   listEmbedAppKeys,
   listEmbedApps,
   revokeEmbedAppKey,
+  revokeEmbedGrants,
   updateEmbedApp,
 } from "@wurmhol/db";
 import { EMBED_PERMISSIONS, embedPermissions } from "@wurmhol/protocol";
@@ -166,6 +167,7 @@ export const apps = new Hono<AppEnv>()
       throw new HTTPException(404, { message: "no such application" });
     }
     await deleteEmbedTunnels(c.var.db, orgId, tunnels);
+    await revokeEmbedGrants(c.var.db, orgId, { tunnelIds: tunnels });
     await endTunnelSessions(c, tunnels, "revoked", "embed delete");
     c.var.log.info("embed.app_deleted", { orgId: c.var.member.orgId, appId });
     return c.json({ ok: true });
