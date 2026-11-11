@@ -1,15 +1,17 @@
-# 0030: Custom domains for branded pipe URLs
+# 0033: Custom domains for branded pipe URLs
 
 Status: proposed. Extends ADR 0009 (named pipes keep their URL) and ADR 0007 (pipes at
 `<id>.wurmhol.dev`). Leaves "only the org's members get in" (spec section 6) and the pipe access key
-(ADR 0028) as they are.
+(ADR 0028) as they are. Supersedes the custom-domain design proposed in ADR 0031 (a hostname as a
+zone of pipes, and `domain` when opening one); the rest of ADR 0031 (usage, token revocation,
+capabilities) is untouched by this. Embedded tunnels (ADR 0032) keep their own hosts.
 
 ## Context
 
 A named pipe has a stable URL, but it is always on Wurmhol's domain: `my-app.wurmhol.dev`. An app that
 shows previews to its own users, or a team that wants `preview.acme.dev` in a redirect URI, an email
-or a pull request comment, has to show someone else's name. Apps that embed Wurmhol (the `wurmhol`
-package's `openPipe`) are the clearest case: their users should see the app's brand.
+or a pull request comment, has to show someone else's name. Apps that embed Wurmhol (the SDK's
+`openPipe`, ADR 0030) are the clearest case: their users should see the app's brand.
 
 So an org can attach a hostname it owns to one of its pipe names. A request to that hostname is a
 request to the name's open pipe, behind the same sign-in wall, with the same access key rule.
@@ -41,6 +43,9 @@ Constraints this has to hold:
   viewer cookie and access key are the same on both hosts.
 - The pipe's **URL** (what the CLI prints, `openPipe` returns, and the wall shows) is the name's
   oldest active domain, else `<name>.<SHARE_DOMAIN>`. The `wurmhol.dev` host keeps working next to it.
+- The domain follows the name, so opening a pipe never names a domain: the SDK's reserved
+  `OpenPipeOptions.domain` (ADR 0031) stays refused, with a fix that says to attach the hostname to
+  the name instead.
 - Exact hostnames only. Wildcards (`*.preview.acme.dev` mapping each label to a name) need Cloudflare's
   wildcard custom hostnames, an Enterprise feature, and are not part of this decision.
 - Not served: an apex that cannot hold a `CNAME` (no CNAME flattening at the customer's DNS), any host
@@ -77,8 +82,9 @@ the daily job for domains that are not `active` or that were:
 - `pending` → `verifying` when the TXT record is found. Ownership, once proven, stays proven.
 - `verifying` → `active` when Cloudflare reports `status: active` and `ssl.status: active`;
   → `failed` when it reports `blocked`, or a certificate refusal (`ssl.validation_errors`, a CAA
-  record forbidding the issuer, a validation timeout), keeping the error for the person. A hostname
-  Cloudflare no longer holds is made again.
+  record forbidding the issuer, a validation timeout), keeping the error for the person, and deleting
+  the Cloudflare hostname so a refused one is not kept and billed. A hostname Cloudflare no longer
+  holds is made again.
 - `active` → `verifying` when Cloudflare stops reporting active (`moved`: the `CNAME` was removed):
   routing stops at once, and the daily job re-checks. An org blocked by the operator (ADR 0022) is not
   routed either, whatever the row says.
@@ -87,6 +93,10 @@ the daily job for domains that are not `active` or that were:
   deleted then.
 
 A TXT record that disappears after activation does not deactivate a domain; the `CNAME` does.
+
+A check reads DNS and Cloudflare, then writes what it found only to the claim it started from (the
+hostname and its challenge): a domain removed and added again meanwhile, by any org, starts over.
+Every check, failed or not, moves the domain to the back of the daily job's queue.
 
 ### The API contract (shared with the SDK)
 
@@ -164,6 +174,8 @@ including an unknown host reaching the app.
   Friends 0, Business 20. This is a pricing decision (ADR 0027); the number is the maintainer's to set.
   Cloudflare's allowance is 100 hostnames, then $0.10 each a month, so 20 is at most $2 a month of
   cost for a $20 plan.
+- **The limit is checked as the row is written**, in one statement, so concurrent adds cannot pass
+  it together. A pipe name claimed by an add that then fails is released again.
 - **Pending claims** count against the limit and expire, so an org cannot sit on hostnames. A hostname
   is unique in Cloudflare's zone, so a pending claim blocks other orgs from it until it is proven,
   expired, or removed. That is accepted for now; the operator can remove a domain
@@ -214,6 +226,10 @@ reaches the dev server. A test covers it on a custom host.
   above keeps that from exposing the console on arbitrary hosts.
 - Cloudflare for SaaS needs a paid allowance past 100 hostnames and an API token in production: both
   need the operator's approval before step 5.
-- Deleting an org removes its domains from Cloudflare too (best effort, then the daily job).
+- Deleting an org removes its domains from Cloudflare first. If Cloudflare does not answer, the org
+  is not deleted and the person is told to try again, since once the rows are gone nothing would
+  find those hostnames again.
+- The SDK's reserved `DomainState` and `PipeDomain` types (ADR 0031) are replaced by `Domain` and
+  this ADR's states, and `domains()` / `Wurmhol#domains` is the client ADR 0031 sketched.
 - Not solved here: wildcards, apex domains without CNAME flattening, per-domain TLS settings,
   bring-your-own certificates, and a domain shared by several names.

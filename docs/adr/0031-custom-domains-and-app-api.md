@@ -1,7 +1,8 @@
 # 0031: Custom domains for pipe URLs, and the API apps need around them
 
 Status: proposed. Design only: nothing here is built, and the SDK refuses `domain` until it is
-(ADR 0030). Departs from the pipe URL of ADR 0007 (`<id>.wurmhol.dev`) for orgs that opt in.
+(ADR 0030). Its custom-domain design is superseded by ADR 0033 (a hostname per pipe name); the
+other API pieces below are still proposed. Departs from the pipe URL of ADR 0007 (`<id>.wurmhol.dev`) for orgs that opt in.
 Spec section 2 rules out public links and custom domains for v1; this lifts the second, not the
 first.
 
