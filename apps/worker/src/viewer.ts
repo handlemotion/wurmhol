@@ -19,7 +19,7 @@ import { fromShare, refusedViewer, shareStub, toShare } from "./share-do.ts";
 /** Paths on a share host the relay keeps for itself. */
 export const RESERVED_PREFIX = "/__wurmhol/";
 
-function isNavigation(request: Request) {
+export function isNavigation(request: Request) {
   if (request.method !== "GET") return false;
   const mode = request.headers.get("sec-fetch-mode");
   if (mode) return mode === "navigate";
@@ -75,7 +75,8 @@ export async function handleShareHost(request: Request, env: Env, shareId: strin
   if (!userId) {
     const status = await stub.status();
     if (status.state !== "live" && status.state !== "away") return ended();
-    // An embedded tunnel's users have no Wurmhol account: never send them to its sign-in.
+    // An embedded tunnel is reached through its own host and a grant (`embedded-host.ts`); a
+    // session found here anyway is never sent to Wurmhol's sign-in.
     if (status.embedded) return grantRequired();
     return signIn(request, config.auth.baseURL, shareId);
   }

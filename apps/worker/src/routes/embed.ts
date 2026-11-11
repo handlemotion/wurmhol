@@ -14,6 +14,8 @@ import {
   findEmbedTenant,
   findEmbedTunnel,
   isOrgBlocked,
+  issueEmbedGrant,
+  listEmbedGrantEvents,
   latestSharesOfTunnels,
   listEmbedTunnelAccess,
   listEmbedTunnels,
@@ -23,6 +25,7 @@ import {
   removeEmbedSubjectAccess,
   removeEmbedTunnelAccess,
   revokeEmbedConnectors,
+  revokeEmbedGrants,
   setEmbedTunnelStopped,
   useEmbedAppKey,
 } from "@wurmhol/db";
@@ -31,6 +34,9 @@ import {
   embedCredentialKind,
   type EmbedPermission,
   embedTtlSeconds,
+  GRANT_KINDS,
+  GRANT_TTL,
+  sameOriginPath,
   SUBJECT_KINDS,
 } from "@wurmhol/protocol";
 import { Hono } from "hono";
@@ -38,7 +44,7 @@ import { createMiddleware } from "hono/factory";
 import { z } from "zod";
 import { refuse } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
-import { endShare, endTunnelSessions } from "../ending.ts";
+import { endShare, endTunnelSessions, pushGrantRevocations } from "../ending.ts";
 import { shareOrigin } from "../env.ts";
 import { orgPlan } from "../plan.ts";
 import { checkRateLimit } from "../rate-limiter.ts";
@@ -158,10 +164,21 @@ async function describeTunnels(c: { env: Env; var: EmbedEnv["Variables"] }, tunn
   );
 }
 
-/** Ends the tunnels' sessions and deletes them for good. */
+/** Ends the tunnels' sessions, revokes their grants, and deletes them for good. */
 async function deleteTunnels(c: { env: Env; var: EmbedEnv["Variables"] }, tunnelIds: string[]) {
   await deleteEmbedTunnels(c.var.db, c.var.key.orgId, tunnelIds);
+  await revokeEmbedGrants(c.var.db, c.var.key.orgId, { tunnelIds }, c.var.key.keyId);
   await endTunnelSessions(c, tunnelIds, "revoked", "embed delete");
+}
+
+/** Revokes grants and stops them on open sessions at once. */
+async function revokeGrants(
+  c: { env: Env; var: EmbedEnv["Variables"] },
+  which: Parameters<typeof revokeEmbedGrants>[2],
+) {
+  const revoked = await revokeEmbedGrants(c.var.db, c.var.key.orgId, which, c.var.key.keyId);
+  await pushGrantRevocations(c, revoked);
+  return revoked;
 }
 
 const tenantBody = z.object({ disabled: z.boolean().optional() }).default({});
@@ -171,6 +188,14 @@ const tunnelBody = z.object({
   owner: externalId,
   access: z.array(externalId).max(100).default([]),
   connectorTtlSeconds: z.number().int().optional(),
+});
+const grantBody = z.object({
+  tunnel: z.string().min(1).max(64),
+  subject: externalId,
+  kind: z.enum(GRANT_KINDS),
+  ttlSeconds: z.number().int().optional(),
+  /** A browser grant's first page on the tunnel: a same-origin path. */
+  next: z.string().max(2048).optional(),
 });
 const connectorBody = z
   .object({ rotate: z.boolean().default(false), ttlSeconds: z.number().int().optional() })
@@ -200,12 +225,9 @@ export const embed = new Hono<EmbedEnv>()
     const { disabled } = c.req.valid("json");
     const tenant = await putEmbedTenant(c.var.db, c.var.key, id, disabled);
     if (disabled) {
-      await endTunnelSessions(
-        c,
-        await embedTunnelIdsOf(c.var.db, c.var.key, { tenantId: tenant.id }),
-        "revoked",
-        "embed stop",
-      );
+      const tunnelIds = await embedTunnelIdsOf(c.var.db, c.var.key, { tenantId: tenant.id });
+      await revokeEmbedGrants(c.var.db, c.var.key.orgId, { tunnelIds }, c.var.key.keyId);
+      await endTunnelSessions(c, tunnelIds, "revoked", "embed stop");
     }
     return c.json({ tenant: { id: tenant.externalId, disabled: tenant.disabledAt !== null } });
   })
@@ -234,6 +256,7 @@ export const embed = new Hono<EmbedEnv>()
       }
       const { subject } = result;
       if (subject.disabledAt) {
+        await revokeGrants(c, { subjectId: subject.id });
         const owned = await embedTunnelIdsOf(c.var.db, c.var.key, { ownerSubjectId: subject.id });
         await endTunnelSessions(c, owned, "revoked", "embed stop");
       }
@@ -260,6 +283,7 @@ export const embed = new Hono<EmbedEnv>()
       disabled: true,
     });
     await removeEmbedSubjectAccess(c.var.db, c.var.key.orgId, subject.id);
+    await revokeGrants(c, { subjectId: subject.id });
     await deleteTunnels(
       c,
       await embedTunnelIdsOf(c.var.db, c.var.key, { ownerSubjectId: subject.id }),
@@ -373,6 +397,8 @@ export const embed = new Hono<EmbedEnv>()
     if (!(await removeEmbedTunnelAccess(c.var.db, c.var.key.orgId, tunnel.id, subject.id))) {
       return notFound("subject");
     }
+    // Off the list, off the tunnel: its grants there stop now.
+    await revokeGrants(c, { subjectId: subject.id, tunnelId: tunnel.id });
     return c.json({ ok: true });
   })
   /** A new connector; `rotate` revokes the others and ends a session they opened. */
@@ -422,4 +448,90 @@ export const embed = new Hono<EmbedEnv>()
       }
     }
     return c.json({ ok: true });
+  })
+  /**
+   * A grant for one subject on a tunnel's list. A `client` grant is a token the program sends as
+   * `x-wurmhol-grant` or a browser page offers as a WebSocket subprotocol; a `browser` grant is a
+   * one-time launch URL that sets the grant's cookie on the tunnel's host.
+   */
+  .post("/grants", can("grants:issue"), zValidator("json", grantBody), async (c) => {
+    const body = c.req.valid("json");
+    const tunnel = await findEmbedTunnel(c.var.db, c.var.key, body.tunnel);
+    if (!tunnel) return notFound("tunnel");
+    const subject = await liveSubject(c, tunnel.tenantId, body.subject);
+    const listed = await listEmbedTunnelAccess(c.var.db, c.var.key.orgId, tunnel.id);
+    // Only a subject the tunnel's list names: an integration cannot grant its way past it.
+    if (!subject || !listed.some((entry) => entry.id === subject.id)) {
+      return refuse(403, "not on the list", "Add the subject to the tunnel's access list first.");
+    }
+    const seconds = embedTtlSeconds(body.ttlSeconds, GRANT_TTL);
+    if (seconds === null) {
+      return refuse(400, "bad ttl", "Pass a lifetime from 60 seconds to 24 hours, in seconds.");
+    }
+    const grant = await issueEmbedGrant(c.var.db, c.var.key, {
+      tenantId: tunnel.tenantId,
+      tunnelId: tunnel.id,
+      subjectId: subject.id,
+      keyId: c.var.key.keyId,
+      kind: body.kind,
+      expiresAt: new Date(Date.now() + seconds * 1000),
+    });
+    const origin = shareOrigin(c.var.config, { id: tunnel.id, name: tunnel.name });
+    const launchUrl = grant.launchCode
+      ? `${origin}/__wurmhol/launch?${new URLSearchParams({ code: grant.launchCode, next: sameOriginPath(body.next) })}`
+      : undefined;
+    c.var.log.info("embed.grant_issued", {
+      orgId: c.var.key.orgId,
+      tunnelId: tunnel.id,
+      grantId: grant.id,
+      kind: body.kind,
+    });
+    return c.json(
+      {
+        grant: {
+          id: grant.id,
+          kind: body.kind,
+          tunnel: tunnel.id,
+          subject: subject.externalId,
+          expiresAt: grant.expiresAt.toISOString(),
+          ...(grant.token ? { token: grant.token } : {}),
+          ...(launchUrl ? { launchUrl } : {}),
+        },
+      },
+      201,
+    );
+  })
+  /** Revokes a grant: refused on the next request, its WebSockets closed with `4403`. */
+  .delete("/grants/:id", can("grants:issue"), async (c) => {
+    const revoked = await revokeGrants(c, { appId: c.var.key.appId, grantId: c.req.param("id") });
+    if (!revoked.length) return notFound("grant");
+    return c.json({ ok: true });
+  })
+  /** Revokes every grant of a subject, on every tunnel. */
+  .post("/tenants/:tenant/subjects/:subject/revoke-grants", can("grants:issue"), async (c) => {
+    const tenant = await tenantOf(c, c.req.param("tenant"));
+    if (!tenant) return notFound("tenant");
+    const id = c.req.param("subject");
+    const subject = EXTERNAL_ID.test(id)
+      ? await findEmbedSubject(c.var.db, c.var.key, tenant.id, id)
+      : undefined;
+    if (!subject) return notFound("subject");
+    const revoked = await revokeGrants(c, { subjectId: subject.id });
+    return c.json({ revoked: revoked.length });
+  })
+  /** The tunnel's grant log: each grant issued or revoked, for whom, by which key. */
+  .get("/tunnels/:id/grants", can("tunnels:read"), async (c) => {
+    const tunnel = await findEmbedTunnel(c.var.db, c.var.key, c.req.param("id"));
+    if (!tunnel) return notFound("tunnel");
+    const events = await listEmbedGrantEvents(c.var.db, c.var.key.orgId, tunnel.id);
+    return c.json({
+      events: events.map((event) => ({
+        grant: event.grantId,
+        event: event.event,
+        subject: event.subject,
+        key: event.keyId,
+        at: event.at.toISOString(),
+        expiresAt: event.expiresAt.toISOString(),
+      })),
+    });
   });

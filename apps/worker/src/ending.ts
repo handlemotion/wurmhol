@@ -97,3 +97,18 @@ export async function endEmbeddedOfOrg(c: Scope, orgId: string, via: "org delete
   }
   return ended;
 }
+
+/**
+ * Tells the open sessions of revoked grants' tunnels to stop them now (ADR 0032): their sockets
+ * close with `4403`. D1 already has the revocation, so a session that misses this still refuses
+ * the grant at its next check.
+ */
+export async function pushGrantRevocations(c: Scope, revoked: { id: string; tunnelId: string }[]) {
+  const byTunnel = new Map<string, string[]>();
+  for (const grant of revoked) {
+    byTunnel.set(grant.tunnelId, [...(byTunnel.get(grant.tunnelId) ?? []), grant.id]);
+  }
+  for (const share of await openSharesOfTunnels(c.var.db, [...byTunnel.keys()])) {
+    await shareStub(c.env, share.id).revokeGrants(byTunnel.get(share.tunnelId!) ?? []);
+  }
+}

@@ -1,9 +1,10 @@
 import { createDb, findOpenShareByName, pruneExpired } from "@wurmhol/db";
 import { app } from "./app.ts";
-import { SHARE_ID } from "@wurmhol/protocol";
+import { isEmbedTunnelName, SHARE_ID } from "@wurmhol/protocol";
 import { hostRole, loadConfig } from "./env.ts";
 import { createLogger } from "./log.ts";
 import { handleRelay } from "./oauth-relay.ts";
+import { handleEmbeddedHost } from "./embedded-host.ts";
 import { handleShareHost } from "./viewer.ts";
 
 export type { AppType } from "./app.ts";
@@ -62,6 +63,10 @@ export default {
       // A named pipe (ADR 0009): its host serves whichever of the name's pipes is open.
       if (shareId && !SHARE_ID.test(shareId)) {
         shareId = (await findOpenShareByName(createDb(env.DB), shareId))?.id ?? "";
+      }
+      // An embedded tunnel's host (ADR 0032): grants, never a member's sign-in.
+      if (isEmbedTunnelName(host.label ?? "")) {
+        return await handleEmbeddedHost(request, env, shareId);
       }
       return await handleShareHost(request, env, shareId);
     } catch (error) {
