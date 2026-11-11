@@ -174,8 +174,9 @@ including an unknown host reaching the app.
   Friends 0, Business 20. This is a pricing decision (ADR 0027); the number is the maintainer's to set.
   Cloudflare's allowance is 100 hostnames, then $0.10 each a month, so 20 is at most $2 a month of
   cost for a $20 plan.
-- **The limit is checked as the row is written**, in one statement, so concurrent adds cannot pass
-  it together. A pipe name claimed by an add that then fails is released again.
+- **The limit holds under concurrent adds:** an add counts the org's domains again right after
+  writing its row, and one that finds the org over the limit removes its row before Cloudflare is
+  called. A pipe name claimed by an add that then fails is released again.
 - **Pending claims** count against the limit and expire, so an org cannot sit on hostnames. A hostname
   is unique in Cloudflare's zone, so a pending claim blocks other orgs from it until it is proven,
   expired, or removed. That is accepted for now; the operator can remove a domain
