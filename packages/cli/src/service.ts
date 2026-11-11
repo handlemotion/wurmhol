@@ -12,7 +12,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, sep } from "node:path";
-import { FixError } from "./errors.ts";
+import { FixError } from "@wurmhol/sdk";
 
 export interface ServiceSpec {
   /** The Node binary that runs the CLI. */

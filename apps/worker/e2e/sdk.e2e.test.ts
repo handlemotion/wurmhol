@@ -1,5 +1,6 @@
 // `openPipe` in this process, against the real stack: the `wurmhol` package's export, as an
 // orchestrator imports it (built `packages/cli/dist/index.js`).
+import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -104,6 +105,40 @@ describe("openPipe", () => {
       db.close();
     }
     await local.close();
+  });
+
+  it("lets a client with no browser session open the pipe with its access key, and no one else", async () => {
+    const seen: string[] = [];
+    const local = await localServer((req, res) => {
+      seen.push(Object.keys(req.headers).join(","));
+      res.writeHead(200, { "content-type": "text/plain" }).end("ok");
+    });
+    const accessKey = randomBytes(24).toString("hex");
+    const keyed = await openPipe({ port: local.port, token, server: stack.url, accessKey });
+    const keyless = await openPipe({ port: local.port, token, server: stack.url });
+    try {
+      const ok = await browserFetch(keyed.url, { headers: { "x-wurmhol-key": accessKey } });
+      expect(ok.status).toBe(200);
+      expect(await ok.text()).toBe("ok");
+      // The key is the relay's: the dev server sees neither it nor a share cookie.
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).not.toMatch(/x-wurmhol|cookie/);
+
+      const hitsBefore = seen.length;
+      const wrong = await browserFetch(keyed.url, {
+        headers: { "x-wurmhol-key": `${accessKey}x` },
+      });
+      expect(wrong.status).toBe(401);
+      expect((await browserFetch(keyed.url)).status).toBe(401);
+      // A pipe opened without a key has none to accept, however well-formed the one presented.
+      const noKey = await browserFetch(keyless.url, { headers: { "x-wurmhol-key": accessKey } });
+      expect(noKey.status).toBe(401);
+      expect(seen).toHaveLength(hitsBefore);
+    } finally {
+      await keyed.close();
+      await keyless.close();
+      await local.close();
+    }
   });
 
   it("rejects with the one-line fix the CLI prints", async () => {

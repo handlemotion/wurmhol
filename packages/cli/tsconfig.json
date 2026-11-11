@@ -7,5 +7,6 @@
     "types": ["node"],
     "allowImportingTsExtensions": true
   },
-  "include": ["src", "package.json", "tsdown.config.ts"]
+  "include": ["src", "package.json", "tsdown.config.ts"],
+  "references": [{ "path": "../sdk" }]
 }

@@ -11,7 +11,8 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { type AppEnv, requireOwner } from "../context.ts";
-import { endShare, revokeTokensOfLeaver } from "../ending.ts";
+import { DomainRefusal, domainDeps, releaseOrgDomains } from "../domains/service.ts";
+import { endEmbeddedOfOrg, endShare, revokeTokensOfLeaver } from "../ending.ts";
 import { orgStub } from "../org-do.ts";
 import { limitPerMember } from "../rate-limiter.ts";
 
@@ -133,10 +134,24 @@ export const org = new Hono<AppEnv>()
         message: "Cancel the plan in Billing first, then delete the org.",
       });
     }
+    // Its custom domains leave Cloudflare first (ADR 0033): once the rows go with the org, nothing
+    // would find those hostnames again. If Cloudflare does not answer, nothing is deleted yet.
+    const domains = domainDeps(c.var.config, c.var.db);
+    if (domains) {
+      try {
+        await releaseOrgDomains(domains, orgId);
+      } catch (error) {
+        if (!(error instanceof DomainRefusal)) throw error;
+        throw new HTTPException(error.status as 502 | 503, {
+          message: `The org's custom domains could not be removed yet. ${error.fix}`,
+        });
+      }
+    }
     const orgObject = orgStub(c.env, orgId);
     for (const share of await orgObject.list()) {
       await endShare(c, { id: share.id, orgId }, "terminated", "org deleted");
     }
+    await endEmbeddedOfOrg(c, orgId, "org deleted");
     await plugin(
       c.var.auth.api.deleteOrganization({
         headers: c.req.raw.headers,

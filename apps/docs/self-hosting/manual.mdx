@@ -37,7 +37,7 @@ From a clone of the repository.
     export WORKER_VAR_APP_ALIASES=app.example.com
     ```
 
-    Any other var goes in the same way, as `WORKER_VAR_<NAME>`.
+    Any other var goes in the same way, as `WORKER_VAR_<NAME>`. A route whose host is not in its zone takes the zone after `@`: with custom domains on, add `*/*@example-pipes.dev` to `WORKER_ROUTE`. A deploy sets the Worker's routes to exactly this list.
 
   </Step>
   <Step title="Deploy">

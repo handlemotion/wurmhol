@@ -1,5 +1,11 @@
 // Random secrets and their hashes, on Web Crypto (Workers and Node alike).
-import { SHARE_ID_ALPHABET, SHARE_ID_LENGTH } from "@wurmhol/protocol";
+import {
+  EMBED_CREDENTIAL_PREFIXES,
+  EMBED_TUNNEL_NAME_LENGTH,
+  type EmbedCredentialKind,
+  SHARE_ID_ALPHABET,
+  SHARE_ID_LENGTH,
+} from "@wurmhol/protocol";
 
 /** Lowercase hex SHA-256 of a UTF-8 string. */
 export async function sha256Hex(value: string): Promise<string> {
@@ -16,18 +22,31 @@ export function randomSecret(bytes = 32): string {
     .replace(/=+$/, "");
 }
 
-/**
- * A new share id: `SHARE_ID_LENGTH` characters of `SHARE_ID_ALPHABET`. Rejection sampling keeps
- * every character equally likely, so ids are as hard to guess as their length says.
- */
-export function randomShareId(): string {
+/** `length` characters of `SHARE_ID_ALPHABET`, each equally likely (rejection sampling). */
+function randomLabel(length: number): string {
   const size = SHARE_ID_ALPHABET.length;
   const below = 256 - (256 % size);
-  let id = "";
-  while (id.length < SHARE_ID_LENGTH) {
-    for (const byte of crypto.getRandomValues(new Uint8Array(SHARE_ID_LENGTH * 2))) {
-      if (byte < below && id.length < SHARE_ID_LENGTH) id += SHARE_ID_ALPHABET[byte % size];
+  let label = "";
+  while (label.length < length) {
+    for (const byte of crypto.getRandomValues(new Uint8Array(length * 2))) {
+      if (byte < below && label.length < length) label += SHARE_ID_ALPHABET[byte % size];
     }
   }
-  return id;
+  return label;
+}
+
+/** A new share id: `SHARE_ID_LENGTH` characters of `SHARE_ID_ALPHABET`. */
+export function randomShareId(): string {
+  return randomLabel(SHARE_ID_LENGTH);
+}
+
+/** A new embedded tunnel's host label (ADR 0032): `e` and 15 random characters. */
+export function randomEmbedTunnelName(): string {
+  return `e${randomLabel(EMBED_TUNNEL_NAME_LENGTH - 1)}`;
+}
+
+/** A new embedded credential of `kind` and its hash; only the hash is ever stored. */
+export async function newEmbedCredential(kind: EmbedCredentialKind) {
+  const value = `${EMBED_CREDENTIAL_PREFIXES[kind]}${randomSecret(32)}`;
+  return { value, hash: await sha256Hex(value) };
 }

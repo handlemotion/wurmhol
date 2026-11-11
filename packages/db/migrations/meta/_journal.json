@@ -92,6 +92,20 @@
       "when": 1793943287490,
       "tag": "0012_red_anita_blake",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1794347378847,
+      "tag": "0013_embedded",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1794433089461,
+      "tag": "0014_custom_domains",
+      "breakpoints": true
     }
   ]
 }

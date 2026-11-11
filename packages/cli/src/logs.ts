@@ -12,7 +12,7 @@ import {
   statSync,
   appendFileSync,
 } from "node:fs";
-import type { RequestEvent } from "./tunnel.ts";
+import type { RequestEvent } from "@wurmhol/sdk";
 import { logFile } from "./state.ts";
 
 /** Where a log moves on; at most twice this is kept per pipe. */

@@ -1,14 +1,17 @@
 import { useState } from "react";
 import {
+  IconBlocks,
   IconChevronsUpDown,
   IconCreditCard,
   IconEllipsis,
+  IconGlobe,
   IconKey,
   IconLogOut,
   IconPlus,
   IconSettings,
   IconTrash,
   IconUsers,
+  IconWaypoints,
 } from "@/components/icons/lucide";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -21,13 +24,22 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "@/components/ui/menu";
-import { useOpenBilling, usePrefetchDialogs, useSignOut, useSwitchOrg } from "@/hooks/use-app";
+import {
+  useAppConfig,
+  useOpenBilling,
+  usePrefetchDialogs,
+  useSignOut,
+  useSwitchOrg,
+} from "@/hooks/use-app";
 import type { Me } from "@/lib/api";
 import { initials } from "@/lib/initials";
 import { type OrgAction, OrgDialog } from "./org-dialogs";
 
 /** The org's dialogs the header opens over the wall. */
-export type WallDialog = "members" | "tokens";
+export type WallDialog = "members" | "tokens" | "domains";
+
+/** What the page shows: the org's pipes, or its embedded apps (ADR 0032). */
+export type WallView = "pipes" | "apps";
 
 /** What the switcher offers: anyone starts an org or opens its settings; owners delete it. */
 const ORG_ACTIONS = [
@@ -44,10 +56,15 @@ const DELETE = { id: "delete", label: "Delete org", Icon: IconTrash } as const;
 export function Header({
   me,
   onOpen,
+  view,
+  onView,
   fade,
 }: {
   me: Me;
   onOpen: (dialog: WallDialog) => void;
+  view: WallView;
+  /** Apps turns into Pipes while the apps show, and back. */
+  onView: (view: WallView) => void;
   /** Off on the empty wall: no pill can pan under the header, and the backdrop runs on to the top. */
   fade: boolean;
 }) {
@@ -55,6 +72,7 @@ export function Header({
   const signOut = useSignOut();
   const billing = useOpenBilling();
   const prefetchDialogs = usePrefetchDialogs();
+  const customDomains = useAppConfig().data?.customDomains ?? false;
   const active = me.orgs.find((org) => org.id === me.activeOrgId);
   const [orgAction, setOrgAction] = useState<OrgAction | null>(null);
   const owner = me.role === "owner";
@@ -63,8 +81,19 @@ export function Header({
   const canBill = owner && me.standing?.reason === "subscribed";
   // The same entries as buttons in the middle, and in the phone's menu.
   const links = [
+    // An owner of an org that may have apps moves between its pipes and its apps.
+    ...(me.apps
+      ? [
+          view === "apps"
+            ? { id: "pipes", label: "Pipes", Icon: IconWaypoints, onPress: () => onView("pipes") }
+            : { id: "apps", label: "Apps", Icon: IconBlocks, onPress: () => onView("apps") },
+        ]
+      : []),
     { id: "members", label: "Members", Icon: IconUsers, onPress: () => onOpen("members") },
     { id: "tokens", label: "Tokens", Icon: IconKey, onPress: () => onOpen("tokens") },
+    ...(customDomains
+      ? [{ id: "domains", label: "Domains", Icon: IconGlobe, onPress: () => onOpen("domains") }]
+      : []),
     ...(canBill
       ? [
           {

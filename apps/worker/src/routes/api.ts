@@ -29,6 +29,7 @@ import { orgStub, toOrg } from "../org-do.ts";
 import { memberCap } from "../plan.ts";
 import { limitPerMember } from "../rate-limiter.ts";
 import { shareStub } from "../share-do.ts";
+import { apps } from "./apps.ts";
 import { billing } from "./billing.ts";
 import { machines } from "./machines.ts";
 import { org } from "./org.ts";
@@ -59,12 +60,21 @@ export const account = new Hono<AppEnv>()
           })
         : null,
     ]);
+    // Embedded applications (ADR 0032): for owners, when the install has them and the org may
+    // use them (Business, or billing off).
+    const apps = Boolean(
+      c.var.config.EMBEDDED_ENABLED &&
+      session.member?.role === "owner" &&
+      standing?.ok &&
+      (standing.reason === "billing_off" || standing.plan === "business"),
+    );
     return c.json({
       user: session.user,
       orgs,
       activeOrgId: session.member?.orgId ?? null,
       role: session.member?.role ?? null,
       standing,
+      apps,
     });
   })
   /** Which org an invite link is for, so the join page can name it. */
@@ -192,6 +202,7 @@ export const api = new Hono<AppEnv>()
     const url = new URL(`/join/${code}`, c.var.config.auth.baseURL).toString();
     return c.json({ url, expiresAt: expiresAt.toISOString() }, 201);
   })
+  .route("/apps", apps)
   .route("/machines", machines)
   .route("/", org)
   .route("/", billing);

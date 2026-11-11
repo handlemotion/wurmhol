@@ -1,7 +1,12 @@
 // Which install the CLI talks to and with which token: WURMHOL_URL, WURMHOL_TOKEN, and the token
 // `wurmhol login` saved for that install. Every command and the MCP server resolve them here.
 import { type Credentials, readCredentials } from "./credentials.ts";
-import { DEFAULT_CONSOLE, DEFAULT_PIPE_DOMAIN, DEFAULT_SERVER, originOf } from "./pipe.ts";
+import {
+  DEFAULT_CONSOLE,
+  DEFAULT_PIPE_DOMAIN,
+  DEFAULT_SERVER,
+  originOf,
+} from "@wurmhol/sdk/internal";
 
 /** The install's origin: WURMHOL_URL, or wurmhol.com. Throws a FixError when it is not a URL. */
 export function server() {

@@ -5,10 +5,10 @@
 import { findMember, findShare } from "@wurmhol/db";
 import { Hono } from "hono";
 import { type AppEnv, resolveSession } from "../context.ts";
-import { shareOrigin } from "../env.ts";
+import { viewerOrigin } from "../share-url.ts";
 import { errorPage } from "../pages.ts";
 import { shareStub } from "../share-do.ts";
-import { sameOriginPath, SHARE_ID } from "@wurmhol/protocol";
+import { customHostname, sameOriginPath, SHARE_ID } from "@wurmhol/protocol";
 import { RESERVED_PREFIX } from "../viewer.ts";
 
 export const open = new Hono<AppEnv>().get("/", async (c) => {
@@ -16,9 +16,13 @@ export const open = new Hono<AppEnv>().get("/", async (c) => {
   const next = sameOriginPath(c.req.query("next"));
   if (!SHARE_ID.test(shareId)) return errorPage(404, "This pipe has ended.");
   const share = await findShare(c.var.db, shareId);
-  if (!share || share.endedAt) return errorPage(410, "This pipe has ended.");
+  // An embedded tunnel's session is no org pipe: membership never opens it (ADR 0032).
+  if (!share || share.endedAt || share.tunnelId) return errorPage(410, "This pipe has ended.");
 
-  const here = `/open?${new URLSearchParams({ share: shareId, next })}`;
+  // The custom host the viewer came from survives the trip through the login page; it is checked
+  // only at the end (`viewerOrigin`), so a crafted one is dropped there, never followed.
+  const host = customHostname(c.req.query("host") ?? "");
+  const here = `/open?${new URLSearchParams({ share: shareId, next, ...(host ? { host } : {}) })}`;
   const login = (reason?: string) => {
     const params = new URLSearchParams({ next: here });
     if (reason) params.set("reason", reason);
@@ -33,7 +37,9 @@ export const open = new Hono<AppEnv>().get("/", async (c) => {
   if (!(await stub.mayView(session.user.id))) return login("not-listed");
 
   const code = await stub.issueCode(session.user.id);
-  const target = new URL(`${RESERVED_PREFIX}auth`, shareOrigin(c.var.config, share));
+  // The host the viewer came from, when it is one of this pipe's own custom domains (ADR 0033).
+  const origin = await viewerOrigin(c.var.db, c.var.config, share, host);
+  const target = new URL(`${RESERVED_PREFIX}auth`, origin);
   target.searchParams.set("code", code);
   target.searchParams.set("next", next);
   c.header("cache-control", "no-store");

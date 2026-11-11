@@ -22,6 +22,16 @@ SHARE_DOMAIN=pipe.localhost
 # oauth.example-pipes.dev) the pipes' wildcard route and certificate already cover it, and no pipe
 # may take that label as its name. Empty: no relay.
 OAUTH_RELAY_HOST=
+# Optional (ADR 0033). Custom domains: the CNAME target an org points its own hostname at, like
+# domains.example-pipes.dev, the Cloudflare zone that serves it (Cloudflare for SaaS enabled, a
+# fallback origin, and a `*/*` Worker route), and a secret API token with SSL and Certificates: Edit
+# on that zone. All three or none: empty turns the feature off. CLOUDFLARE_API_URL and
+# DNS_RESOLVER_URL point at other endpoints (a proxy, a local test double); empty uses Cloudflare's.
+CUSTOM_DOMAIN_TARGET=
+CLOUDFLARE_ZONE_ID=
+CLOUDFLARE_API_TOKEN=
+CLOUDFLARE_API_URL=
+DNS_RESOLVER_URL=
 # Optional. Where the wall's Docs links go, e.g. https://docs.example.com. Empty: the hosted
 # docs, https://wurmhol.com/docs.
 DOCS_URL=
@@ -36,6 +46,11 @@ ENVIRONMENT=development
 # that sign in with OAuth. On by default; `false` turns it off. It needs HTTPS, or plain http on
 # localhost or 127.0.0.1: a stack on http://api.localhost has it off.
 MCP_ENABLED=
+
+# --- Embedded mode (ADR 0032) ---
+# Optional. `true` turns on applications that open private tunnels for a SaaS's own users
+# (`/api/apps`). Off by default. With billing on, only Business orgs may use it.
+EMBEDDED_ENABLED=
 
 # --- Takedown (ADR 0022) ---
 # Optional secret. At least 32 random characters: openssl rand -base64 32. The bearer token of
@@ -111,6 +126,9 @@ GITHUB_WEB_URL=
 # --- Fair-use limits per org with billing off; empty means the default ---
 # With billing on, each plan's limits apply instead (ADR 0027).
 LIMIT_ACTIVE_SHARES=5
+# Open embedded tunnel sessions per org (ADR 0032), apart from the pipes above, with billing on
+# or off.
+LIMIT_EMBED_ACTIVE=1000
 # Bytes relayed per calendar month (UTC), both directions. Default 100 GB.
 LIMIT_MONTHLY_BYTES=100000000000
 # Viewer requests per calendar month (UTC). Default 50 million.

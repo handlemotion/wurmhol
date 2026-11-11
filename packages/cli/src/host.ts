@@ -3,9 +3,8 @@
 // web ports open here as they come and go; when its owner picks one in Create pipe, the relay
 // asks it to open a pipe to that port, and it answers with the pipe's URL or why it could not.
 import { type HostMessage, MACHINE_LIMITS, parseRelayMessage } from "@wurmhol/protocol";
-import WebSocket from "ws";
-import { dial } from "./dial.ts";
-import { FixError } from "./errors.ts";
+import { FixError } from "@wurmhol/sdk";
+import { dial, type WsConnection, WS_OPEN } from "@wurmhol/sdk/internal";
 import { PortScanner } from "./ports.ts";
 
 export interface HostOptions {
@@ -23,7 +22,7 @@ export interface HostOptions {
 /** How often the ports are looked at again. */
 const SCAN_MS = 3000;
 
-function connect(options: HostOptions): Promise<WebSocket> {
+function connect(options: HostOptions): Promise<WsConnection> {
   const url = new URL("/host", options.server);
   url.searchParams.set("name", options.name);
   return dial(url, { server: options.server, token: options.token, version: options.version });
@@ -38,7 +37,7 @@ export async function host(options: HostOptions): Promise<never> {
   let delay = 1000;
   let first = true;
   for (;;) {
-    let socket: WebSocket;
+    let socket: WsConnection;
     try {
       socket = await connect(options);
     } catch (error) {
@@ -60,7 +59,7 @@ export async function host(options: HostOptions): Promise<never> {
 }
 
 /** One connection: reports ports and answers opens until the socket closes. */
-function session(socket: WebSocket, scanner: PortScanner, options: HostOptions) {
+function session(socket: WsConnection, scanner: PortScanner, options: HostOptions) {
   return new Promise<void>((resolve) => {
     let sent = "";
     const send = (message: HostMessage) => socket.send(JSON.stringify(message));
@@ -69,7 +68,7 @@ function session(socket: WebSocket, scanner: PortScanner, options: HostOptions) 
         type: "ports",
         ports: await scanner.scan(),
       } satisfies HostMessage);
-      if (message === sent || socket.readyState !== WebSocket.OPEN) return;
+      if (message === sent || socket.readyState !== WS_OPEN) return;
       socket.send(message);
       sent = message;
     };
