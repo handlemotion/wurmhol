@@ -75,7 +75,9 @@ export function AppsNetwork({ apps }: { apps: App[] }) {
             card={<CreateAppCard onCreated={setCreated} />}
             pill={
               <Button
-                intent="secondary"
+                // Creating an app is the view's one action: the brand's filled button, with its
+                // darker edge, like Delete's in red.
+                intent="primary"
                 data-create-app
                 aria-expanded={false}
                 onPress={() => setOpen(ANCHOR)}
