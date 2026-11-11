@@ -12,7 +12,8 @@ export { RateLimiter } from "./rate-limiter.ts";
 export { Share } from "./share-do.ts";
 
 /**
- * The CLI's host answers these and `/v1/pipes` (ADR 0006, ADR 0008, ADR 0018): the pipe socket,
+ * The CLI's host answers these, `/v1/pipes` and `/v1/embed` (ADR 0006, ADR 0008, ADR 0018, ADR
+ * 0032): the pipe socket,
  * `wurmhol host`, `wurmhol login`, health, and the hosted MCP server with its protected resource
  * metadata (ADR 0014).
  */
@@ -29,7 +30,7 @@ const CLI_PATHS = new Set([
 export default {
   /**
    * One Worker, five kinds of host (ADR 0006, ADR 0010): pipes (`<id>.wurmhol.dev`, or `<name>.wurmhol.dev`), the CLI's
-   * endpoint (`api.wurmhol.com`: `/connect`, `/device/*`, the `/v1/pipes` API and `/health`), aliases that redirect to the app
+   * endpoint (`api.wurmhol.com`: `/connect`, `/device/*`, the `/v1/pipes` and `/v1/embed` APIs and `/health`), aliases that redirect to the app
    * (`app.wurmhol.com`), the app itself (`dirt.wurmhol.com`: console, API, sign-in), and the OAuth callback relay
    * (`oauth.wurmhol.dev`).
    */
@@ -43,7 +44,7 @@ export default {
     }
     if (host.role === "connect") {
       const { pathname } = new URL(request.url);
-      if (CLI_PATHS.has(pathname) || /^\/v1\/pipes(\/|$)/.test(pathname)) {
+      if (CLI_PATHS.has(pathname) || /^\/v1\/(pipes|embed)(\/|$)/.test(pathname)) {
         return app.fetch(request, env, ctx);
       }
       return Response.json(

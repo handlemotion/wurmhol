@@ -17,20 +17,27 @@ export async function recordShareStart(
   db: Db,
   input: {
     orgId: string;
-    tokenId: string;
+    /** The classic token that opened it; null for an embedded tunnel's session. */
+    tokenId: string | null;
     startedBy: string | null;
     port: number;
     name?: string | null;
     /** Where the pipe came from (ADR 0015), already checked with `parsePipeSource`. */
     source?: PipeSource | null;
+    /** An embedded tunnel's session (ADR 0032): what it belongs to and which connector opened it. */
+    embed?: { appId: string; tenantId: string; tunnelId: string; connectorId: string } | null;
   },
 ): Promise<
   | { ok: true; id: string; startedAt: Date }
   | { ok: false; reason: "taken" }
-  | { ok: false; reason: "open"; open: { id: string; tokenId: string | null; port: number } }
+  | {
+      ok: false;
+      reason: "open";
+      open: { id: string; tokenId: string | null; connectorId: string | null; port: number };
+    }
 > {
   const name = input.name ?? null;
-  const { source, ...share } = input;
+  const { source, embed, ...share } = input;
   const columns = source
     ? {
         repoHost: source.repoHost,
@@ -55,7 +62,7 @@ export async function recordShareStart(
     const id = randomShareId();
     const inserted = await db
       .insert(shares)
-      .values({ id, ...share, ...columns, name })
+      .values({ id, ...share, ...columns, ...embed, name })
       .onConflictDoNothing()
       .returning({ id: shares.id, startedAt: shares.startedAt });
     if (inserted[0]) return { ok: true, ...inserted[0] };
@@ -69,7 +76,12 @@ export async function recordShareStart(
 /** The open share a name points at, or null. */
 export async function findOpenShareByName(db: Db, name: string) {
   const [row] = await db
-    .select({ id: shares.id, tokenId: shares.tokenId, port: shares.port })
+    .select({
+      id: shares.id,
+      tokenId: shares.tokenId,
+      connectorId: shares.connectorId,
+      port: shares.port,
+    })
     .from(shares)
     .where(and(eq(shares.name, name), isNull(shares.endedAt)))
     .limit(1);
@@ -107,6 +119,9 @@ export async function findShare(db: Db, id: string) {
       tokenId: shares.tokenId,
       port: shares.port,
       name: shares.name,
+      /** Set for an embedded tunnel's session (ADR 0032), which is never an org pipe. */
+      tunnelId: shares.tunnelId,
+      connectorId: shares.connectorId,
       startedAt: shares.startedAt,
       endedAt: shares.endedAt,
       endReason: shares.endReason,

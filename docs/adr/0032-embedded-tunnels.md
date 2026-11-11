@@ -389,8 +389,8 @@ other origin is refused, and the dev server never sees either entry.
 
 **Step 6: usage and limits.** Usage batches carry `appId` and `tenantId`; the Org object keeps
 per-application and per-tenant counts per window and enforces their limits on reserve and on usage,
-ending only the affected sessions. `GET /v1/embed/usage`. `LIMIT_EMBED_ACTIVE` in `env.ts` (zod),
-`.dev.vars.example` and the self-hosting docs. E2E: a tenant over its limit loses only its own
+ending only the affected sessions. `GET /v1/embed/usage`. `LIMIT_EMBED_ACTIVE` already arrived in step 4, with the session
+reservation it guards. E2E: a tenant over its limit loses only its own
 sessions; the org's Stripe meter (test mode) receives the sum once.
 
 **Step 7: SDK and CLI.** `@wurmhol/sdk`:

@@ -116,6 +116,9 @@ GITHUB_WEB_URL=
 # --- Fair-use limits per org with billing off; empty means the default ---
 # With billing on, each plan's limits apply instead (ADR 0027).
 LIMIT_ACTIVE_SHARES=5
+# Open embedded tunnel sessions per org (ADR 0032), apart from the pipes above, with billing on
+# or off.
+LIMIT_EMBED_ACTIVE=1000
 # Bytes relayed per calendar month (UTC), both directions. Default 100 GB.
 LIMIT_MONTHLY_BYTES=100000000000
 # Viewer requests per calendar month (UTC). Default 50 million.

@@ -11,7 +11,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { type AppEnv, requireOwner } from "../context.ts";
-import { endShare, revokeTokensOfLeaver } from "../ending.ts";
+import { endEmbeddedOfOrg, endShare, revokeTokensOfLeaver } from "../ending.ts";
 import { orgStub } from "../org-do.ts";
 import { limitPerMember } from "../rate-limiter.ts";
 
@@ -137,6 +137,7 @@ export const org = new Hono<AppEnv>()
     for (const share of await orgObject.list()) {
       await endShare(c, { id: share.id, orgId }, "terminated", "org deleted");
     }
+    await endEmbeddedOfOrg(c, orgId, "org deleted");
     await plugin(
       c.var.auth.api.deleteOrganization({
         headers: c.req.raw.headers,

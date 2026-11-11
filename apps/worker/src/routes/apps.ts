@@ -6,6 +6,8 @@ import {
   createEmbedApp,
   createEmbedAppKey,
   deleteEmbedApp,
+  deleteEmbedTunnels,
+  embedTunnelIdsOfApp,
   findEmbedApp,
   listEmbedAppKeys,
   listEmbedApps,
@@ -18,6 +20,7 @@ import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { type AppEnv, requireOwner } from "../context.ts";
+import { endTunnelSessions } from "../ending.ts";
 import { orgPlan } from "../plan.ts";
 import { limitPerMember } from "../rate-limiter.ts";
 
@@ -154,12 +157,16 @@ export const apps = new Hono<AppEnv>()
     if (!app) throw new HTTPException(404, { message: "no such application" });
     return c.json({ app });
   })
-  /** Deletes the application and revokes its keys. */
+  /** Deletes the application, revokes its keys, and ends and deletes its tunnels. */
   .delete("/:id", limitPerMember("manage"), async (c) => {
     const appId = c.req.param("id");
-    if (!(await deleteEmbedApp(c.var.db, c.var.member.orgId, appId))) {
+    const orgId = c.var.member.orgId;
+    const tunnels = await embedTunnelIdsOfApp(c.var.db, orgId, appId);
+    if (!(await deleteEmbedApp(c.var.db, orgId, appId))) {
       throw new HTTPException(404, { message: "no such application" });
     }
+    await deleteEmbedTunnels(c.var.db, orgId, tunnels);
+    await endTunnelSessions(c, tunnels, "revoked", "embed delete");
     c.var.log.info("embed.app_deleted", { orgId: c.var.member.orgId, appId });
     return c.json({ ok: true });
   })
