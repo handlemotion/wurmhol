@@ -1,7 +1,8 @@
 // `Wurmhol`: one object for an app that embeds the SDK. It remembers the server, the token (or a
-// store that holds it) and how the app names itself, and offers the three things an app does:
-// sign a person in (`auth`), open pipes (`pipes.open`, `pipes.keepOpen`), and see or end the org's
-// pipes (`pipes.list`, `pipes.end`). Everything it does is also available as a plain function.
+// store that holds it) and how the app names itself, and offers what an app does: sign a person in
+// (`auth`), open pipes (`pipes.open`, `pipes.keepOpen`), see or end the org's pipes (`pipes.list`,
+// `pipes.end`), and give a pipe name its own hostname (`domains`). Everything it does is also
+// available as a plain function.
 import {
   type DeviceCode,
   type Granted,
@@ -9,6 +10,7 @@ import {
   redeem as redeemCode,
   startLogin as startDeviceLogin,
 } from "./auth.ts";
+import { domains, type DomainsClient } from "./domains.ts";
 import { explainRefusal, FixError } from "./errors.ts";
 import { send } from "./http.ts";
 import { keepOpen, type ManagedPipe, type ManagedPipeOptions } from "./managed.ts";
@@ -69,6 +71,11 @@ export class Wurmhol {
   readonly #store: TokenStore;
   readonly #options: WurmholOptions;
   readonly #client: { name: string; version: string };
+  /**
+   * The org's custom domains (ADR 0033): attach a hostname to a pipe name, check it, remove it.
+   * Needs a token that can list and end every pipe.
+   */
+  readonly domains: DomainsClient;
 
   constructor(options: WurmholOptions = {}) {
     this.#options = options;
@@ -76,6 +83,11 @@ export class Wurmhol {
     this.#token = options.token?.trim() || undefined;
     this.#store = options.tokenStore ?? memoryTokenStore();
     this.#client = options.client ?? { name: "wurmhol-sdk", version: pkg.version };
+    this.domains = domains({
+      server: this.server,
+      client: this.#client,
+      token: () => this.#needToken(),
+    });
   }
 
   /** The token in use: the one given, or the stored one for this server; null when signed out. */

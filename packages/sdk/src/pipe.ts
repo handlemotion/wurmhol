@@ -129,8 +129,9 @@ export interface OpenPipeOptions {
    */
   source?: Partial<PipeSource>;
   /**
-   * Custom domain for the pipe's URL (`preview.acme.dev`). Reserved: the relay does not serve
-   * custom domains yet (ADR 0031), so a value here rejects with a `FixError` coded `unsupported`.
+   * Not supported: a custom domain follows the pipe's name (ADR 0033). Attach the hostname to a
+   * name with `domains().add`, then open the pipe with that `name`. A value here rejects with a
+   * `FixError` coded `unsupported` that says so.
    */
   domain?: string;
   /**
@@ -308,7 +309,7 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
   }
   if (options.domain !== undefined) {
     throw new FixError(
-      "Custom domains are not available on this server yet. Open the pipe without `domain`.",
+      "A custom domain follows the pipe's name: attach it with `domains().add({ hostname, pipe: name })` (or `wurmhol domain add`), then open the pipe with that `name` and without `domain`.",
       { code: "unsupported" },
     );
   }
