@@ -21,6 +21,7 @@ import {
   Ellipsis,
   ExternalLink,
   Eye,
+  Globe,
   Info,
   KeyRound,
   Laptop,
@@ -65,6 +66,7 @@ export const IconDoorOpen = thin(DoorOpen, "IconDoorOpen");
 export const IconEllipsis = thin(Ellipsis, "IconEllipsis");
 export const IconExternalLink = thin(ExternalLink, "IconExternalLink");
 export const IconEye = thin(Eye, "IconEye");
+export const IconGlobe = thin(Globe, "IconGlobe");
 export const IconInfo = thin(Info, "IconInfo");
 export const IconKey = thin(KeyRound, "IconKey");
 export const IconLaptop = thin(Laptop, "IconLaptop");

@@ -12,6 +12,7 @@ import { AppsNetwork } from "../apps/apps-network";
 import { Header, type WallDialog, type WallView } from "./header";
 import { MembersDialog } from "./members-dialog";
 import { Network } from "./network";
+import { DomainsDialog } from "./domains-dialog";
 import { TokensDialog } from "./tokens-dialog";
 
 const SAMPLE: ShareCard[] = [1, 2, 3].map((n) =>
@@ -96,6 +97,7 @@ export function Wall({ me }: { me: Me }) {
       </main>
       <MembersDialog me={me} isOpen={dialog === "members"} onOpenChange={() => setDialog(null)} />
       <TokensDialog isOpen={dialog === "tokens"} onOpenChange={() => setDialog(null)} />
+      <DomainsDialog isOpen={dialog === "domains"} onOpenChange={() => setDialog(null)} />
     </div>
   );
 }
