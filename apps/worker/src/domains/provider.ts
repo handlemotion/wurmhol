@@ -1,4 +1,4 @@
-// Cloudflare for SaaS custom hostnames (ADR 0030), behind an interface: nothing else in the Worker
+// Cloudflare for SaaS custom hostnames (ADR 0033), behind an interface: nothing else in the Worker
 // knows Cloudflare's shapes. Needs a token scoped to `SSL and Certificates: Edit` on the SaaS zone.
 import type { HostnameSnapshot } from "@wurmhol/protocol";
 

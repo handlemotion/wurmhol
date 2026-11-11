@@ -196,7 +196,7 @@ export const oauthStates = sqliteTable(
       .notNull()
       .references(() => shares.id, { onDelete: "cascade" }),
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
-    /** The host the flow started on when it was a custom domain (ADR 0030), where it comes back. */
+    /** The host the flow started on when it was a custom domain (ADR 0033), where it comes back. */
     host: text("host"),
   },
   (table) => [
@@ -255,7 +255,7 @@ export const spendCaps = sqliteTable("spend_caps", {
 });
 
 /**
- * Custom domains (ADR 0030): a hostname an org owns, attached to one of its pipe names. Only an
+ * Custom domains (ADR 0033): a hostname an org owns, attached to one of its pipe names. Only an
  * `active` row is routed. The hostname is unique across orgs: it is the key, and Cloudflare's zone
  * holds one custom hostname per name too. Goes with its pipe name, and with its org.
  */

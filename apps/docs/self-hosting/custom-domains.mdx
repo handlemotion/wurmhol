@@ -34,4 +34,4 @@ All of the first three or none. `CLOUDFLARE_API_URL`, `DNS_RESOLVER_URL` and `CU
 
 The domain is `pending` until the TXT record is seen, `verifying` until Cloudflare reports the hostname and certificate active, then `active`. One that is not `active` within `CUSTOM_DOMAIN_PENDING_SECONDS` is `failed` and its Cloudflare hostname is removed. A daily job re-checks every domain, so removing the `CNAME` stops routing.
 
-The full contract is [ADR 0030](https://github.com/handlemotion/wurmhol/blob/main/docs/adr/0030-custom-domains.md).
+The full contract is [ADR 0033](https://github.com/handlemotion/wurmhol/blob/main/docs/adr/0033-custom-domains.md).

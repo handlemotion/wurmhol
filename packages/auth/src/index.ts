@@ -159,7 +159,7 @@ export interface OrgLimits {
   active: number;
   monthlyBytes: number;
   monthlyRequests: number;
-  /** Custom domains (ADR 0030). */
+  /** Custom domains (ADR 0033). */
   customDomains: number;
 }
 

@@ -88,7 +88,7 @@ export default {
       asOf: now.toISOString(),
       ...pruned,
     });
-    // Custom domains (ADR 0030): expire the unfinished, and notice a CNAME that went away.
+    // Custom domains (ADR 0033): expire the unfinished, and notice a CNAME that went away.
     const domains = domainDeps(config, createDb(env.DB));
     if (domains) await refreshDomains(domains);
   },

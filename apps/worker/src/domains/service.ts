@@ -1,14 +1,14 @@
-// Custom domains (ADR 0030): adding one, checking it, removing it. Routes and the daily job call
+// Custom domains (ADR 0033): adding one, checking it, removing it. Routes and the daily job call
 // these; Cloudflare and DNS are reached only through `provider` and `txt`.
 import {
   addDomain,
-  countDomains,
   type Db,
   deleteDomain,
   type DomainRow,
   domainsToCheck,
   findDomain,
   listDomains,
+  releasePipeName,
   updateDomain,
 } from "@wurmhol/db";
 import {
@@ -29,7 +29,7 @@ import { orgPlan } from "../plan.ts";
 import { DnsError, lookupTxt } from "./dns.ts";
 import { cloudflareProvider, type HostnameProvider, ProviderError } from "./provider.ts";
 
-/** A refusal with the status, the machine code and the one line that fixes it (ADR 0030). */
+/** A refusal with the status, the machine code and the one line that fixes it (ADR 0033). */
 export class DomainRefusal extends Error {
   readonly status: number;
   readonly code: string;
@@ -219,18 +219,27 @@ export async function add(
     );
   }
 
-  const existing = await findDomain(db, hostname);
-  if (!(existing?.orgId === orgId && existing.pipeName === name)) {
-    const plan = await orgPlan(db, config, orgId);
-    if (!plan) {
-      throw new DomainRefusal(
-        402,
-        "no_subscription",
-        "The org has no plan yet.",
-        `An owner starts a trial at ${config.auth.baseURL}.`,
-      );
-    }
-    if ((await countDomains(db, orgId)) >= plan.customDomains) {
+  const plan = await orgPlan(db, config, orgId);
+  if (!plan) {
+    throw new DomainRefusal(
+      402,
+      "no_subscription",
+      "The org has no plan yet.",
+      `An owner starts a trial at ${config.auth.baseURL}.`,
+    );
+  }
+
+  // The limit is checked as the row is written, so two adds at once cannot both pass it.
+  const added = await addDomain(db, {
+    orgId,
+    hostname,
+    pipeName: name,
+    challenge: randomChallenge(),
+    expiresAt: new Date(Date.now() + config.customDomains!.pendingSeconds * 1000),
+    limit: plan.customDomains,
+  });
+  if (!added.ok) {
+    if (added.reason === "domain_limit") {
       throw new DomainRefusal(
         plan.plan ? 402 : 403,
         "domain_limit",
@@ -242,16 +251,6 @@ export async function add(
           : "Remove a domain you no longer use.",
       );
     }
-  }
-
-  const added = await addDomain(db, {
-    orgId,
-    hostname,
-    pipeName: name,
-    challenge: randomChallenge(),
-    expiresAt: new Date(Date.now() + config.customDomains!.pendingSeconds * 1000),
-  });
-  if (!added.ok) {
     throw added.reason === "pipe_taken"
       ? new DomainRefusal(
           409,
@@ -268,21 +267,26 @@ export async function add(
   }
   if (!added.created) return added.domain;
 
+  const claim = added.domain;
+  let made;
   try {
-    const made = await provider.create(hostname);
-    return (
-      (await updateDomain(db, hostname, {
-        providerId: made.id,
-        providerStatus: made.status,
-        providerSslStatus: made.ssl,
-        checkedAt: new Date(),
-      })) ?? added.domain
-    );
+    made = await provider.create(hostname);
   } catch (error) {
-    // Nothing to keep: the org can retry without a half-made domain in the way.
-    await deleteDomain(db, hostname);
+    // Nothing to keep: the org can retry without a half-made domain, or a name, in the way.
+    await deleteDomain(db, claim);
+    if (added.nameClaimed) await releasePipeName(db, orgId, name);
     return unavailable(error);
   }
+  const updated = await updateDomain(db, claim, {
+    providerId: made.id,
+    providerStatus: made.status,
+    providerSslStatus: made.ssl,
+    checkedAt: new Date(),
+  });
+  if (updated) return updated;
+  // Removed while Cloudflare made it: the hostname made for it has no row to remove it later.
+  await provider.delete(made.id).catch(() => {});
+  return claim;
 }
 
 /**
@@ -323,15 +327,18 @@ export async function check(deps: DomainDeps, row: DomainRow, options: { nudge: 
       });
     }
 
-    // A domain that will not come back frees its Cloudflare hostname now.
-    if (facts.error === "expired" && providerId) {
+    // A domain that will not come back (expired, blocked, or refused a certificate) frees its
+    // Cloudflare hostname now: the daily job never looks at a failed one again.
+    if (facts.state === "failed" && providerId) {
       await provider.delete(providerId);
       providerId = null;
     }
 
     const becameActive = facts.state === "active";
     const lostActive = row.state === "active" && facts.state !== "active";
-    const updated = await updateDomain(db, row.hostname, {
+    // Written only to the claim this check started from: one removed meanwhile, or removed and
+    // added again by anyone, is not touched, and the result is dropped.
+    const updated = await updateDomain(db, row, {
       state: facts.state,
       errorCode: facts.error,
       errorDetail: facts.state === "failed" ? snapshot?.errors.join("; ") || null : null,
@@ -356,6 +363,10 @@ export async function check(deps: DomainDeps, row: DomainRow, options: { nudge: 
         error: updated.errorCode,
       });
     }
+    if (!updated && providerId && providerId !== row.providerId) {
+      // A hostname this check made for a claim that is gone: nothing else would remove it.
+      await provider.delete(providerId).catch(() => {});
+    }
     return updated ?? row;
   } catch (error) {
     return unavailable(error);
@@ -371,22 +382,25 @@ export async function remove(deps: DomainDeps, row: DomainRow) {
       unavailable(error);
     }
   }
-  await deleteDomain(deps.db, row.hostname);
+  await deleteDomain(deps.db, row);
 }
 
 /**
- * Takes an org's domains out of Cloudflare before its rows go with the org. Best effort: a
- * failure is logged and the org's deletion goes on, so no org is kept from leaving.
+ * Takes an org's domains out of Cloudflare before its rows go with the org. Each one released is
+ * marked so (`providerId` null), so a second attempt only retries the rest. Throws the refusal
+ * when Cloudflare does not answer: the org must not be deleted then, since nothing would find
+ * those hostnames again once the rows are gone.
  */
 export async function releaseOrgDomains(deps: DomainDeps, orgId: string) {
-  const log = createLogger({ component: "domains" });
   for (const row of await listDomains(deps.db, orgId)) {
     if (!row.providerId) continue;
     try {
       await deps.provider.delete(row.providerId);
     } catch (error) {
-      log.error("domain.release_failed", { error, orgId });
+      createLogger({ component: "domains" }).error("domain.release_failed", { error, orgId });
+      return unavailable(error);
     }
+    await updateDomain(deps.db, row, { providerId: null });
   }
 }
 
@@ -399,8 +413,10 @@ export async function refreshDomains(deps: DomainDeps, limit = 100) {
       await check(deps, row, { nudge: false });
       checked += 1;
     } catch (error) {
-      // One unreachable resolver or a Cloudflare error must not stop the rest.
+      // One unreachable resolver or a Cloudflare error must not stop the rest, nor keep its
+      // place at the front of the queue: it goes to the back like a domain that was checked.
       log.warn("domain.check_failed", { error, orgId: row.orgId });
+      await updateDomain(deps.db, row, { checkedAt: new Date() }).catch(() => {});
     }
   }
   log.info("domain.refreshed", { checked });

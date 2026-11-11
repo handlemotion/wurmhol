@@ -102,7 +102,7 @@ const githubSchema = z
 export type GithubConfig = NonNullable<z.output<typeof githubSchema>>;
 
 /**
- * Custom domains (ADR 0030): the `CNAME` target customers point at, the Cloudflare zone that
+ * Custom domains (ADR 0033): the `CNAME` target customers point at, the Cloudflare zone that
  * serves it, and the token that manages its custom hostnames. All of it or none of it: with no
  * `CUSTOM_DOMAIN_TARGET`, the feature is off and nothing talks to Cloudflare.
  */
@@ -238,7 +238,7 @@ const configSchema = z
     BUSINESS_INCLUDED_REQUESTS: positive(10_000_000),
     BUSINESS_CENTS_PER_MILLION: positive(150),
     /**
-     * Custom domains an org may have with billing off (ADR 0030). With billing on, each plan's
+     * Custom domains an org may have with billing off (ADR 0033). With billing on, each plan's
      * limit applies instead.
      */
     LIMIT_CUSTOM_DOMAINS: positive(10),
@@ -411,7 +411,7 @@ export function shareOrigin(config: Config, share: { id: string; name?: string |
   return originOnAppPort(config, `${share.name || share.id}.${config.SHARE_DOMAIN}`);
 }
 
-/** A custom domain's origin (ADR 0030), on the app's scheme and port like every other host. */
+/** A custom domain's origin (ADR 0033), on the app's scheme and port like every other host. */
 export function customDomainOrigin(config: Config, hostname: string) {
   return originOnAppPort(config, hostname);
 }
@@ -463,7 +463,7 @@ export function reservedPipeNames(config: Config) {
   );
 }
 
-/** Whether `hostname` is one this install already serves, so no org may attach it (ADR 0030). */
+/** Whether `hostname` is one this install already serves, so no org may attach it (ADR 0033). */
 export function isServedHost(config: Config, hostname: string) {
   const app = new URL(config.auth.baseURL).hostname;
   return (

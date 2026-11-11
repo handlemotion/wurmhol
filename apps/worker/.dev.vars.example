@@ -22,7 +22,7 @@ SHARE_DOMAIN=pipe.localhost
 # oauth.example-pipes.dev) the pipes' wildcard route and certificate already cover it, and no pipe
 # may take that label as its name. Empty: no relay.
 OAUTH_RELAY_HOST=
-# Optional (ADR 0030). Custom domains: the CNAME target an org points its own hostname at, like
+# Optional (ADR 0033). Custom domains: the CNAME target an org points its own hostname at, like
 # domains.example-pipes.dev, the Cloudflare zone that serves it (Cloudflare for SaaS enabled, a
 # fallback origin, and a `*/*` Worker route), and a secret API token with SSL and Certificates: Edit
 # on that zone. All three or none: empty turns the feature off. CLOUDFLARE_API_URL and

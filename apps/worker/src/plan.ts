@@ -11,7 +11,7 @@ export interface OrgPlan {
   plan: PlanName | null;
   members: number | null;
   limits: UsageLimits & { active: number };
-  /** Custom domains the org may have (ADR 0030). */
+  /** Custom domains the org may have (ADR 0033). */
   customDomains: number;
 }
 

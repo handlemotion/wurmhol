@@ -1,4 +1,4 @@
-// Custom domains (ADR 0030): adding a hostname to a pipe name, the two proofs it needs before it is
+// Custom domains (ADR 0033): adding a hostname to a pipe name, the two proofs it needs before it is
 // routed, and what moves it back out. The Worker runs for real (workerd, D1, the real routes); the
 // two services it calls out to are local HTTP servers speaking their real wire shapes: Cloudflare's
 // custom hostnames API and a DNS-over-HTTPS JSON resolver, because no test may create real
@@ -30,12 +30,19 @@ interface Hostname {
 async function fakeCloudflare() {
   const hostnames = new Map<string, Hostname>();
   const calls: string[] = [];
+  let down = false;
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
     const send = (status: number, body: unknown) => {
       res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
     };
+    if (down) {
+      return send(503, {
+        success: false,
+        errors: [{ code: 10001, message: "Service unavailable" }],
+      });
+    }
     if (req.headers.authorization !== `Bearer ${TOKEN}`) {
       return send(401, {
         success: false,
@@ -98,6 +105,8 @@ async function fakeCloudflare() {
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`,
     has: (hostname: string) => hostnames.has(hostname),
     calls,
+    /** Cloudflare's API answering 503 to everything, or back. */
+    setDown: (value: boolean) => (down = value),
     /** What the customer's DNS and Cloudflare's validation would do. */
     set(hostname: string, state: Partial<Pick<Hostname, "status" | "sslStatus">>) {
       Object.assign(hostnames.get(hostname)!, state);
@@ -109,13 +118,16 @@ async function fakeCloudflare() {
 /** A DNS-over-HTTPS JSON resolver that answers from a table. */
 async function fakeResolver() {
   const records = new Map<string, string[]>();
+  const failing = new Set<string>();
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
-    const values = records.get(url.searchParams.get("name") ?? "");
+    const name = url.searchParams.get("name") ?? "";
+    const values = records.get(name);
     res.writeHead(200, { "content-type": "application/dns-json" });
     res.end(
       JSON.stringify({
-        Status: values ? 0 : 3,
+        // SERVFAIL for a name set to fail: the resolver's trouble, not an answer.
+        Status: failing.has(name) ? 2 : values ? 0 : 3,
         Answer: (values ?? []).map((v) => ({ type: 16, data: `"${v}"` })),
       }),
     );
@@ -125,6 +137,7 @@ async function fakeResolver() {
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/dns-query`,
     publish: (name: string, value: string) => records.set(name, [value]),
     unpublish: (name: string) => records.delete(name),
+    fail: (name: string) => failing.add(name),
     close: () => stop(server),
   };
 }
@@ -326,4 +339,103 @@ it("is off unless configured: every call says so, and nothing else changes", asy
   } finally {
     await plain.stop();
   }
+});
+
+it("frees the Cloudflare hostname of a domain Cloudflare refuses", async () => {
+  const carl = await signIn(stack);
+  const hostname = "blocked.carl.test";
+  const added = (await add(carl, hostname, "carl-app")).body.domain!;
+  resolver.publish(`_wurmhol.${hostname}`, added.dns[0]!.value);
+  cloudflare.set(hostname, { status: "blocked" });
+  const failed = await verify(carl, hostname);
+  expect(failed.body.domain).toMatchObject({
+    state: "failed",
+    error: { code: "hostname_blocked" },
+  });
+  // Catches: a failed domain that is never checked again keeping a billed hostname for good.
+  expect(cloudflare.has(hostname)).toBe(false);
+});
+
+it("holds the limit when adds arrive together, and a refused add keeps no pipe name", async () => {
+  const dana = await signIn(stack);
+  const hosts = ["a", "b", "c", "d", "e", "f"].map((label) => `${label}.dana.test`);
+  const answers = await Promise.all(hosts.map((host) => add(dana, host, "dana-app")));
+  // Catches: concurrent adds that all read the count below the limit and all get a domain. Adds
+  // that overlap may all back out, so fewer than three can pass; never more.
+  const passed = answers.filter((answer) => answer.status === 201).length;
+  expect(passed).toBeLessThanOrEqual(3);
+  expect(answers.every((a) => a.status === 201 || a.body.code === "domain_limit")).toBe(true);
+  const count = async () =>
+    (await api<{ domains: Domain[] }>(stack, dana, "/api/domains")).body.domains.length;
+  expect(await count()).toBe(passed);
+  // The ones that backed out left nothing at Cloudflare.
+  expect(hosts.filter((host) => cloudflare.has(host))).toHaveLength(passed);
+  for (const host of hosts.slice(0, 3 - passed).map((h) => `again-${h}`)) {
+    expect((await add(dana, host, "dana-app")).status).toBe(201);
+  }
+  expect(await count()).toBe(3);
+
+  // Catches: a refused add that still reserved a fresh pipe name for the org, for good.
+  expect((await add(dana, "g.dana.test", "dana-spare")).body.code).toBe("domain_limit");
+  expect((await add(dana, "preview.acme-one.test", "dana-other")).body.code).toBe("hostname_taken");
+  const erin = await signIn(stack);
+  expect((await add(erin, "spare.erin.test", "dana-spare")).status).toBe(201);
+  expect((await add(erin, "other.erin.test", "dana-other")).status).toBe(201);
+});
+
+it("moves a domain whose check fails to the back of the daily job's queue", async () => {
+  const fay = await signIn(stack);
+  const hostname = "servfail.fay.test";
+  await add(fay, hostname, "fay-app");
+  resolver.fail(`_wurmhol.${hostname}`);
+  const checkedAt = () => {
+    const db = stack.db();
+    try {
+      return (
+        db
+          .prepare("select checked_at as at from custom_domains where hostname = ?")
+          .get(hostname) as {
+          at: number;
+        }
+      ).at;
+    } finally {
+      db.close();
+    }
+  };
+  const before = checkedAt();
+  expect((await browserFetch(`${stack.url}/cdn-cgi/local/scheduled`)).ok).toBe(true);
+  // Catches: a domain whose DNS keeps failing staying the oldest checked, so the daily job's batch
+  // fills with the same failures and never reaches the rest.
+  expect(checkedAt()).toBeGreaterThan(before);
+});
+
+it("deleting an org takes its domains out of Cloudflare, and waits while Cloudflare is down", async () => {
+  const gus = await signIn(stack);
+  const hal = await signIn(stack);
+  const gusOrg = (await api<{ activeOrgId: string }>(stack, gus, "/api/me")).body.activeOrgId;
+  // Gus joins Hal's org, so his own is not his only one, then goes back to his own.
+  const invite = await api<{ url: string }>(stack, hal, "/api/invites", { method: "POST" });
+  const code = invite.body.url.split("/join/")[1]!;
+  expect((await api(stack, gus, `/api/invites/${code}/accept`, { method: "POST" })).status).toBe(
+    200,
+  );
+  await api(stack, gus, "/api/auth/organization/set-active", {
+    method: "POST",
+    body: { organizationId: gusOrg },
+  });
+  const hostname = "brand.gus.test";
+  expect((await add(gus, hostname, "gus-app")).status).toBe(201);
+
+  cloudflare.setDown(true);
+  try {
+    const refused = await api(stack, gus, "/api/org", { method: "DELETE" });
+    // Catches: the org's rows going while Cloudflare keeps its billed hostnames, with nothing
+    // left to find them by.
+    expect(refused.status).toBe(502);
+    expect(cloudflare.has(hostname)).toBe(true);
+  } finally {
+    cloudflare.setDown(false);
+  }
+  expect((await api(stack, gus, "/api/org", { method: "DELETE" })).status).toBe(200);
+  expect(cloudflare.has(hostname)).toBe(false);
 });

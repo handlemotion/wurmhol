@@ -1,4 +1,4 @@
-// Custom domains (ADR 0030): a hostname an org owns, attached to one of its pipe names. The CLI,
+// Custom domains (ADR 0033): a hostname an org owns, attached to one of its pipe names. The CLI,
 // the SDK and the Worker check hostnames with this, so a hostname one accepts is one the others
 // route.
 
@@ -14,7 +14,7 @@ export function customHostname(value: string): string | null {
   if (labels.length < 2 || !labels.every((label) => LABEL.test(label))) return null;
   // An all-numeric last label is an IP address (or a typo for one), never a registrable name.
   if (/^\d+$/.test(labels.at(-1)!)) return null;
-  // Underscore and wildcard forms are not served; wildcards are a different feature (ADR 0030).
+  // Underscore and wildcard forms are not served; wildcards are a different feature (ADR 0033).
   return host;
 }
 
@@ -22,7 +22,7 @@ export function customHostname(value: string): string | null {
 export const CUSTOM_HOSTNAME_RULE =
   "a full domain name like preview.example.com, without a scheme, path or wildcard";
 
-/** The states a domain moves through (ADR 0030). Only `active` is routed. */
+/** The states a domain moves through (ADR 0033). Only `active` is routed. */
 export const DOMAIN_STATES = ["pending", "verifying", "active", "failed"] as const;
 export type DomainState = (typeof DOMAIN_STATES)[number];
 
@@ -36,7 +36,7 @@ export interface DomainRecord {
   done: boolean;
 }
 
-/** Why a domain is `failed` (ADR 0030). */
+/** Why a domain is `failed` (ADR 0033). */
 export const DOMAIN_ERROR_CODES = ["expired", "certificate_refused", "hostname_blocked"] as const;
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];
 
@@ -47,7 +47,7 @@ export interface DomainError {
   fix: string;
 }
 
-/** A custom domain as `/v1/domains` returns it (ADR 0030). Dates are ISO 8601. */
+/** A custom domain as `/v1/domains` returns it (ADR 0033). Dates are ISO 8601. */
 export interface Domain {
   hostname: string;
   pipe: string;
@@ -71,7 +71,7 @@ export function ownershipRecordValue(challenge: string) {
   return `wurmhol-verify=${challenge}`;
 }
 
-/** What Cloudflare reports about a custom hostname and its certificate (ADR 0030). */
+/** What Cloudflare reports about a custom hostname and its certificate (ADR 0033). */
 export interface HostnameSnapshot {
   /** The hostname's own status: `moved` is a `CNAME` that no longer points at the target. */
   status: "pending" | "active" | "moved" | "deleted" | "blocked";
@@ -79,7 +79,7 @@ export interface HostnameSnapshot {
   ssl: "pending" | "active" | "failed";
 }
 
-/** What a domain's state follows from (ADR 0030). */
+/** What a domain's state follows from (ADR 0033). */
 export interface DomainFacts {
   /** The TXT record was seen now or at any earlier check: ownership, once proven, stays proven. */
   ownership: boolean;
@@ -92,7 +92,7 @@ export interface DomainFacts {
 /**
  * Where a domain stands. Only `active` is routed, and only with both proofs: our TXT record and
  * Cloudflare's active hostname and certificate. A `CNAME` left behind without the TXT record never
- * gets past `pending`, which is what stops a takeover of a name its owner abandoned (ADR 0030).
+ * gets past `pending`, which is what stops a takeover of a name its owner abandoned (ADR 0033).
  * `recreate` asks for the Cloudflare hostname to be made again: it was never made or is gone.
  */
 export function nextDomainState(facts: DomainFacts): {

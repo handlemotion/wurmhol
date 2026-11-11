@@ -1,5 +1,5 @@
 // `/v1/domains` on the CLI's host (org-scope token) and `/api/domains` in the console (any member):
-// custom domains for branded pipe URLs (ADR 0030). The same handlers answer both; they differ only
+// custom domains for branded pipe URLs (ADR 0033). The same handlers answer both; they differ only
 // in who the caller is and which org they act for.
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
@@ -93,7 +93,7 @@ const endpoints = new Hono<DomainsEnv>()
   })
   .delete("/:hostname", async (c) => {
     try {
-      // Removing one that is already gone is fine (ADR 0030: calls are idempotent).
+      // Removing one that is already gone is fine (ADR 0033: calls are idempotent).
       const row = await get(c.var.domains, c.var.orgId, c.req.param("hostname")).catch((error) => {
         if (error instanceof DomainRefusal && error.code === "not_found") return null;
         throw error;

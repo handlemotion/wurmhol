@@ -1,4 +1,4 @@
-// Reads a TXT record over DNS-over-HTTPS (ADR 0030): the proof that an org owns a hostname. The
+// Reads a TXT record over DNS-over-HTTPS (ADR 0033): the proof that an org owns a hostname. The
 // Worker has no resolver of its own, and DoH is a plain fetch.
 
 /** The resolver failed or did not answer: the caller may try again; it says nothing about the record. */
