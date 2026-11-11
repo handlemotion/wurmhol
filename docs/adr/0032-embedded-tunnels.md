@@ -293,8 +293,10 @@ Where the shipped code differs from the design above, or settled what it left op
   subject at once.
 - **The console page for applications is not built.** Owners manage applications and keys
   through `/api/apps`; the page that shows tunnels' health with Stop and Delete is still to do.
-- **Grant rows and the grant log are not pruned** by the daily retention job yet; launch codes
-  are. Their retention, and the hosted privacy policy's list, need a decision.
+- **Retention.** The daily job deletes a grant `RETENTION_DAYS` (90) after it expired or was
+  revoked, grant log entries that long after they were written, and launch codes once expired,
+  as for pipe history. Tenants and subjects stay until the org is deleted: removing a subject
+  disables it. The hosted privacy policy lists both.
 
 ## Consequences
 

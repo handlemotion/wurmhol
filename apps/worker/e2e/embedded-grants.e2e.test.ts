@@ -362,3 +362,39 @@ describe("issuing", () => {
     });
   });
 });
+
+describe("retention", () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  /** Runs the Worker's daily cron as if it fired at `at` (Miniflare's trigger endpoint). */
+  async function runRetention(at: number) {
+    const response = await fetch(`${stack.url}/cdn-cgi/local/scheduled?cron=17+3+*+*+*&time=${at}`);
+    expect(response.status).toBe(200);
+  }
+
+  function count(sql: string, ...params: string[]) {
+    const db = stack.db();
+    try {
+      return (db.prepare(sql).get(...params) as { n: number }).n;
+    } finally {
+      db.close();
+    }
+  }
+
+  // Catches: who was let into which tunnel kept forever, past the history it explains.
+  it("deletes grants and their log 90 days after they ended, like pipe history", async () => {
+    const issued = await grant(alice.id, "alice", "client");
+    await embed(`/grants/${issued.id}`, { method: "DELETE" });
+    const left = () => ({
+      grants: count("select count(*) as n from embed_grants where id = ?", issued.id),
+      events: count("select count(*) as n from embed_grant_events where grant_id = ?", issued.id),
+    });
+    expect(left()).toEqual({ grants: 1, events: 2 });
+    await runRetention(Date.now() + 89 * DAY_MS);
+    expect(left()).toEqual({ grants: 1, events: 2 });
+    await runRetention(Date.now() + 91 * DAY_MS);
+    expect(left()).toEqual({ grants: 0, events: 0 });
+    // The tunnel and its subjects stay: they belong to the application, not to a grant.
+    expect(count("select count(*) as n from embed_tunnels where id = ?", alice.id)).toBe(1);
+  });
+});
