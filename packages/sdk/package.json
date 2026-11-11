@@ -1,6 +1,6 @@
 {
   "name": "@wurmhol/sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Embed Wurmhol pipes in your own app: open and keep open private HTTPS URLs for a local server, sign in with the device flow, and manage the org's pipes. Runs on Node and Bun, including a compiled Bun binary",
   "homepage": "https://wurmhol.com",
   "license": "MIT",
@@ -48,7 +48,7 @@
   "dependencies": {
     "https-proxy-agent": "^9.1.0",
     "proxy-from-env": "^2.1.0",
-    "ws": "^8.22.1"
+    "ws": "^8.22.2"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
