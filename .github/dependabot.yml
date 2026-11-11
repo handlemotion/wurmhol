@@ -12,35 +12,20 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: npm
+    # One entry for the whole pnpm workspace: an entry per package cannot update the shared
+    # pnpm-lock.yaml, so its pull requests fail `pnpm install --frozen-lockfile`.
     directory: "/"
-    exclude-paths: ["apps/site/package.json"]
     schedule:
       interval: weekly
     # Matches minimumReleaseAge (1 day) in pnpm-workspace.yaml, so pnpm can install what we propose.
     cooldown:
       default-days: 1
     open-pull-requests-limit: 5
-    groups:
-      npm-security:
-        applies-to: security-updates
-        patterns: ["*"]
-      npm-production:
-        dependency-type: production
-        update-types: [minor, patch]
-      npm-development:
-        dependency-type: development
-        update-types: [minor, patch]
-
-  - package-ecosystem: npm
-    directory: "/apps/site"
-    schedule:
-      interval: weekly
-    cooldown:
-      default-days: 1
-    open-pull-requests-limit: 5
+    # apps/site stays on TypeScript 6 for Astro's checker while the rest of the workspace runs 7;
+    # TypeScript majors are upgraded by hand.
     ignore:
       - dependency-name: typescript
-        versions: [">=7.0.0"]
+        update-types: ["version-update:semver-major"]
     groups:
       npm-security:
         applies-to: security-updates
