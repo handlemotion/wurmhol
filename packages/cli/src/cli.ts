@@ -12,7 +12,7 @@
 //                                 (--install runs it at login, --uninstall removes that)
 //   wurmhol doctor [--port N]     check the token, proxy, allowlist and port a pipe needs
 //   wurmhol mcp                   a stdio MCP server with the same tools, for agents
-//   wurmhol domain add|ls|verify|rm   your own hostname on a pipe name (ADR 0030)
+//   wurmhol domain add|ls|verify|rm   your own hostname on a pipe name (ADR 0033)
 import { homedir, hostname } from "node:os";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -438,7 +438,7 @@ function formatDomain(domain: Domain) {
 }
 
 /**
- * `wurmhol domain add|verify|ls|rm` (ADR 0030): a hostname you own on one of your pipe names, so
+ * `wurmhol domain add|verify|ls|rm` (ADR 0033): a hostname you own on one of your pipe names, so
  * the pipe's URL is yours. Needs a token of scope `org`.
  */
 async function domain(

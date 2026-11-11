@@ -1,11 +1,14 @@
-// `wurmhol domain` and the SDK's `domains()` client (ADR 0030): the same API as the console, from
+// `wurmhol domain` and the SDK's `domains()` client (ADR 0033): the same API as the console, from
 // the shell, with the token an orchestrator holds.
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { DomainError, domains } from "wurmhol";
 import { fakeCloudflare, fakeResolver, TOKEN, ZONE } from "./domain-fakes.ts";
 import {
   cli,
   cliEnv,
   createToken,
+  localServer,
+  shareStates,
   type Person,
   signIn,
   type Stack,
@@ -65,6 +68,22 @@ it("adds a domain, waits until its records are published, lists it and removes i
   expect(verified.code).toBe(0);
   expect((JSON.parse(verified.stdout) as Domain).state).toBe("active");
 
+  // A pipe opened with the name now has the domain as its URL, and is still found by its name.
+  const local = await localServer((_req, res) => res.end("ok"));
+  try {
+    const opened = await cli([String(local.port), "--name", "acme-cli", "--json"], pipesOnly);
+    expect(opened.code).toBe(0);
+    expect((JSON.parse(opened.stdout) as { url: string }).url).toBe(
+      `http://preview.acme-cli.test:${stack.port}`,
+    );
+    // Catches: `stop <name>` matching the first label of the URL (`preview`) instead of the name.
+    expect((await cli(["stop", "preview"], pipesOnly)).code).toBe(1);
+    expect((await cli(["stop", "acme-cli"], pipesOnly)).code).toBe(0);
+    expect(shareStates(pipesOnly)).toHaveLength(0);
+  } finally {
+    await local.close();
+  }
+
   const listed = await cli(["domain", "ls", "--json"], org);
   expect(
     (JSON.parse(listed.stdout) as { domains: Domain[] }).domains.map((d) => d.hostname),
@@ -88,4 +107,32 @@ it("tells a person which record is missing when time runs out", async () => {
   expect(once.code).toBe(0);
   expect(once.stdout).toContain("publish  TXT   _wurmhol.slow.acme-cli.test");
   expect(once.stdout).toContain("publish  CNAME slow.acme-cli.test");
+});
+
+it("the SDK's waitActive keeps to its timeout and its signal", async () => {
+  const client = domains({ token: org.WURMHOL_TOKEN!, server: stack.url });
+  await client.add({ hostname: "patient.acme-cli.test", pipe: "acme-cli" });
+
+  // Catches: a timeout shorter than the interval giving up after the first look, at once.
+  const started = Date.now();
+  const late = await client
+    .waitActive("patient.acme-cli.test", { timeoutMs: 1500, intervalMs: 10_000 })
+    .catch((error: unknown) => error);
+  expect(late).toBeInstanceOf(DomainError);
+  expect(Date.now() - started).toBeGreaterThanOrEqual(1500);
+  expect(Date.now() - started).toBeLessThan(10_000);
+
+  // Catches: an aborted wait that still looks, and can report success after its caller gave up.
+  const reason = new Error("stopped by the caller");
+  const aborted = new AbortController();
+  aborted.abort(reason);
+  resolver.publish(
+    "_wurmhol.patient.acme-cli.test",
+    (await client.get("patient.acme-cli.test")).dns[0]!.value,
+  );
+  cloudflare.set("patient.acme-cli.test", { status: "active", sslStatus: "active" });
+  await expect(client.waitActive("patient.acme-cli.test", { signal: aborted.signal })).rejects.toBe(
+    reason,
+  );
+  expect((await client.get("patient.acme-cli.test")).state).toBe("pending");
 });
