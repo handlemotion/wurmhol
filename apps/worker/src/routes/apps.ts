@@ -22,6 +22,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { type AppEnv, requireOwner } from "../context.ts";
 import { endTunnelSessions } from "../ending.ts";
+import { orgStub } from "../org-do.ts";
 import { orgPlan } from "../plan.ts";
 import { limitPerMember } from "../rate-limiter.ts";
 
@@ -156,6 +157,13 @@ export const apps = new Hono<AppEnv>()
     }
     const app = await updateEmbedApp(c.var.db, c.var.member.orgId, current.id, change);
     if (!app) throw new HTTPException(404, { message: "no such application" });
+    // New limits apply at once, to open tunnels too (ADR 0032).
+    await orgStub(c.env, c.var.member.orgId).setAppLimits(app.id, {
+      monthlyRequests: app.monthlyRequests,
+      activeTunnels: app.activeTunnels,
+      tenantMonthlyRequests: app.tenantMonthlyRequests,
+      tenantActiveTunnels: app.tenantActiveTunnels,
+    });
     return c.json({ app });
   })
   /** Deletes the application, revokes its keys, and ends and deletes its tunnels. */

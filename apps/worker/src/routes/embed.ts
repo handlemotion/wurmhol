@@ -46,6 +46,7 @@ import { refuse } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
 import { endShare, endTunnelSessions, pushGrantRevocations } from "../ending.ts";
 import { shareOrigin } from "../env.ts";
+import { orgStub } from "../org-do.ts";
 import { orgPlan } from "../plan.ts";
 import { checkRateLimit } from "../rate-limiter.ts";
 import { shareStub } from "../share-do.ts";
@@ -181,7 +182,11 @@ async function revokeGrants(
   return revoked;
 }
 
-const tenantBody = z.object({ disabled: z.boolean().optional() }).default({});
+const limit = z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().optional();
+/** A tenant's own limits override its application's defaults; null clears one. */
+const tenantBody = z
+  .object({ disabled: z.boolean().optional(), monthlyRequests: limit, activeTunnels: limit })
+  .default({});
 const subjectBody = z.object({ kind: z.enum(SUBJECT_KINDS), disabled: z.boolean().optional() });
 const tunnelBody = z.object({
   tenant: externalId,
@@ -222,20 +227,32 @@ export const embed = new Hono<EmbedEnv>()
     const id = c.req.param("tenant");
     if (!EXTERNAL_ID.test(id))
       return refuse(400, "bad tenant id", "Use 1 to 200 printable characters.");
-    const { disabled } = c.req.valid("json");
-    const tenant = await putEmbedTenant(c.var.db, c.var.key, id, disabled);
+    const change = c.req.valid("json");
+    const { disabled } = change;
+    const tenant = await putEmbedTenant(c.var.db, c.var.key, id, change);
+    await orgStub(c.env, c.var.key.orgId).setTenantLimits(tenant.id, {
+      monthlyRequests: tenant.monthlyRequests,
+      activeTunnels: tenant.activeTunnels,
+    });
     if (disabled) {
       const tunnelIds = await embedTunnelIdsOf(c.var.db, c.var.key, { tenantId: tenant.id });
       await revokeEmbedGrants(c.var.db, c.var.key.orgId, { tunnelIds }, c.var.key.keyId);
       await endTunnelSessions(c, tunnelIds, "revoked", "embed stop");
     }
-    return c.json({ tenant: { id: tenant.externalId, disabled: tenant.disabledAt !== null } });
+    return c.json({
+      tenant: {
+        id: tenant.externalId,
+        disabled: tenant.disabledAt !== null,
+        monthlyRequests: tenant.monthlyRequests,
+        activeTunnels: tenant.activeTunnels,
+      },
+    });
   })
   /** Disables a tenant and deletes its tunnels. */
   .delete("/tenants/:tenant", can("subjects:manage"), async (c) => {
     const tenant = await tenantOf(c, c.req.param("tenant"));
     if (!tenant) return notFound("tenant");
-    await putEmbedTenant(c.var.db, c.var.key, tenant.externalId, true);
+    await putEmbedTenant(c.var.db, c.var.key, tenant.externalId, { disabled: true });
     await deleteTunnels(c, await embedTunnelIdsOf(c.var.db, c.var.key, { tenantId: tenant.id }));
     return c.json({ ok: true });
   })
@@ -518,6 +535,30 @@ export const embed = new Hono<EmbedEnv>()
     if (!subject) return notFound("subject");
     const revoked = await revokeGrants(c, { subjectId: subject.id });
     return c.json({ revoked: revoked.length });
+  })
+  /**
+   * The application's usage this window (requests, bytes, open tunnels) and each named tenant's,
+   * with the limits in effect. `tenant` may repeat. Counts only, never anything from a tunnel.
+   */
+  .get("/usage", can("tunnels:read"), async (c) => {
+    const named = c.req.queries("tenant") ?? [];
+    if (named.length > 100) return refuse(400, "too many tenants", "Ask for at most 100.");
+    const tenants = [];
+    for (const id of named) {
+      const tenant = await tenantOf(c, id);
+      if (tenant) tenants.push(tenant);
+    }
+    const usage = await orgStub(c.env, c.var.key.orgId).embedUsage(
+      c.var.key.appId,
+      tenants.map((tenant) => tenant.id),
+    );
+    return c.json({
+      window: usage.month,
+      app: usage.app,
+      tenants: Object.fromEntries(
+        tenants.map((tenant) => [tenant.externalId, usage.tenants[tenant.id]]),
+      ),
+    });
   })
   /** The tunnel's grant log: each grant issued or revoked, for whom, by which key. */
   .get("/tunnels/:id/grants", can("tunnels:read"), async (c) => {

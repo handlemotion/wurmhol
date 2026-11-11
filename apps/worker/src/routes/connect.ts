@@ -37,6 +37,7 @@ import {
 import {
   findMembersByEmail,
   findShare,
+  embedLimitsOf,
   isOrgBlocked,
   recordShareEnd,
   recordShareStart,
@@ -437,12 +438,38 @@ async function connectEmbedded(c: ConnectContext, presented: string) {
     },
   };
   const org = orgStub(c.env, orgId);
+  const set = await embedLimitsOf(db, embed.appId, embed.tenantId);
   const reservation = await org.reserveEmbedded(
     { id: init.id, appId: embed.appId, tenantId: embed.tenantId, tunnelId: embed.tunnelId },
     { ...plan.limits, active: config.LIMIT_EMBED_ACTIVE },
+    {
+      monthlyRequests: set?.appMonthlyRequests ?? null,
+      activeTunnels: set?.appActiveTunnels ?? null,
+      tenantMonthlyRequests: set?.tenantMonthlyRequests ?? null,
+      tenantActiveTunnels: set?.tenantActiveTunnels ?? null,
+    },
+    {
+      monthlyRequests: set?.ownMonthlyRequests ?? null,
+      activeTunnels: set?.ownActiveTunnels ?? null,
+    },
   );
   if (!reservation.ok) {
     await recordShareEnd(db, { id: init.id, reason: "limit", bytes: 0 });
+    // An application's or tenant's own limit: the app's to raise, not the org's plan.
+    if (reservation.scope === "app" || reservation.scope === "tenant") {
+      const whose = reservation.scope === "app" ? "The app" : "This account";
+      return reservation.reason === "active_limit"
+        ? refuse(
+            429,
+            "active pipe limit",
+            `${whose} already has ${reservation.limit} tunnels open. Close one, or ask the app to raise its limit.`,
+          )
+        : refuse(
+            429,
+            "monthly request limit",
+            `${whose} has used this month's requests. Ask the app to raise its limit.`,
+          );
+    }
     return reservationRefusal(
       reservation,
       plan,
