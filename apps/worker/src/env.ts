@@ -19,6 +19,7 @@ declare global {
       GITHUB_APP_CLIENT_SECRET?: string;
       GITHUB_APP_WEBHOOK_SECRET?: string;
       OPERATOR_TOKEN?: string;
+      CLOUDFLARE_API_TOKEN?: string;
     }
   }
 }
@@ -99,6 +100,57 @@ const githubSchema = z
   );
 
 export type GithubConfig = NonNullable<z.output<typeof githubSchema>>;
+
+/**
+ * Custom domains (ADR 0033): the `CNAME` target customers point at, the Cloudflare zone that
+ * serves it, and the token that manages its custom hostnames. All of it or none of it: with no
+ * `CUSTOM_DOMAIN_TARGET`, the feature is off and nothing talks to Cloudflare.
+ */
+const customDomainsSchema = z
+  .object({
+    CUSTOM_DOMAIN_TARGET: optionalHost("domains.example-pipes.dev"),
+    CLOUDFLARE_ZONE_ID: optional.pipe(
+      z
+        .string()
+        .regex(/^[a-f0-9]{32}$/, "use the zone's 32-character id")
+        .optional(),
+    ),
+    CLOUDFLARE_API_TOKEN: optional,
+    /** Cloudflare's API origin, for a proxy or the e2e suites. */
+    CLOUDFLARE_API_URL: optional.pipe(z.url().optional()),
+    /** A DNS-over-HTTPS JSON endpoint, which the TXT proof is read from. */
+    DNS_RESOLVER_URL: optional.pipe(z.url().optional()),
+    /** How long a domain may stay short of active, in seconds. Seven days by default. */
+    CUSTOM_DOMAIN_PENDING_SECONDS: positive(7 * 24 * 3600),
+  })
+  .superRefine((vars, ctx) => {
+    if (!vars.CUSTOM_DOMAIN_TARGET) return;
+    for (const name of ["CLOUDFLARE_ZONE_ID", "CLOUDFLARE_API_TOKEN"] as const) {
+      if (!vars[name])
+        ctx.addIssue({
+          code: "custom",
+          path: [name],
+          message: "required with CUSTOM_DOMAIN_TARGET",
+        });
+    }
+  })
+  .transform((vars) =>
+    vars.CUSTOM_DOMAIN_TARGET
+      ? {
+          target: vars.CUSTOM_DOMAIN_TARGET,
+          zoneId: vars.CLOUDFLARE_ZONE_ID!,
+          apiToken: vars.CLOUDFLARE_API_TOKEN!,
+          apiUrl: (vars.CLOUDFLARE_API_URL ?? "https://api.cloudflare.com/client/v4").replace(
+            /\/$/,
+            "",
+          ),
+          resolverUrl: vars.DNS_RESOLVER_URL ?? "https://cloudflare-dns.com/dns-query",
+          pendingSeconds: vars.CUSTOM_DOMAIN_PENDING_SECONDS,
+        }
+      : undefined,
+  );
+
+export type CustomDomainsConfig = NonNullable<z.output<typeof customDomainsSchema>>;
 
 export type RateLimit = { count: number; windowSeconds: number } | null;
 
@@ -185,6 +237,11 @@ const configSchema = z
     BUSINESS_BASE_CENTS: positive(2000),
     BUSINESS_INCLUDED_REQUESTS: positive(10_000_000),
     BUSINESS_CENTS_PER_MILLION: positive(150),
+    /**
+     * Custom domains an org may have with billing off (ADR 0033). With billing on, each plan's
+     * limit applies instead.
+     */
+    LIMIT_CUSTOM_DOMAINS: positive(10),
     /** Longest a share stays open, in seconds; the CLI's `--ttl` may ask up to this. 12 hours. */
     LIMIT_SHARE_SECONDS: positive(12 * 3600),
     /** Days the daily retention job keeps a pipe's history (`shares` rows). 90 by default. */
@@ -247,7 +304,7 @@ const configSchema = z
       .pipe(z.enum(["true", "false"], 'use "true" or "false"'))
       .transform((value) => value === "true"),
   })
-  .and(z.object({ auth: authEnvSchema, github: githubSchema }))
+  .and(z.object({ auth: authEnvSchema, github: githubSchema, customDomains: customDomainsSchema }))
   .superRefine((config, ctx) => {
     const app = new URL(config.auth.baseURL).hostname;
     if (app === config.SHARE_DOMAIN || app.endsWith(`.${config.SHARE_DOMAIN}`)) {
@@ -256,6 +313,31 @@ const configSchema = z
         path: ["SHARE_DOMAIN"],
         message: "must not contain the app's host: shares and the app are separate sites",
       });
+    }
+    const target = config.customDomains?.target;
+    if (target) {
+      if (target === app || target === config.CONNECT_HOST || target === config.OAUTH_RELAY_HOST) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["CUSTOM_DOMAIN_TARGET"],
+          message: "must be a host of its own, not the app's, the CLI's or the relay's",
+        });
+      }
+      if (config.APP_ALIASES.includes(target)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["CUSTOM_DOMAIN_TARGET"],
+          message: "must not be an alias of the app",
+        });
+      }
+      const label = labelUnder(target, config.SHARE_DOMAIN);
+      if (label !== null && (label.includes(".") || SHARE_ID.test(label))) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["CUSTOM_DOMAIN_TARGET"],
+          message: `under SHARE_DOMAIN, use one label that is not 10 letters and digits, like domains.${config.SHARE_DOMAIN}`,
+        });
+      }
     }
     const relay = config.OAUTH_RELAY_HOST;
     if (relay) {
@@ -304,7 +386,12 @@ const cache = new WeakMap<object, Config>();
 export function loadConfig(env: Env): Config {
   let config = cache.get(env);
   if (!config) {
-    const parsed = configSchema.safeParse({ ...env, auth: env, github: env });
+    const parsed = configSchema.safeParse({
+      ...env,
+      auth: env,
+      github: env,
+      customDomains: env,
+    });
     if (!parsed.success) {
       // Names only: values may be secrets.
       const problems = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
@@ -322,6 +409,11 @@ export function loadConfig(env: Env): Config {
  */
 export function shareOrigin(config: Config, share: { id: string; name?: string | null }) {
   return originOnAppPort(config, `${share.name || share.id}.${config.SHARE_DOMAIN}`);
+}
+
+/** A custom domain's origin (ADR 0033), on the app's scheme and port like every other host. */
+export function customDomainOrigin(config: Config, hostname: string) {
+  return originOnAppPort(config, hostname);
 }
 
 /** `hostname`'s origin on the app's scheme and port (BETTER_AUTH_URL). */
@@ -361,6 +453,28 @@ export function relayOrigin(config: Config) {
 export function reservedPipeName(config: Config) {
   const relay = config.OAUTH_RELAY_HOST;
   return relay ? labelUnder(relay, config.SHARE_DOMAIN) : null;
+}
+
+/** Every pipe name SHARE_DOMAIN's own hosts take: the relay's and the custom domains' target. */
+export function reservedPipeNames(config: Config) {
+  const target = config.customDomains?.target;
+  return [reservedPipeName(config), target ? labelUnder(target, config.SHARE_DOMAIN) : null].filter(
+    (name): name is string => name !== null,
+  );
+}
+
+/** Whether `hostname` is one this install already serves, so no org may attach it (ADR 0033). */
+export function isServedHost(config: Config, hostname: string) {
+  const app = new URL(config.auth.baseURL).hostname;
+  return (
+    hostname === app ||
+    hostname === config.CONNECT_HOST ||
+    hostname === config.OAUTH_RELAY_HOST ||
+    hostname === config.customDomains?.target ||
+    config.APP_ALIASES.includes(hostname) ||
+    hostname === config.SHARE_DOMAIN ||
+    hostname.endsWith(`.${config.SHARE_DOMAIN}`)
+  );
 }
 
 /** What a request's host is for (ADR 0006). */

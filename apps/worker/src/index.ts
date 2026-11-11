@@ -5,6 +5,7 @@ import { hostRole, loadConfig } from "./env.ts";
 import { createLogger } from "./log.ts";
 import { handleRelay } from "./oauth-relay.ts";
 import { handleEmbeddedHost } from "./embedded-host.ts";
+import { domainDeps, refreshDomains } from "./domains/service.ts";
 import { handleShareHost } from "./viewer.ts";
 
 export type { AppType } from "./app.ts";
@@ -13,8 +14,8 @@ export { RateLimiter } from "./rate-limiter.ts";
 export { Share } from "./share-do.ts";
 
 /**
- * The CLI's host answers these, `/v1/pipes` and `/v1/embed` (ADR 0006, ADR 0008, ADR 0018, ADR
- * 0032): the pipe socket,
+ * The CLI's host answers these, `/v1/pipes`, `/v1/embed` and `/v1/domains` (ADR 0006, ADR 0008,
+ * ADR 0018, ADR 0032, ADR 0033): the pipe socket,
  * `wurmhol host`, `wurmhol login`, health, and the hosted MCP server with its protected resource
  * metadata (ADR 0014).
  */
@@ -45,7 +46,7 @@ export default {
     }
     if (host.role === "connect") {
       const { pathname } = new URL(request.url);
-      if (CLI_PATHS.has(pathname) || /^\/v1\/(pipes|embed)(\/|$)/.test(pathname)) {
+      if (CLI_PATHS.has(pathname) || /^\/v1\/(pipes|embed|domains)(\/|$)/.test(pathname)) {
         return app.fetch(request, env, ctx);
       }
       return Response.json(
@@ -87,5 +88,8 @@ export default {
       asOf: now.toISOString(),
       ...pruned,
     });
+    // Custom domains (ADR 0033): expire the unfinished, and notice a CNAME that went away.
+    const domains = domainDeps(config, createDb(env.DB));
+    if (domains) await refreshDomains(domains);
   },
 } satisfies ExportedHandler<Env>;

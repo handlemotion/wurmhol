@@ -44,6 +44,7 @@
         "pages": [
           "self-hosting/index",
           "self-hosting/domains",
+          "self-hosting/custom-domains",
           "self-hosting/configuration",
           "self-hosting/manual"
         ]
