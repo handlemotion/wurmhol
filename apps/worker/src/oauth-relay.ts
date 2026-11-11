@@ -48,7 +48,7 @@ export async function noteOAuthRedirect(
   share: { id: string; orgId: string },
   request: Request,
   response: Response,
-  /** The custom domain the flow started on (ADR 0030): where it comes back to. */
+  /** The custom domain the flow started on (ADR 0033): where it comes back to. */
   host: string | null = null,
 ) {
   const state = relayedState(config, response.headers.get("location"), request.url);

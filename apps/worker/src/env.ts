@@ -483,7 +483,7 @@ export type HostRole =
   | { role: "connect" }
   | { role: "oauth" }
   | { role: "alias" }
-  /** Any other host, once custom domains are on (ADR 0030): a customer's hostname, or nothing. */
+  /** Any other host, once custom domains are on (ADR 0033): a customer's hostname, or nothing. */
   | { role: "custom"; hostname: string }
   | { role: "app" };
 

@@ -67,7 +67,7 @@ export default {
     if (host.role === "app") return app.fetch(request, env, ctx);
     if (host.role === "oauth") return handleRelay(request, env, config);
     if (host.role === "custom") {
-      // A customer's hostname (ADR 0030): routed only when the org proved it owns it and
+      // A customer's hostname (ADR 0033): routed only when the org proved it owns it and
       // Cloudflare serves it, to its pipe name's open pipe. Anything else is not found.
       try {
         const db = createDb(env.DB);
@@ -112,7 +112,7 @@ export default {
       ...pruned,
     });
     // Custom domains (ADR 0033): expire the unfinished, and notice a CNAME that went away.
-    const domains = domainDeps(config, createDb(env.DB));
+    const domains = domainDeps(config, createDb(env.DB), env);
     if (domains) await refreshDomains(domains);
   },
 } satisfies ExportedHandler<Env>;

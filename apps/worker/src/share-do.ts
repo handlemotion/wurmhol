@@ -399,6 +399,17 @@ export class Share extends DurableObject<Env> {
     };
   }
 
+  /**
+   * Moves the open pipe to `url`, its new public URL (a custom domain of its name became active or
+   * stopped being, ADR 0033). The CLI is given it when it next connects. False when it has ended.
+   */
+  setUrl(url: string) {
+    const meta = this.#meta();
+    if (!meta) return false;
+    if (meta.url !== url) this.#save({ ...meta, url });
+    return true;
+  }
+
   /** A one-time code for `userId` (60 s, single use), after the app checked their membership. */
   async issueCode(userId: string) {
     const code = randomSecret(24);
@@ -745,7 +756,7 @@ export class Share extends DurableObject<Env> {
     return {
       method: request.method,
       path: `${url.pathname}${url.search}`,
-      // The host the viewer used, not the pipe's own URL: a pipe with a custom domain (ADR 0030)
+      // The host the viewer used, not the pipe's own URL: a pipe with a custom domain (ADR 0033)
       // answers on both, and an app builds its redirect URIs from what it is told.
       headers: viewerRequestHeaders(request.headers, request.url),
     };

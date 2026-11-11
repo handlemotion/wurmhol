@@ -1,4 +1,4 @@
-// Local stand-ins for the two services the custom domains feature calls out to (ADR 0030):
+// Local stand-ins for the two services the custom domains feature calls out to (ADR 0033):
 // Cloudflare's custom hostnames API and a DNS-over-HTTPS JSON resolver. They speak the real wire
 // shapes over HTTP, because no test may create real hostnames or publish real DNS records.
 import { createServer, type Server } from "node:http";

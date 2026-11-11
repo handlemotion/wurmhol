@@ -51,7 +51,7 @@ const requireOperator = createMiddleware<AppEnv>(async (c, next) => {
 async function reportedShare(c: { var: AppEnv["Variables"] }, pipe: string) {
   let host = pipe.trim().toLowerCase();
   if (host.includes("://")) host = URL.canParse(host) ? new URL(host).hostname : "";
-  // A report may name a pipe by its custom domain (ADR 0030): it means that name's newest pipe.
+  // A report may name a pipe by its custom domain (ADR 0033): it means that name's newest pipe.
   const domain = host.includes(".") ? await findDomain(c.var.db, host) : null;
   if (domain) {
     const latest = await latestShareByName(c.var.db, domain.pipeName);
@@ -134,7 +134,7 @@ export const operator = new Hono<AppEnv>()
    * it. The org's pipe and its `<name>.<SHARE_DOMAIN>` host are untouched.
    */
   .delete("/domains/:hostname", async (c) => {
-    const deps = domainDeps(c.var.config, c.var.db);
+    const deps = domainDeps(c.var.config, c.var.db, c.env);
     if (!deps) return c.json({ error: "custom domains are not enabled" }, 404);
     const row = await findDomain(c.var.db, c.req.param("hostname").toLowerCase());
     if (row) {

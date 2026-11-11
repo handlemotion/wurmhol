@@ -30,7 +30,7 @@ export async function handleShareHost(
   request: Request,
   env: Env,
   shareId: string,
-  /** The custom domain (ADR 0030) the request came to, when it did not come to a `SHARE_DOMAIN` host. */
+  /** The custom domain (ADR 0033) the request came to, when it did not come to a `SHARE_DOMAIN` host. */
   customHost: string | null = null,
 ) {
   const config = loadConfig(env);
@@ -122,7 +122,7 @@ function signIn(request: Request, appURL: string, shareId: string, customHost: s
   const url = new URL(request.url);
   const open = new URL("/open", appURL);
   open.searchParams.set("share", shareId);
-  // Back to the host the viewer came to, which `/open` checks is this pipe's own (ADR 0030).
+  // Back to the host the viewer came to, which `/open` checks is this pipe's own (ADR 0033).
   if (customHost) open.searchParams.set("host", customHost);
   open.searchParams.set("next", `${url.pathname}${url.search}`);
   return new Response(null, {

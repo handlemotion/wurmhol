@@ -1,4 +1,4 @@
-// Routing on a custom domain (ADR 0030): a verified hostname serves its pipe name's open pipe behind
+// Routing on a custom domain (ADR 0033): a verified hostname serves its pipe name's open pipe behind
 // the same sign-in wall, signing in comes back to the host the viewer used, and a host that is not
 // proven, or not known, is never the console and never a pipe.
 import { randomBytes } from "node:crypto";
@@ -91,6 +91,20 @@ it("serves the name's pipe on the custom host, and signing in comes back to that
   expect(open.searchParams.get("share")).toBe(pipe.id);
   expect(open.searchParams.get("host")).toBe("preview.acme.localhost");
 
+  // Signed out of the console: the login page, which comes back to this same /open, host and all.
+  const login = await browserFetch(open.toString());
+  expect(login.status).toBe(302);
+  const loginUrl = new URL(login.headers.get("location")!, stack.url);
+  expect(loginUrl.pathname).toBe("/login");
+  const resumed = new URL(loginUrl.searchParams.get("next")!, stack.url);
+  // Catches: the host lost on the way through the login page, so a viewer who was signed out
+  // lands on `<name>.<SHARE_DOMAIN>` instead of the domain they came from.
+  expect(resumed.searchParams.get("host")).toBe("preview.acme.localhost");
+  const afterLogin = await browserFetch(resumed.toString(), { cookie: ada.cookie });
+  expect(afterLogin.headers.get("location")).toMatch(
+    new RegExp(`^${customUrl("preview.acme.localhost")}/__wurmhol/auth\\?code=`),
+  );
+
   const back = await browserFetch(open.toString(), { cookie: ada.cookie });
   // Catches: sending the viewer to `<name>.<SHARE_DOMAIN>`, where the app they were using on their
   // own domain has no session, so every custom-domain sign-in would land on a different site.
@@ -149,12 +163,21 @@ it("does not serve a domain that is not proven, and never answers as the console
 
 it("stops serving the moment the domain is removed, by its org or by the operator", async () => {
   const gone = "preview.acme.localhost";
+  const wallUrl = async () =>
+    (await api<{ shares: { url: string }[] }>(stack, ada, "/api/shares")).body.shares.find((s) =>
+      s.url.includes("acme"),
+    )?.url;
+  expect(await wallUrl()).toBe(customUrl(gone));
   const removed = await api(stack, ada, `/api/domains/${gone}`, { method: "DELETE" });
   expect(removed.status).toBe(200);
   const after = await browserFetch(`${customUrl(gone)}/`, { headers: navigate });
   expect(after.status).toBe(404);
+  // Catches: the open pipe still advertising the removed domain, a URL that now answers 404.
+  expect(await wallUrl()).toBe(stack.shareUrl("acme-app"));
 
   await activate("again.acme.localhost", "acme-app");
+  // A domain that becomes active moves the open pipe to it too.
+  expect(await wallUrl()).toBe(customUrl("again.acme.localhost"));
   const taken = await browserFetch(`${stack.url}/operator/domains/again.acme.localhost`, {
     method: "DELETE",
     headers: { authorization: `Bearer ${OPERATOR_TOKEN}` },

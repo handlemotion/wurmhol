@@ -25,6 +25,7 @@ import {
 } from "@wurmhol/protocol";
 import { type Config, customDomainOrigin, isServedHost, reservedPipeNames } from "../env.ts";
 import { createLogger } from "../log.ts";
+import { refreshPipeUrl } from "../share-url.ts";
 import { orgPlan } from "../plan.ts";
 import { DnsError, lookupTxt } from "./dns.ts";
 import { cloudflareProvider, type HostnameProvider, ProviderError } from "./provider.ts";
@@ -51,10 +52,15 @@ export interface DomainDeps {
   config: Config;
   provider: HostnameProvider;
   txt: (name: string) => Promise<string[]>;
+  /** Called when a domain of a pipe name became active or stopped being, so its open pipe's URL follows. */
+  urlChanged?: (domain: { orgId: string; pipeName: string }) => Promise<void>;
 }
 
-/** The deps for this install, or null when custom domains are off. */
-export function domainDeps(config: Config, db: Db): DomainDeps | null {
+/**
+ * The deps for this install, or null when custom domains are off. With `env`, an open pipe's URL
+ * follows its name's domains.
+ */
+export function domainDeps(config: Config, db: Db, env?: Env): DomainDeps | null {
   const custom = config.customDomains;
   if (!custom) return null;
   return {
@@ -66,7 +72,22 @@ export function domainDeps(config: Config, db: Db): DomainDeps | null {
       token: custom.apiToken,
     }),
     txt: (name) => lookupTxt(custom.resolverUrl, name),
+    urlChanged: env
+      ? (domain) => refreshPipeUrl(env, db, config, { orgId: domain.orgId, name: domain.pipeName })
+      : undefined,
   };
+}
+
+/** Lets the name's open pipe know its URL changed. Best effort: the pipe keeps working either way. */
+async function noteUrlChange(deps: DomainDeps, row: DomainRow) {
+  try {
+    await deps.urlChanged?.(row);
+  } catch (error) {
+    createLogger({ component: "domains" }).warn("domain.url_refresh_failed", {
+      error,
+      orgId: row.orgId,
+    });
+  }
 }
 
 /** Wraps a provider or DNS failure as the refusal a caller sees. */
@@ -355,6 +376,9 @@ export async function check(deps: DomainDeps, row: DomainRow, options: { nudge: 
           : row.expiresAt,
       checkedAt: now,
     });
+    if (updated && (becameActive || lostActive) && row.state !== updated.state) {
+      await noteUrlChange(deps, updated);
+    }
     if (updated && updated.state !== row.state) {
       createLogger({ component: "domains" }).info("domain.state", {
         orgId: row.orgId,
@@ -383,6 +407,7 @@ export async function remove(deps: DomainDeps, row: DomainRow) {
     }
   }
   await deleteDomain(deps.db, row);
+  if (row.state === "active") await noteUrlChange(deps, row);
 }
 
 /**
