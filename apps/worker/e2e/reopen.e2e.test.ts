@@ -5,7 +5,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { RECONNECT_GRACE_MS } from "@wurmhol/protocol";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   alive,
   browserFetch,
@@ -14,6 +15,7 @@ import {
   connectProxy,
   createToken,
   localServer,
+  parseJson,
   type Person,
   shareStates,
   signIn,
@@ -28,6 +30,7 @@ let stack: Stack;
 let ada: Person;
 let env: Record<string, string>;
 let proxy: Awaited<ReturnType<typeof connectProxy>>;
+
 /** The ports the proxy tunnels to: emptied, it refuses every CONNECT with a 403. */
 const allowed: number[] = [];
 
@@ -49,40 +52,43 @@ afterAll(async () => {
   await stack.stop();
 });
 
-interface Listed {
-  id: string;
-  url: string;
-  port: number;
-  endsAt: string;
-}
+/** A pipe as `wurmhol <port> --json` and `wurmhol ls --json` print it. */
+const listedPipe = z.object({ id: z.string(), url: z.string(), port: z.number() });
 
 async function open(args: string[]) {
   const result = await cli([...args, "--json"], env);
+
   if (result.code !== 0) throw new Error(`wurmhol ${args.join(" ")}: ${result.stderr}`);
-  return JSON.parse(result.stdout.split("\n")[0]!) as Listed;
+
+  return parseJson(listedPipe, result.stdout.split("\n")[0]!);
 }
 
 async function ls() {
-  return JSON.parse((await cli(["ls", "--json"], env)).stdout) as Listed[];
+  return parseJson(z.array(listedPipe), (await cli(["ls", "--json"], env)).stdout);
 }
 
 async function events(target: string) {
   const run = await cli(["logs", target, "--json"], env);
+
   return run.stdout
     .trim()
     .split("\n")
     .filter(Boolean)
-    .map((line) => JSON.parse(line) as { event: string; from?: string; to?: string });
+    .map((line) =>
+      parseJson(
+        z.object({ event: z.string(), from: z.string().optional(), to: z.string().optional() }),
+        line,
+      ),
+    );
 }
 
 function endReason(id: string) {
   const db = stack.db();
+
   try {
-    return (
-      db.prepare("select end_reason from shares where id = ?").get(id) as {
-        end_reason: string | null;
-      }
-    ).end_reason;
+    return z
+      .object({ end_reason: z.string().nullable() })
+      .parse(db.prepare("select end_reason from shares where id = ?").get(id)).end_reason;
   } finally {
     db.close();
   }
@@ -90,7 +96,8 @@ function endReason(id: string) {
 
 function pidOf(id: string) {
   const file = join(env.WURMHOL_HOME!, "shares", `${id}.json`);
-  return (JSON.parse(readFileSync(file, "utf8")) as { pid: number }).pid;
+
+  return parseJson(z.object({ pid: z.number() }), readFileSync(file, "utf8")).pid;
 }
 
 /** Signs Ada in to `url` and returns the body of `/`, once the pipe answers there. */
@@ -98,8 +105,10 @@ async function answer(url: string) {
   return waitFor(
     async () => {
       const cookie = await viewerCookie(stack, ada, url).catch(() => null);
+
       if (!cookie) return null;
       const response = await browserFetch(`${url}/`, { cookie });
+
       return response.status === 200 ? response.text() : null;
     },
     { timeoutMs: 90_000, intervalMs: 500, what: `${url} to answer` },
@@ -144,14 +153,17 @@ it(
 
     // Catches: a daemon that exits on `disconnected`, leaving a named URL dead for good.
     expect(await answer(named.url)).toBe("named app");
+
     const listed = await waitFor(
       async () => {
         const now = await ls();
         const fresh = now.find((p) => p.port === plainApp.port);
+
         return fresh && fresh.id !== plain.id && now.length === 2 ? now : null;
       },
       { timeoutMs: 90_000, intervalMs: 500, what: "the new unnamed pipe in ls" },
     );
+
     const reopened = listed.find((p) => p.port === plainApp.port)!;
     const namedAgain = listed.find((p) => p.port === namedApp.port)!;
     expect(namedAgain.url).toBe(named.url);
@@ -184,9 +196,11 @@ it(
     expect((await cli(["stop", String(plainApp.port)], env)).code).toBe(0);
     expect(pids.map(alive)).toEqual([false, false, false]);
     expect(await ls()).toEqual([]);
+
     const gone = await browserFetch(`${named.url}/`, {
       headers: { accept: "text/html", "sec-fetch-mode": "navigate" },
     });
+
     expect(gone.status).toBe(404);
 
     await Promise.all([namedApp.close(), plainApp.close(), stoppedApp.close()]);

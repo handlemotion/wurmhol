@@ -1,15 +1,18 @@
 // `wurmhol doctor` against the real stack: the built CLI checks its token on the CLI's host, the
 // hosts through a real CONNECT proxy like a sandbox's, and a real local port.
 import { createServer } from "node:http";
-import { type AddressInfo, connect, type Socket } from "node:net";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { connect, type Socket } from "node:net";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   api,
   cli,
   cliEnv,
   connectProxy,
   createToken,
+  listeningPort,
   localServer,
+  parseJson,
   type Person,
   share,
   signIn,
@@ -18,16 +21,18 @@ import {
   stopAll,
 } from "./support.ts";
 
-interface Check {
-  name: string;
-  ok: boolean;
-  detail: string;
-  fix: string | null;
-}
+/** One of `wurmhol doctor --json`'s checks; extra fields pass through to `toMatchObject`. */
+const check = z.looseObject({
+  name: z.string(),
+  ok: z.boolean(),
+  detail: z.string(),
+  fix: z.string().nullable(),
+});
 
 let stack: Stack;
 let ada: Person;
 let proxy: Awaited<ReturnType<typeof connectProxy>>;
+
 /** What the Tokens dialog names as WURMHOL_URL: the CLI's own host. */
 let server: string;
 
@@ -51,7 +56,8 @@ function sandbox(token: string, viaProxy = proxy.url) {
 async function doctor(env: Record<string, string>, args: string[] = []) {
   const result = await cli(["doctor", "--json", ...args], env);
   expect(result.stderr).toBe("");
-  const { checks } = JSON.parse(result.stdout) as { checks: Check[] };
+  const { checks } = parseJson(z.object({ checks: z.array(check) }), result.stdout);
+
   return { code: result.code, checks: Object.fromEntries(checks.map((c) => [c.name, c])) };
 }
 
@@ -59,6 +65,7 @@ async function doctor(env: Record<string, string>, args: string[] = []) {
 // refuses it for scope), the pipe domain not taken from an open pipe, or a check that cannot pass.
 it("passes every check with a good token of either scope, and names the pipe domain", async () => {
   const local = await localServer((_req, res) => res.end("ok"));
+
   for (const scope of ["org", "pipes"] as const) {
     const { token } = await createToken(stack, ada, `doctor-${scope}`, { scope });
     const env = sandbox(token);
@@ -70,6 +77,7 @@ it("passes every check with a good token of either scope, and names the pipe dom
     expect(checks.proxy?.detail).toBe(`through ${proxy.url}`);
     await stopAll(env);
   }
+
   await local.close();
 });
 
@@ -80,6 +88,7 @@ it("an unknown or revoked token gives the token fix and exits 1", async () => {
   expect((await api(stack, ada, `/api/tokens/${revoked.id}`, { method: "DELETE" })).status).toBe(
     200,
   );
+
   for (const token of [revoked.token, `wh_${"x".repeat(43)}`]) {
     const { code, checks } = await doctor(sandbox(token));
     expect(code).toBe(1);
@@ -99,8 +108,10 @@ it("a proxy that refuses the API host names the host to allowlist", async () => 
   const env = sandbox(token, refusing.url);
   const { code, checks } = await doctor(env);
   expect(code).toBe(1);
+
   const allowlist =
     "The network proxy refused the connection (HTTP 403). Allowlist api.localhost in the sandbox's network settings.";
+
   expect(checks["api-host"]).toMatchObject({ ok: false, fix: allowlist });
   expect(checks.token).toMatchObject({ ok: false, fix: allowlist });
   // The text form is one line per check, the fix on the failing ones.
@@ -118,14 +129,17 @@ async function hostProxy(allow: string) {
   const proxyServer = createServer((_req, res) => res.writeHead(405).end());
   proxyServer.on("connect", (req, client: Socket, head) => {
     const [host, port] = (req.url ?? "").split(":");
+
     if (host !== allow)
       return void client.end("HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n");
+
     const upstream = connect(Number(port), "127.0.0.1", () => {
       client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
       upstream.write(head);
       upstream.pipe(client);
       client.pipe(upstream);
     });
+
     for (const socket of [client, upstream]) {
       sockets.add(socket);
       socket.on("error", () => socket.destroy());
@@ -133,10 +147,13 @@ async function hostProxy(allow: string) {
     }
   });
   await new Promise<void>((resolve) => proxyServer.listen(0, "127.0.0.1", resolve));
+
   return {
-    url: `http://127.0.0.1:${(proxyServer.address() as AddressInfo).port}`,
+    url: `http://127.0.0.1:${listeningPort(proxyServer)}`,
+
     close: () => {
       for (const socket of sockets) socket.destroy();
+
       return new Promise<void>((resolve) => proxyServer.close(() => resolve()));
     },
   };
@@ -153,8 +170,10 @@ it("a proxy that refuses only the pipe domain warns and still exits 0", async ()
   const refused = { ...env, HTTPS_PROXY: apiOnly.url, HTTP_PROXY: apiOnly.url };
   const { code, checks } = await doctor(refused);
   expect(code).toBe(0);
+
   const advice =
     "Allowlist *.pipe.localhost in the sandbox's network settings, to open pipe URLs from the sandbox.";
+
   expect(checks["pipe-domain"]).toMatchObject({ ok: true, fix: advice });
   expect(checks["api-host"]).toMatchObject({ ok: true, fix: null });
   const text = await cli(["doctor"], refused);

@@ -59,12 +59,14 @@ const STATE: Record<AppTunnel["state"], string> = {
 function activity(tunnel: AppTunnel) {
   const open = tunnel.state === "live" || tunnel.state === "away" ? 1 : 0;
   const at = tunnel.session?.lastRequestAt ?? tunnel.session?.startedAt ?? tunnel.createdAt;
+
   return [open, Date.parse(at)] as const;
 }
 
 function byActivity(a: AppTunnel, b: AppTunnel) {
   const [aOpen, aAt] = activity(a);
   const [bOpen, bAt] = activity(b);
+
   return bOpen - aOpen || bAt - aAt;
 }
 
@@ -90,6 +92,7 @@ export function AppCard({ app, onDeleted }: { app: App; onDeleted: () => void })
   useEffect(() => card.current?.focus({ preventScroll: true }), []);
   const tunnels = useAppTunnels(app.id, true);
   const [dialog, setDialog] = useState<"keys" | "settings" | null>(null);
+
   const rows = [
     { term: "Pipes open", value: String(app.usage.openTunnels) },
     { term: "Requests", value: `${app.usage.requests.toLocaleString()} this month` },
@@ -151,6 +154,7 @@ export function AppCard({ app, onDeleted }: { app: App; onDeleted: () => void })
 function Pipes({ app, tunnels }: { app: string; tunnels: AppTunnel[] }) {
   const now = useNow();
   const end = useEndTunnel(app);
+
   if (tunnels.length === 0) {
     return (
       <p className="text-xs text-muted-foreground">
@@ -158,13 +162,16 @@ function Pipes({ app, tunnels }: { app: string; tunnels: AppTunnel[] }) {
       </p>
     );
   }
+
   const shown = [...tunnels].sort(byActivity).slice(0, PIPES_SHOWN);
+
   return (
     <section aria-label="Pipes" className="flex flex-col gap-1">
       <ul className="flex flex-col divide-y divide-border">
         {shown.map((tunnel) => {
           const last = ago(tunnel.session?.lastRequestAt ?? null, now);
           const pending = end.isPending && end.variables?.tunnel === tunnel.id;
+
           return (
             <li key={tunnel.id} className="flex items-center justify-between gap-3 py-2">
               <div className="flex min-w-0 flex-col">

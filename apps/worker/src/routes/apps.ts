@@ -47,6 +47,7 @@ function secureUrl(value: string) {
   if (!URL.canParse(value)) return null;
   const url = new URL(value);
   const ok = url.protocol === "https:" || (url.protocol === "http:" && isLocalHost(url.hostname));
+
   return ok && !url.username && !url.password ? url : null;
 }
 
@@ -65,13 +66,14 @@ const origin = z
   .max(255)
   .refine((value) => {
     const url = secureUrl(value);
+
     return url !== null && url.origin === value.replace(/\/$/, "");
   }, "use an origin like https://app.example.com, with no path")
   .transform((value) => secureUrl(value)!.origin);
 
 const limit = z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable();
 
-const settingsShape = {
+const appSettingsFields = {
   name: z.string().trim().min(1).max(80),
   launchUrl: launchUrl.nullable(),
   allowedOrigins: z.array(origin).max(MAX_ORIGINS),
@@ -90,18 +92,20 @@ function tenantWithinApp(settings: {
 }) {
   const within = (tenant?: number | null, app?: number | null) =>
     tenant === null || tenant === undefined || app === null || app === undefined || tenant <= app;
+
   return (
     within(settings.tenantMonthlyRequests, settings.monthlyRequests) &&
     within(settings.tenantActiveTunnels, settings.activeTunnels)
   );
 }
+
 const TENANT_OVER_APP = "a tenant's default can't be more than the application's limit";
 
 const createBody = z
   .object({
-    name: settingsShape.name,
-    launchUrl: settingsShape.launchUrl.default(null),
-    allowedOrigins: settingsShape.allowedOrigins.default([]),
+    name: appSettingsFields.name,
+    launchUrl: appSettingsFields.launchUrl.default(null),
+    allowedOrigins: appSettingsFields.allowedOrigins.default([]),
     monthlyRequests: limit.default(null),
     activeTunnels: limit.default(null),
     tenantMonthlyRequests: limit.default(null),
@@ -109,7 +113,7 @@ const createBody = z
   })
   .refine(tenantWithinApp, TENANT_OVER_APP);
 
-const updateBody = z.object(settingsShape).partial();
+const updateBody = z.object(appSettingsFields).partial();
 
 const keyBody = z.object({
   name: z.string().trim().min(1).max(80),
@@ -130,17 +134,21 @@ const requireEmbedded = createMiddleware<AppEnv>(async (c, next) => {
 const requireBusiness = createMiddleware<AppEnv>(async (c, next) => {
   const { config, db, member } = c.var;
   const plan = await orgPlan(db, config, member.orgId);
+
   if (!plan || (config.auth.billing && plan.plan !== "business")) {
     throw new HTTPException(402, {
       message: "Applications are part of Business. An owner can move the org to it in Billing.",
     });
   }
+
   await next();
 });
 
 async function ownApp(c: { var: AppEnv["Variables"] }, appId: string) {
   const app = await findEmbedApp(c.var.db, c.var.member.orgId, appId);
+
   if (!app) throw new HTTPException(404, { message: "no such application" });
+
   return app;
 }
 
@@ -151,30 +159,37 @@ export const apps = new Hono<AppEnv>()
     const orgId = c.var.member.orgId;
     const apps = await listEmbedApps(c.var.db, orgId);
     const org = orgStub(c.env, orgId);
+
     const withUsage = await Promise.all(
       apps.map(async (app) => {
         const usage = await org.embedUsage(app.id);
+
         return {
           ...app,
           usage: { requests: usage.app.requests, openTunnels: usage.app.openTunnels },
         };
       }),
     );
+
     return c.json({ apps: withUsage });
   })
   .post("/", limitPerMember("manage"), zValidator("json", createBody), async (c) => {
     const app = await createEmbedApp(c.var.db, c.var.member.orgId, c.req.valid("json"));
     c.var.log.info("embed.app_created", { orgId: c.var.member.orgId, appId: app.id });
+
     return c.json({ app }, 201);
   })
   .get("/:id", async (c) => c.json({ app: await ownApp(c, c.req.param("id")) }))
   .patch("/:id", limitPerMember("manage"), zValidator("json", updateBody), async (c) => {
     const current = await ownApp(c, c.req.param("id"));
     const change = c.req.valid("json");
+
     if (!tenantWithinApp({ ...current, ...change })) {
       throw new HTTPException(400, { message: TENANT_OVER_APP });
     }
+
     const app = await updateEmbedApp(c.var.db, c.var.member.orgId, current.id, change);
+
     if (!app) throw new HTTPException(404, { message: "no such application" });
     // New limits apply at once, to open tunnels too (ADR 0032).
     await orgStub(c.env, c.var.member.orgId).setAppLimits(app.id, {
@@ -183,6 +198,7 @@ export const apps = new Hono<AppEnv>()
       tenantMonthlyRequests: app.tenantMonthlyRequests,
       tenantActiveTunnels: app.tenantActiveTunnels,
     });
+
     return c.json({ app });
   })
   /** Deletes the application, revokes its keys, and ends and deletes its tunnels. */
@@ -190,13 +206,16 @@ export const apps = new Hono<AppEnv>()
     const appId = c.req.param("id");
     const orgId = c.var.member.orgId;
     const tunnels = await embedTunnelIdsOfApp(c.var.db, orgId, appId);
+
     if (!(await deleteEmbedApp(c.var.db, orgId, appId))) {
       throw new HTTPException(404, { message: "no such application" });
     }
+
     await deleteEmbedTunnels(c.var.db, orgId, tunnels);
     await revokeEmbedGrants(c.var.db, orgId, { tunnelIds: tunnels });
     await endTunnelSessions(c, tunnels, "revoked", "embed delete");
     c.var.log.info("embed.app_deleted", { orgId: c.var.member.orgId, appId });
+
     return c.json({ ok: true });
   })
   /**
@@ -206,6 +225,7 @@ export const apps = new Hono<AppEnv>()
   .get("/:id/tunnels", async (c) => {
     const app = await ownApp(c, c.req.param("id"));
     const scope = { orgId: c.var.member.orgId, appId: app.id };
+
     return c.json({ tunnels: await describeTunnels(c, await listEmbedTunnels(c.var.db, scope)) });
   })
   /** Ends a pipe's session; its agent stops and may open it again when restarted. */
@@ -213,10 +233,12 @@ export const apps = new Hono<AppEnv>()
     const app = await ownApp(c, c.req.param("id"));
     const orgId = c.var.member.orgId;
     const tunnel = await findEmbedTunnel(c.var.db, { orgId, appId: app.id }, c.req.param("tunnel"));
+
     if (!tunnel) throw new HTTPException(404, { message: "no such pipe" });
     await setEmbedTunnelStopped(c.var.db, orgId, tunnel.id, true);
     await endTunnelSessions(c, [tunnel.id], "terminated", "embed stop");
     c.var.log.info("embed.tunnel_stopped", { orgId, appId: app.id, tunnelId: tunnel.id });
+
     return c.json({ ok: true });
   })
   /** Deletes a pipe for good: its session, connectors and grants end, its URL is never reused. */
@@ -224,22 +246,26 @@ export const apps = new Hono<AppEnv>()
     const app = await ownApp(c, c.req.param("id"));
     const orgId = c.var.member.orgId;
     const tunnel = await findEmbedTunnel(c.var.db, { orgId, appId: app.id }, c.req.param("tunnel"));
+
     if (!tunnel) throw new HTTPException(404, { message: "no such pipe" });
     await deleteEmbedTunnels(c.var.db, orgId, [tunnel.id]);
     const revoked = await revokeEmbedGrants(c.var.db, orgId, { tunnelIds: [tunnel.id] });
     await pushGrantRevocations(c, revoked);
     await endTunnelSessions(c, [tunnel.id], "revoked", "embed delete");
     c.var.log.info("embed.tunnel_deleted", { orgId, appId: app.id, tunnelId: tunnel.id });
+
     return c.json({ ok: true });
   })
   .get("/:id/keys", async (c) => {
     const app = await ownApp(c, c.req.param("id"));
+
     return c.json({ keys: await listEmbedAppKeys(c.var.db, c.var.member.orgId, app.id) });
   })
   /** A new integration key, shown once. It belongs to the application, not to its maker. */
   .post("/:id/keys", limitPerMember("manage"), zValidator("json", keyBody), async (c) => {
     const app = await ownApp(c, c.req.param("id"));
     const { name, permissions, expiresInDays } = c.req.valid("json");
+
     const { id, key } = await createEmbedAppKey(c.var.db, {
       orgId: c.var.member.orgId,
       appId: app.id,
@@ -248,15 +274,20 @@ export const apps = new Hono<AppEnv>()
       createdBy: c.var.user.id,
       expiresAt: expiresInDays === null ? null : new Date(Date.now() + expiresInDays * DAY_MS),
     });
+
     c.var.log.info("embed.key_created", { orgId: c.var.member.orgId, appId: app.id, keyId: id });
+
     return c.json({ id, key, permissions }, 201);
   })
   .delete("/:id/keys/:keyId", limitPerMember("manage"), async (c) => {
     const app = await ownApp(c, c.req.param("id"));
     const keyId = c.req.param("keyId");
+
     if (!(await revokeEmbedAppKey(c.var.db, c.var.member.orgId, app.id, keyId))) {
       throw new HTTPException(404, { message: "no such key" });
     }
+
     c.var.log.info("embed.key_revoked", { orgId: c.var.member.orgId, appId: app.id, keyId });
+
     return c.json({ ok: true });
   });

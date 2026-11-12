@@ -7,7 +7,9 @@
 export const WS_OPEN = 1;
 
 export type MessageListener = (data: Buffer, isBinary: boolean) => void;
+
 export type CloseListener = (code: number, reason: Buffer) => void;
+
 export type ErrorListener = (error: Error) => void;
 
 export interface WsConnection {

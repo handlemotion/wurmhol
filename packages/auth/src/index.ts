@@ -4,11 +4,11 @@
 import { cimd } from "@better-auth/cimd";
 import { mcp } from "@better-auth/mcp";
 import { passkey } from "@better-auth/passkey";
-import { stripe, type StripeOptions } from "@better-auth/stripe";
+import { stripe, type StripeOptions, type StripePlan } from "@better-auth/stripe";
 import { type Db, createPersonalOrg, findMember, schema } from "@wurmhol/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { getDpopJktFromPayload, getJwks, verifyJwsAccessToken } from "better-auth/oauth2";
+import { getDpopJktFromPayload, verifyJwsAccessToken } from "better-auth/oauth2";
 import { APIError } from "better-auth/api";
 import { deviceAuthorization } from "better-auth/plugins/device-authorization";
 import { jwt } from "better-auth/plugins/jwt";
@@ -93,11 +93,14 @@ export const authEnvSchema = z
     // Half a billing setup is a mistake, not "billing off": name what is missing.
     if (!env.STRIPE_SECRET_KEY) {
       const stray = ["STRIPE_WEBHOOK_SECRET", ...REQUIRED_PRICES] as const;
+
       for (const name of stray.filter((n) => env[n] !== undefined)) {
         ctx.addIssue({ code: "custom", path: [name], message: "needs STRIPE_SECRET_KEY" });
       }
+
       return;
     }
+
     if (env.STRIPE_WEBHOOK_SECRET === undefined) {
       ctx.addIssue({
         code: "custom",
@@ -105,6 +108,7 @@ export const authEnvSchema = z
         message: "is required with STRIPE_SECRET_KEY",
       });
     }
+
     for (const name of REQUIRED_PRICES.filter((n) => env[n] === undefined)) {
       ctx.addIssue({ code: "custom", path: [name], message: "is required with STRIPE_SECRET_KEY" });
     }
@@ -148,6 +152,7 @@ export type BillingConfig = NonNullable<AuthConfig["billing"]>;
 
 /** The plans (ADR 0027), by the key the Stripe plugin stores in `subscriptions.plan`. */
 export const PLAN_NAMES = ["friends", "business"] as const;
+
 export type PlanName = (typeof PLAN_NAMES)[number];
 
 /** Days a new org's first subscription is free. Checkout still takes a card up front. */
@@ -191,7 +196,7 @@ export const DEFAULT_SPEND_CAP_CENTS = 10_000;
 export const METER_EVENT_NAME = "wurmhol_requests";
 
 export function isPlanName(value: string): value is PlanName {
-  return (PLAN_NAMES as readonly string[]).includes(value);
+  return PLAN_NAMES.some((name) => name === value);
 }
 
 /**
@@ -235,7 +240,7 @@ function billingPlugin(env: AuthEnv, billing: BillingConfig) {
           lineItems: [{ price: billing.prices.businessRequests }],
           freeTrial: { days: TRIAL_DAYS },
         },
-      ] satisfies ({ name: PlanName } & Record<string, unknown>)[],
+      ] satisfies (StripePlan & { name: PlanName })[],
       // Org subscriptions only (the Worker refuses others), managed by owners.
       authorizeReference: ({ user, referenceId }) => isOwner(env.db, user.id, referenceId),
       getCheckoutSessionParams: () => ({
@@ -243,13 +248,14 @@ function billingPlugin(env: AuthEnv, billing: BillingConfig) {
         params: { allow_promotion_codes: true, payment_method_collection: "always" },
       }),
     },
-    // The option's type intersects the three tables' field maps and rejects renames; this shape
-    // is what the plugin reads (and what `auth:generate` turned into our schema).
+    // SAFETY: the option's type intersects the three tables' field maps and so rejects renaming
+    // a subscription field; this shape is what the plugin reads per table (and what
+    // `auth:generate` turned into our schema).
     schema: {
       subscription: { modelName: "subscriptions", fields: { referenceId: "orgId" } },
       organization: { modelName: "organizations" },
       user: { modelName: "users" },
-    } as unknown as StripeOptions["schema"],
+    } as StripeOptions["schema"],
   });
 }
 
@@ -259,6 +265,7 @@ function billingPlugin(env: AuthEnv, billing: BillingConfig) {
  * split exists only so that a person can grant a client read-only access.
  */
 export const MCP_SCOPES = ["pipes:read", "pipes:write"] as const;
+
 export type McpScope = (typeof MCP_SCOPES)[number];
 
 /** Where the OAuth flow sends a person who is not signed in, and where they consent. */
@@ -327,6 +334,21 @@ function mcpPlugins(env: AuthEnv, options: McpAuthOptions) {
   ];
 }
 
+/** The OAuth providers a deploy configured. */
+interface SocialProviders {
+  google?: NonNullable<AuthEnv["google"]> & { prompt: "select_account" };
+  github?: NonNullable<AuthEnv["github"]>;
+}
+
+/** Passkeys, bound to `rpId` when one is set and otherwise to the host Better Auth serves. */
+function passkeyPlugin(rpName: string, rpId: string | undefined) {
+  const tables = { passkey: { modelName: "passkeys" } };
+
+  return rpId
+    ? passkey({ rpName, rpID: rpId, schema: tables })
+    : passkey({ rpName, schema: tables });
+}
+
 export type MagicLinkSender = (message: { email: string; url: string }) => Promise<void>;
 
 export interface AuthEnv extends Partial<
@@ -353,11 +375,14 @@ export interface AuthEnv extends Partial<
  */
 export function createAuth(env: AuthEnv) {
   const appName = env.appName ?? "Wurmhol";
-  const socialProviders = {
-    // `select_account` lets one browser add a second Google account (multi-session).
-    ...(env.google ? { google: { ...env.google, prompt: "select_account" as const } } : {}),
-    ...(env.github ? { github: env.github } : {}),
-  };
+
+  const socialProviders: SocialProviders = {};
+
+  // `select_account` lets one browser add a second Google account (multi-session).
+  if (env.google) socialProviders.google = { ...env.google, prompt: "select_account" };
+
+  if (env.github) socialProviders.github = env.github;
+
   return betterAuth({
     appName,
     secret: env.secret,
@@ -417,6 +442,7 @@ export function createAuth(env: AuthEnv) {
           // A new session starts in the user's oldest org, the same default the API uses.
           before: async (session) => {
             const member = await findMember(env.db, session.userId);
+
             return { data: { ...session, activeOrganizationId: member?.orgId ?? null } };
           },
         },
@@ -424,11 +450,7 @@ export function createAuth(env: AuthEnv) {
     },
     plugins: [
       ...(env.sendMagicLink ? [magicLink({ sendMagicLink: env.sendMagicLink })] : []),
-      passkey({
-        rpName: appName,
-        ...(env.passkeyRpId ? { rpID: env.passkeyRpId } : {}),
-        schema: { passkey: { modelName: "passkeys" } },
-      }),
+      passkeyPlugin(appName, env.passkeyRpId),
       organization({
         // Anyone signed in may start another org; members join by invite link (the Worker's
         // `/api/invites`), not by email invitation.
@@ -464,6 +486,9 @@ export interface McpGrant {
   scopes: Set<string>;
 }
 
+/** The access token's granted scopes, space-separated; none when the claim is absent or malformed. */
+const scopeClaim = z.object({ scope: z.string().catch("") });
+
 /** One cache of the signing keys per isolate, refetched on a `kid` it does not know. */
 const jwksCache = {};
 
@@ -480,16 +505,18 @@ export async function verifyMcpAccessToken(
 ): Promise<McpGrant | null> {
   try {
     const payload = await verifyJwsAccessToken(token, {
-      jwksFetch: async () => (await auth.api.getJwks()) as Awaited<ReturnType<typeof getJwks>>,
+      jwksFetch: async () => await auth.api.getJwks(),
       jwksCacheKey: jwksCache,
       verifyOptions: {
-        issuer: new URL(auth.options.baseURL as string).origin,
+        issuer: new URL(auth.options.baseURL).origin,
         audience: resource,
         requiredClaims: ["sub", "azp", "exp"],
       },
     });
+
     if (getDpopJktFromPayload(payload)) return null;
-    const scope = typeof payload.scope === "string" ? payload.scope : "";
+    const { scope } = scopeClaim.parse(payload);
+
     return {
       userId: String(payload.sub),
       clientId: String(payload.azp),

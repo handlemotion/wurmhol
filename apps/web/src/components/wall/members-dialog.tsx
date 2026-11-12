@@ -166,6 +166,7 @@ export function MembersDialog({
 function TransferDialog({ member, onClose }: { member: Member | null; onClose: () => void }) {
   const transfer = useTransferOrg();
   const who = member ? member.name || member.email : "";
+
   return (
     <Dialog
       isOpen={member !== null}

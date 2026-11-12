@@ -5,7 +5,7 @@ import {
   Popover as PopoverPrimitive,
   type PopoverProps as PopoverPrimitiveProps,
 } from "react-aria-components/Popover";
-import { cx } from "@/lib/primitive";
+import { cx, renderChildren } from "@/lib/primitive";
 import {
   DialogBody,
   DialogClose,
@@ -30,6 +30,7 @@ export interface PopoverProps extends PopoverPrimitiveProps {
 
 export function Popover({ children, arrow = false, className, ref, ...props }: PopoverProps) {
   const offset = props.offset ?? (arrow ? 12 : 8);
+
   return (
     <PopoverPrimitive
       ref={ref}
@@ -63,7 +64,7 @@ export function Popover({ children, arrow = false, className, ref, ...props }: P
             </OverlayArrow>
           )}
           <div data-slot="popover-inner" className="max-h-[inherit] overflow-y-auto flex flex-col">
-            {typeof children === "function" ? children(values) : children}
+            {renderChildren(children, values)}
           </div>
         </>
       )}

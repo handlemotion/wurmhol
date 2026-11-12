@@ -46,6 +46,7 @@ export function DomainsDialog({
           setHostname("");
           setPipe("");
         }
+
         onOpenChange(open);
       }}
       size="lg"
@@ -133,8 +134,8 @@ const SAMPLE: Domain = {
   expiresAt: null,
 };
 
-function message(error: unknown) {
-  return error instanceof ApiError ? error.message : "Something went wrong. Try again.";
+function message(cause: unknown) {
+  return cause instanceof ApiError ? cause.message : "Something went wrong. Try again.";
 }
 
 /** One domain: where it stands, the records it still needs, and what can be done to it. */
@@ -143,6 +144,7 @@ function DomainRow({ domain }: { domain: Domain }) {
   const remove = useRemoveDomain();
   const state = STATE[domain.state];
   const waiting = domain.state === "pending" || domain.state === "verifying";
+
   return (
     <li className="flex flex-col gap-3 py-3">
       <div className="flex items-center justify-between gap-3">

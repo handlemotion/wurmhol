@@ -30,17 +30,20 @@ const CONTROL = "input, textarea, select, button, a, [role='button']";
 function measure(row: HTMLElement, container: HTMLElement): ItemRect {
   let top = row.offsetTop;
   let left = row.offsetLeft;
-  let parent = row.offsetParent as HTMLElement | null;
-  while (parent && parent !== container && container.contains(parent)) {
+  let parent = row.offsetParent;
+
+  while (parent instanceof HTMLElement && parent !== container && container.contains(parent)) {
     top += parent.offsetTop + parent.clientTop;
     left += parent.offsetLeft + parent.clientLeft;
-    parent = parent.offsetParent as HTMLElement | null;
+    parent = parent.offsetParent;
   }
+
   // A scroller between the row and the container (a long menu) moves the row up.
   for (let el = row.parentElement; el && el !== container; el = el.parentElement) {
     top -= el.scrollTop;
     left -= el.scrollLeft;
   }
+
   return { top, left, width: row.offsetWidth, height: row.offsetHeight };
 }
 
@@ -65,10 +68,13 @@ export function useMagneticHover({
     const container = containerRef.current;
     const rect = element && container ? measure(element, container) : null;
     const prev = litRef.current;
+
     if (!element || !rect) {
       if (prev) setLit(null);
+
       return;
     }
+
     if (
       prev?.element === element &&
       prev.rect.top === rect.top &&
@@ -78,12 +84,14 @@ export function useMagneticHover({
     ) {
       return;
     }
+
     setLit({ element, rect });
   }, []);
 
   const pick = useCallback(
     (clientX: number, clientY: number) => {
       const container = containerRef.current;
+
       if (!container) return;
       const box = container.getBoundingClientRect();
       const scaleX = container.offsetWidth ? box.width / container.offsetWidth : 1;
@@ -92,18 +100,22 @@ export function useMagneticHover({
       const y = (clientY - box.top) / scaleY - container.clientTop;
       let best: HTMLElement | null = null;
       let bestDistance = Infinity;
+
       for (const row of container.querySelectorAll<HTMLElement>(itemSelector)) {
         if (row.matches(SKIP)) continue;
         const r = measure(row, container);
         const dx = Math.max(r.left - x, 0, x - (r.left + r.width));
         const dy = Math.max(r.top - y, 0, y - (r.top + r.height));
         const distance = Math.hypot(dx, dy);
+
         if (distance < bestDistance) {
           best = row;
           bestDistance = distance;
+
           if (distance === 0) break;
         }
       }
+
       light(bestDistance <= maxDistance ? best : null);
     },
     [itemSelector, light, maxDistance],
@@ -120,11 +132,13 @@ export function useMagneticHover({
   const ref = useCallback(
     (element: HTMLElement | null) => {
       containerRef.current = element;
+
       if (!element) return;
       requestAnimationFrame(() => {
         const focused = element.querySelector<HTMLElement>(
           `:is(${itemSelector})[data-focus-visible]`,
         );
+
         if (focused && !litRef.current) light(focused);
       });
     },
@@ -135,6 +149,7 @@ export function useMagneticHover({
     (event: React.PointerEvent) => {
       if (event.pointerType !== "mouse") return;
       const { clientX, clientY } = event;
+
       if (frame.current !== null) cancelAnimationFrame(frame.current);
       frame.current = requestAnimationFrame(() => {
         frame.current = null;
@@ -160,9 +175,11 @@ export function useMagneticHover({
     if (frame.current !== null) cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(() => {
       frame.current = null;
+
       const focused = containerRef.current?.querySelector<HTMLElement>(
         `:is(${itemSelector})[data-focused]`,
       );
+
       if (focused) light(focused);
     });
   }, [itemSelector, light]);
@@ -170,8 +187,17 @@ export function useMagneticHover({
   // What is lit is what a click hits: a click in a gap lands on the lit row.
   const onClick = useCallback(
     (event: React.MouseEvent) => {
-      const target = event.target as Element;
-      if (!target.isConnected || target.closest(itemSelector) || target.closest(CONTROL)) return;
+      const target = event.target;
+
+      if (
+        !(target instanceof Element) ||
+        !target.isConnected ||
+        target.closest(itemSelector) ||
+        target.closest(CONTROL)
+      ) {
+        return;
+      }
+
       litRef.current?.element.click();
     },
     [itemSelector],

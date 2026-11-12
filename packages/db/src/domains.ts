@@ -40,10 +40,14 @@ export async function addDomain(
   | { ok: false; reason: "hostname_taken" | "pipe_taken" | "domain_limit" }
 > {
   const { limit, ...values } = input;
+
   const mine = (row: DomainRow | null) =>
     row !== null && row.orgId === input.orgId && row.pipeName === input.pipeName;
+
   const before = await findDomain(db, input.hostname);
+
   if (mine(before)) return { ok: true, domain: before!, created: false, nameClaimed: false };
+
   if (before) return { ok: false, reason: "hostname_taken" };
 
   const claimed = await db
@@ -51,28 +55,39 @@ export async function addDomain(
     .values({ name: input.pipeName, orgId: input.orgId })
     .onConflictDoNothing()
     .returning({ name: pipeNames.name });
+
   const nameClaimed = claimed.length > 0;
+
   const [owner] = await db
     .select({ orgId: pipeNames.orgId })
     .from(pipeNames)
     .where(eq(pipeNames.name, input.pipeName));
+
   if (owner?.orgId !== input.orgId) return { ok: false, reason: "pipe_taken" };
+
   const [inserted] = await db
     .insert(customDomains)
     .values({ ...values, state: "pending" })
     .onConflictDoNothing()
     .returning();
+
   if (!inserted) {
     if (nameClaimed) await releasePipeName(db, input.orgId, input.pipeName);
     const existing = await findDomain(db, input.hostname);
+
     if (mine(existing)) return { ok: true, domain: existing!, created: false, nameClaimed: false };
+
     return { ok: false, reason: "hostname_taken" };
   }
+
   if ((await countDomains(db, input.orgId)) > limit) {
     await deleteDomain(db, inserted);
+
     if (nameClaimed) await releasePipeName(db, input.orgId, input.pipeName);
+
     return { ok: false, reason: "domain_limit" };
   }
+
   return { ok: true, domain: inserted, created: true, nameClaimed };
 }
 
@@ -103,6 +118,7 @@ export async function releasePipeName(db: Db, orgId: string, name: string) {
 
 export async function findDomain(db: Db, hostname: string) {
   const [row] = await db.select().from(customDomains).where(eq(customDomains.hostname, hostname));
+
   return row ?? null;
 }
 
@@ -120,6 +136,7 @@ export async function countDomains(db: Db, orgId: string) {
     .select({ n: count() })
     .from(customDomains)
     .where(eq(customDomains.orgId, orgId));
+
   return row?.n ?? 0;
 }
 
@@ -133,6 +150,7 @@ export async function updateDomain(
   patch: Partial<Omit<DomainRow, "hostname" | "orgId" | "pipeName" | "createdAt" | "challenge">>,
 ) {
   const [row] = await db.update(customDomains).set(patch).where(isClaim(claim)).returning();
+
   return row ?? null;
 }
 
@@ -147,6 +165,7 @@ export async function findActiveDomain(db: Db, hostname: string) {
     .select({ orgId: customDomains.orgId, pipeName: customDomains.pipeName })
     .from(customDomains)
     .where(and(eq(customDomains.hostname, hostname), eq(customDomains.state, "active")));
+
   return row ?? null;
 }
 
@@ -164,6 +183,7 @@ export async function primaryDomain(db: Db, pipeName: string) {
     )
     .orderBy(asc(customDomains.activatedAt), asc(customDomains.hostname))
     .limit(1);
+
   return row?.hostname ?? null;
 }
 
@@ -173,6 +193,7 @@ export async function isActiveDomainOf(
   input: { hostname: string; orgId: string; pipeName: string },
 ) {
   const domain = await findActiveDomain(db, input.hostname);
+
   return domain?.orgId === input.orgId && domain.pipeName === input.pipeName;
 }
 

@@ -4,7 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { routePath } from "hono/route";
 import { type AppEnv, magicLinksOn, mcpScope, requestScope } from "./context.ts";
 import { type Config, loadConfig, mcpResource } from "./env.ts";
-import { createLogger, REQUEST_ID_HEADER, requestIdFrom } from "./log.ts";
+import { createLogger, loggedError, REQUEST_ID_HEADER, requestIdFrom } from "./log.ts";
 import { limitAuth } from "./rate-limiter.ts";
 import { account, api } from "./routes/api.ts";
 import { connect } from "./routes/connect.ts";
@@ -29,6 +29,7 @@ const trace = createMiddleware<AppEnv>(async (c, next) => {
   c.set("requestId", requestId);
   c.set("log", log);
   const started = Date.now();
+
   try {
     await next();
   } finally {
@@ -37,6 +38,7 @@ const trace = createMiddleware<AppEnv>(async (c, next) => {
     } catch {
       // Immutable headers (a websocket upgrade): the log still has it.
     }
+
     log.info("http.request", {
       method: c.req.method,
       route: routePath(c, -1),
@@ -62,7 +64,8 @@ function appConfig(config: Config) {
 }
 
 /** JSON for inside a `<script>`: `<` escaped, so no value can close the element. */
-const inlineJson = (value: unknown) => JSON.stringify(value).replaceAll("<", "\\u003c");
+const inlineJson = (value: ReturnType<typeof signInMethods> | ReturnType<typeof appConfig>) =>
+  JSON.stringify(value).replaceAll("<", "\\u003c");
 
 /**
  * Serves the web app. Pages (HTML) carry the sign-in methods and the app config inline, as JSON
@@ -72,10 +75,12 @@ const inlineJson = (value: unknown) => JSON.stringify(value).replaceAll("<", "\\
  */
 async function serveApp(c: { env: Env; req: { raw: Request } }) {
   const res = await c.env.ASSETS.fetch(c.req.raw);
+
   if (!res.headers.get("content-type")?.includes("text/html")) return res;
   const config = loadConfig(c.env);
   const methods = inlineJson(signInMethods(config));
   const app = inlineJson(appConfig(config));
+
   return new HTMLRewriter()
     .on("head", {
       element(head) {
@@ -95,6 +100,7 @@ async function serveApp(c: { env: Env; req: { raw: Request } }) {
  */
 function mcpHere(c: { req: { url: string }; var: AppEnv["Variables"] }) {
   const resource = mcpResource(c.var.config);
+
   return resource && new URL(resource).host === new URL(c.req.url).host ? resource : null;
 }
 
@@ -124,6 +130,7 @@ export const app = new Hono<AppEnv>()
   .use("/mcp", mcpScope, securityHeaders)
   .post("/mcp", async (c) => {
     const resource = mcpHere(c);
+
     return resource ? serveMcp(c, resource) : notFound();
   })
   .all("/mcp", (c) =>
@@ -146,13 +153,17 @@ export const app = new Hono<AppEnv>()
   // `prompt=login` keeps authorize from sending them straight back here.
   .get("/oauth/login", (c) => {
     const query = new URLSearchParams();
+
     for (const [key, value] of new URL(c.req.url).searchParams) {
       if (key !== "sig" && key !== "exp" && !key.startsWith("ba_")) query.append(key, value);
     }
+
     const prompt = (query.get("prompt") ?? "").split(" ").filter((p) => p && p !== "login");
+
     if (prompt.length) query.set("prompt", prompt.join(" "));
     else query.delete("prompt");
     const next = `/api/auth/oauth2/authorize?${query}`;
+
     return c.redirect(`/login?next=${encodeURIComponent(next)}`);
   })
   .use("/connect", requestScope)
@@ -209,7 +220,9 @@ export const app = new Hono<AppEnv>()
   .post("/api/auth/sign-in/magic-link", limitAuth, async (c) => {
     const response = await c.var.auth.handler(c.req.raw);
     const devLink = c.get("devLink");
+
     if (!devLink || !response.ok) return response;
+
     return c.json({ ...(await response.json<object>()), devLink });
   })
   .on(["GET", "POST"], "/api/auth/*", limitAuth, (c) => c.var.auth.handler(c.req.raw))
@@ -223,7 +236,11 @@ export const app = new Hono<AppEnv>()
   .all("*", (c) => serveApp(c))
   .onError((error, c) => {
     if (error instanceof HTTPException) return c.json({ error: error.message }, error.status);
-    (c.var.log ?? createLogger()).error("http.error", { error, orgId: c.var.member?.orgId });
+    (c.var.log ?? createLogger()).error("http.error", {
+      error: loggedError(error),
+      orgId: c.var.member?.orgId,
+    });
+
     return c.json({ error: "internal error", requestId: c.var.requestId }, 500);
   });
 

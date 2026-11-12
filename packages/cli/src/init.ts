@@ -2,6 +2,8 @@
 // server's port read from package.json; `--skill` also writes the plugin's skill.
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { isJsonObject, type JsonObject, type JsonValue, parseJson } from "@wurmhol/protocol";
+import { errorCode } from "@wurmhol/sdk/internal";
 import skill from "../../../plugins/wurmhol/skills/wurmhol/SKILL.md";
 import { allowlistLine, consoleUrl, envToken, savedLogin, server } from "./config.ts";
 import { credentialsFile } from "./credentials.ts";
@@ -22,27 +24,37 @@ function readIfExists(path: string): string | null {
   try {
     return readFileSync(path, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if (errorCode(error) === "ENOENT") return null;
     throw error;
   }
 }
 
-/** The dev server's port, from package.json's dependencies and scripts. */
-function devPort(cwd: string): number {
-  let manifest: { dependencies?: object; devDependencies?: object; scripts?: object } = {};
+/** `cwd`'s package.json, or an empty one when there is none or it is not a JSON object. */
+function readManifest(cwd: string): JsonObject {
   try {
-    manifest = JSON.parse(readIfExists(join(cwd, "package.json")) ?? "{}");
+    const manifest = parseJson(readIfExists(join(cwd, "package.json")) ?? "{}");
+
+    return isJsonObject(manifest) ? manifest : {};
   } catch {
     // Not JSON: no hints.
+    return {};
   }
-  const deps = new Set([
-    ...Object.keys(manifest.dependencies ?? {}),
-    ...Object.keys(manifest.devDependencies ?? {}),
-  ]);
-  const scripts = Object.values(manifest.scripts ?? {}).join("\n");
+}
+
+function keysOf(value: JsonValue | undefined): string[] {
+  return isJsonObject(value) ? Object.keys(value) : [];
+}
+
+/** The dev server's port, from package.json's dependencies and scripts. */
+function devPort(cwd: string): number {
+  const manifest = readManifest(cwd);
+  const deps = new Set([...keysOf(manifest.dependencies), ...keysOf(manifest.devDependencies)]);
+  const scripts = Object.values(isJsonObject(manifest.scripts) ? manifest.scripts : {}).join("\n");
+
   for (const [name, port] of DEV_PORTS) {
     if (deps.has(name) || new RegExp(`(^|[\\s;&|(])${name}(\\s|$)`, "m").test(scripts)) return port;
   }
+
   return 8787;
 }
 
@@ -53,15 +65,19 @@ export function init(writeSkill: boolean) {
   // between a check and the write.
   let target = join(cwd, "AGENTS.md");
   let current = "";
+
   for (const name of ["AGENTS.md", "CLAUDE.md"]) {
     const text = readIfExists(join(cwd, name));
+
     if (text === null) continue;
     target = join(cwd, name);
     current = text;
     break;
   }
+
   const say = (line: string) => process.stdout.write(`${line}\n`);
   say(allowlistLine());
+
   if (current.includes("npx wurmhol")) {
     say(`${relative(cwd, target)} already mentions wurmhol`);
   } else {
@@ -69,12 +85,14 @@ export function init(writeSkill: boolean) {
     appendFileSync(target, `${separator}${initLine(port)}\n`);
     say(`Added a line to ${relative(cwd, target)} (port ${port}, from package.json)`);
   }
+
   if (writeSkill) {
     const dir = join(cwd, ".claude/skills/wurmhol");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "SKILL.md"), skill);
     say(`Wrote ${relative(cwd, join(dir, "SKILL.md"))}`);
   }
+
   if (envToken()) {
     say("WURMHOL_TOKEN is set.");
   } else if (savedLogin()) {

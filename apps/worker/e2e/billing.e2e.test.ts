@@ -6,7 +6,8 @@
 // sandbox key.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   alive,
   api,
@@ -14,8 +15,10 @@ import {
   cli,
   cliEnv,
   createToken,
+  type JsonValue,
   localServer,
   me,
+  parseJson,
   type Person,
   share,
   signIn,
@@ -54,7 +57,7 @@ afterAll(async () => {
   await stack.stop();
 });
 
-function webhook(type: string, object: Record<string, unknown>, secret?: string) {
+function webhook(type: string, object: { [key: string]: JsonValue }, secret?: string) {
   return stripeWebhook(stack, type, object, secret);
 }
 
@@ -62,15 +65,19 @@ function subscription(status: string, plan: "friends" | "business" = "friends") 
   return stripeSubscription(customer, status, plan);
 }
 
-interface BillingBody {
-  standing: { ok: boolean };
-  subscription: { plan: string; status: string; trialEnd: string | null } | null;
-  spendCap: { cents: number; minCents: number; requests: number } | false;
-  usage: { bytes: number; requests: number } | null;
-}
+const billingBody = z.object({
+  standing: z.object({ ok: z.boolean() }),
+  subscription: z
+    .object({ plan: z.string(), status: z.string(), trialEnd: z.string().nullable() })
+    .nullable(),
+  spendCap: z
+    .object({ cents: z.number(), minCents: z.number(), requests: z.number() })
+    .or(z.literal(false)),
+  usage: z.object({ bytes: z.number(), requests: z.number() }).nullable(),
+});
 
 async function billing() {
-  return (await api<BillingBody>(stack, ada, "/api/billing")).body;
+  return (await api(stack, ada, "/api/billing", {}, billingBody)).body;
 }
 
 /** Waits for the org's plan, as `/api/billing` reports it, to be `plan` (null: none). */
@@ -80,8 +87,17 @@ async function planIs(plan: string | null) {
   });
 }
 
+/** A new invite link to `person`'s org. */
 async function invite(person: Person) {
-  return api<{ url: string }>(stack, person, "/api/invites", { method: "POST" });
+  const made = await api(
+    stack,
+    person,
+    "/api/invites",
+    { method: "POST" },
+    z.object({ url: z.string() }),
+  );
+
+  return made.body.url;
 }
 
 async function accept(person: Person, url: string) {
@@ -90,7 +106,8 @@ async function accept(person: Person, url: string) {
 
 function pidOf(id: string) {
   const file = join(env.WURMHOL_HOME!, "shares", `${id}.json`);
-  return (JSON.parse(readFileSync(file, "utf8")) as { pid: number }).pid;
+
+  return parseJson(z.object({ pid: z.number() }), readFileSync(file, "utf8")).pid;
 }
 
 describe("billing", () => {
@@ -104,19 +121,23 @@ describe("billing", () => {
 
   it("only owners open billing or set a spend cap, and the plugin's own routes are closed", async () => {
     const bob = await signIn(stack);
-    await accept(bob, (await invite(ada)).body.url);
+    await accept(bob, await invite(ada));
     expect((await api(stack, bob, "/api/billing/open", { method: "POST", body: {} })).status).toBe(
       403,
     );
+
     const cap = await api(stack, bob, "/api/billing/spend-cap", {
       method: "PUT",
       body: { cents: 5000 },
     });
+
     expect(cap.status).toBe(403);
+
     const direct = await api(stack, ada, "/api/auth/subscription/upgrade", {
       method: "POST",
       body: { plan: "friends" },
     });
+
     expect(direct.status).toBe(404);
   });
 
@@ -126,6 +147,7 @@ describe("billing", () => {
       subscription("active"),
       "whsec_wrong",
     );
+
     expect(response.status).toBeGreaterThanOrEqual(400);
   });
 
@@ -148,9 +170,11 @@ describe("billing", () => {
     const started = await share(stack, env, local.port);
     const cookie = await viewerCookie(stack, ada, started.url);
     const before = (await billing()).usage!.requests;
+
     for (let i = 0; i < 25; i++) {
       expect((await browserFetch(`${started.url}/n${i}`, { cookie })).status).toBe(200);
     }
+
     await stopAll(env);
     await waitFor(async () => (await billing()).usage!.requests >= before + 25, {
       what: "the pipe's requests to reach the org",
@@ -162,19 +186,22 @@ describe("billing", () => {
     // Ada and Bob are in. Two links made at 9 members: the first fills the org to 10, the second
     // is refused at the door, and no new link can be made.
     for (let i = 0; i < 7; i++) {
-      expect((await accept(await signIn(stack), (await invite(ada)).body.url)).status).toBe(200);
+      expect((await accept(await signIn(stack), await invite(ada))).status).toBe(200);
     }
-    const early = (await invite(ada)).body.url;
-    const late = (await invite(ada)).body.url;
+
+    const early = await invite(ada);
+    const late = await invite(ada);
     expect((await accept(await signIn(stack), early)).status).toBe(200);
     const refused = await accept(await signIn(stack), late);
     expect(refused.status).toBe(409);
     expect(JSON.stringify(refused.body)).toContain("includes 10 members");
-    expect((await invite(ada)).status).toBe(409);
+    expect((await api(stack, ada, "/api/invites", { method: "POST" })).status).toBe(409);
+
     const cap = await api(stack, ada, "/api/billing/spend-cap", {
       method: "PUT",
       body: { cents: 5000 },
     });
+
     expect(cap.status).toBe(409);
   });
 
@@ -189,7 +216,7 @@ describe("billing", () => {
       minCents: 2000,
       requests: 3 + 53_333_333,
     });
-    const late = (await invite(ada)).body.url;
+    const late = await invite(ada);
     expect((await accept(await signIn(stack), late)).status).toBe(200);
   });
 
@@ -198,11 +225,17 @@ describe("billing", () => {
       method: "PUT",
       body: { cents: 1999 },
     });
+
     expect(low.status).toBe(400);
-    const at = await api<{ requests: number }>(stack, ada, "/api/billing/spend-cap", {
-      method: "PUT",
-      body: { cents: 2000 },
-    });
+
+    const at = await api(
+      stack,
+      ada,
+      "/api/billing/spend-cap",
+      { method: "PUT", body: { cents: 2000 } },
+      z.object({ requests: z.number() }),
+    );
+
     expect(at.status).toBe(200);
     expect(at.body.requests).toBe(3);
   });
@@ -215,6 +248,7 @@ describe("billing", () => {
     await waitFor(
       async () => {
         await browserFetch(`${started.url}/`, { cookie }).catch(() => null);
+
         return !alive(pid);
       },
       { what: "the pipe to end at the spend cap", timeoutMs: 20_000, intervalMs: 250 },
@@ -227,6 +261,7 @@ describe("billing", () => {
       method: "PUT",
       body: { cents: 2100 },
     });
+
     expect(raised.status).toBe(200);
     expect((await cli([String(local.port)], env)).code).toBe(0);
     await stopAll(env);

@@ -17,8 +17,11 @@ export const machineConnect = new Hono<AppEnv>().get("/", async (c) => {
   if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
     return refuse(426, "expected a websocket upgrade", "Run wurmhol host.");
   }
+
   const token = await bearerToken(c);
+
   if (token instanceof Response) return token;
+
   if (!token.createdBy) {
     return refuse(
       401,
@@ -26,7 +29,9 @@ export const machineConnect = new Hono<AppEnv>().get("/", async (c) => {
       `Whoever made this token has left. Run wurmhol login, or make a token at ${c.var.config.auth.baseURL} (menu → Tokens).`,
     );
   }
+
   c.var.log.info("machine.connected", { orgId: token.orgId });
+
   return orgStub(c.env, token.orgId).fetch(
     toOrg(c.req.raw, {
       kind: "machine",
@@ -56,8 +61,10 @@ export const machines = new Hono<AppEnv>()
         c.req.param("id"),
         c.req.valid("json").port,
       );
+
       if (!result.ok) throw new HTTPException(result.status, { message: result.error });
       c.var.log.info("machine.opened", { orgId: c.var.member.orgId });
+
       return c.json({ url: result.url });
     },
   );

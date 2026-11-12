@@ -4,6 +4,7 @@
 // unnamed one gets a new one, announced by `open`. This is the policy an embedding app would
 // otherwise write itself (ADR 0030).
 import { EventEmitter } from "node:events";
+import { isString } from "@wurmhol/protocol";
 import { FixError } from "./errors.ts";
 import {
   type CloseReason,
@@ -94,9 +95,11 @@ const WITHOUT_REOPEN: CloseReason[] = [
  */
 function hopeless(error: unknown): error is FixError {
   if (!(error instanceof FixError)) return false;
+
   if (error.final || ["invalid_option", "no_token", "unsupported"].includes(error.code))
     return true;
   const status = error.status;
+
   return (
     error.code === "refused" &&
     status !== undefined &&
@@ -139,14 +142,17 @@ class Managed implements ManagedPipe {
 
   on<E extends keyof ManagedPipeEvents>(event: E, listener: ManagedPipeEvents[E]) {
     this.#events.on(event, listener);
+
     return this;
   }
   once<E extends keyof ManagedPipeEvents>(event: E, listener: ManagedPipeEvents[E]) {
     this.#events.once(event, listener);
+
     return this;
   }
   off<E extends keyof ManagedPipeEvents>(event: E, listener: ManagedPipeEvents[E]) {
     this.#events.off(event, listener);
+
     return this;
   }
   #emit<E extends keyof ManagedPipeEvents>(event: E, ...args: Parameters<ManagedPipeEvents[E]>) {
@@ -161,16 +167,20 @@ class Managed implements ManagedPipe {
 
   #delay(attempt: number) {
     const policy = this.#policy();
+
     const base = Math.min(
       policy.maxDelayMs,
       policy.initialDelayMs * policy.factor ** Math.max(attempt - 1, 0),
     );
+
     const spread = base * policy.jitter;
+
     return Math.max(0, Math.round(base + (Math.random() * 2 - 1) * spread));
   }
 
   #policy() {
     const given = this.#options.reopen || {};
+
     return {
       giveUpOn: given.giveUpOn ?? WITHOUT_REOPEN,
       initialDelayMs: given.initialDelayMs ?? 1000,
@@ -207,31 +217,38 @@ class Managed implements ManagedPipe {
     const once = this.#options.reopen === false;
     let failures = 0;
     let opened = false;
+
     while (!this.#stop.signal.aborted) {
       let pipe: Pipe;
+
       try {
         const { token, reopen: _reopen, ...rest } = this.#options;
         pipe = await openPipe({
           ...rest,
-          token: typeof token === "function" ? await token() : token,
+          token: isString(token) ? token : await token(),
           signal: this.#stop.signal,
         });
       } catch (error) {
         if (this.#stop.signal.aborted) break;
+
         const fix =
           error instanceof FixError
             ? error
-            : new FixError(String((error as Error)?.message ?? error));
+            : new FixError(error instanceof Error ? error.message : String(error));
+
         if (hopeless(fix) || once || ++failures > policy.maxAttempts) {
           if (!opened) this.#rejectReady(fix);
+
           return this.#finish("gave_up", fix);
         }
+
         const delayMs = this.#delay(failures);
         this.state = opened ? "reconnecting" : "opening";
         this.#emit("reopening", { attempt: failures, delayMs, reason: "error", error: fix });
         await this.#sleep(delayMs);
         continue;
       }
+
       failures = 0;
       this.#current = pipe;
       this.state = "open";
@@ -248,17 +265,21 @@ class Managed implements ManagedPipe {
         this.#emit("reconnected");
       });
       this.#emit("open", { id: pipe.id, url: pipe.url, endsAt: pipe.endsAt, reopened: opened });
+
       if (!opened) this.#resolveReady();
       opened = true;
       const reason = await new Promise<CloseReason>((resolve) => pipe.once("close", resolve));
       this.#current = null;
+
       if (this.#stop.signal.aborted) return this.#finish("stopped");
+
       if (once || policy.giveUpOn.includes(reason)) return this.#finish(reason);
       this.state = "reconnecting";
       const delayMs = this.#delay(1);
       this.#emit("reopening", { attempt: 1, delayMs, reason });
       await this.#sleep(delayMs);
     }
+
     if (!opened)
       this.#rejectReady(new FixError("Closed before the pipe opened.", { code: "error" }));
     this.#finish("stopped");

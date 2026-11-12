@@ -12,13 +12,14 @@ import {
 } from "./auth.ts";
 import { domains, type DomainsClient } from "./domains.ts";
 import { explainRefusal, FixError } from "./errors.ts";
-import { send } from "./http.ts";
+import { type Answer, routeJson, send } from "./http.ts";
 import { keepOpen, type ManagedPipe, type ManagedPipeOptions } from "./managed.ts";
 import {
   DEFAULT_SERVER,
   originOf,
   type OpenPipeOptions,
   openPipe,
+  type LogFields,
   type Pipe,
   type PipeSource,
 } from "./pipe.ts";
@@ -38,7 +39,7 @@ export interface WurmholOptions {
   /** See `OpenPipeOptions.transport`. */
   transport?: TransportChoice;
   /** Diagnostic events, never request contents or secrets. A throw here is ignored. */
-  log?: (event: string, fields: Record<string, unknown>) => void;
+  log?: (event: string, fields: LogFields) => void;
 }
 
 /** What the relay says about one open pipe: the card the wall shows. */
@@ -63,6 +64,7 @@ export interface PipeInfo {
 }
 
 export type PipeOptions = Omit<OpenPipeOptions, "token" | "server" | "transport" | "client">;
+
 export type KeepOpenOptions = Omit<ManagedPipeOptions, "token" | "server" | "transport" | "client">;
 
 export class Wurmhol {
@@ -93,17 +95,20 @@ export class Wurmhol {
   /** The token in use: the one given, or the stored one for this server; null when signed out. */
   async token(): Promise<string | null> {
     if (this.#token) return this.#token;
+
     return (await this.#store.load(this.server))?.token ?? null;
   }
 
   async #needToken(): Promise<string> {
     const token = await this.token();
+
     if (!token) {
       throw new FixError(
         `Sign in first: call auth.login(), or pass a token made at ${this.server} (menu → Tokens).`,
         { code: "no_token" },
       );
     }
+
     return token;
   }
 
@@ -136,6 +141,7 @@ export class Wurmhol {
         product: this.#client.name,
         signal: options.signal,
       });
+
       return this.#save(granted);
     },
     /** `start`, `prompt`, `wait` in one call. */
@@ -148,6 +154,7 @@ export class Wurmhol {
     }): Promise<StoredToken> => {
       const code = await this.auth.start(options);
       options.prompt(code);
+
       return this.auth.wait(code, { signal: options.signal });
     },
     /** Redeems a setup code the console made for a signed-in member (a one-time code). */
@@ -168,6 +175,7 @@ export class Wurmhol {
     /** The stored token's org and computer name, or null. Never the token itself. */
     status: async (): Promise<{ server: string; org: string | null; name: string } | null> => {
       const stored = await this.#store.load(this.server);
+
       return stored ? { server: stored.server, org: stored.org, name: stored.name } : null;
     },
   };
@@ -179,7 +187,9 @@ export class Wurmhol {
       org: granted.org.name ?? granted.org.id,
       name: granted.name,
     };
+
     await this.#store.save(stored);
+
     return stored;
   }
 
@@ -193,8 +203,9 @@ export class Wurmhol {
       keepOpen({ ...options, ...this.#shared(), token: () => this.#needToken() }),
     /** The org's open pipes (the wall's cards). Needs a token that can list and end every pipe. */
     list: async (options: { signal?: AbortSignal } = {}): Promise<PipeInfo[]> => {
-      const body = await this.#call("GET", "/v1/pipes", options.signal);
-      return (body as { pipes: PipeInfo[] }).pipes;
+      const answer = await this.#call("GET", "/v1/pipes", options.signal);
+
+      return routeJson<{ pipes: PipeInfo[] }>(answer, this.server).pipes;
     },
     /** Ends one of the org's pipes, as Terminate does on the wall. */
     end: async (id: string, options: { signal?: AbortSignal } = {}): Promise<void> => {
@@ -211,8 +222,10 @@ export class Wurmhol {
     };
   }
 
-  async #call(method: string, path: string, signal?: AbortSignal): Promise<unknown> {
+  /** One call with this client's token: the answer when it is a success, else the fix. */
+  async #call(method: string, path: string, signal?: AbortSignal): Promise<Answer> {
     const token = await this.#needToken();
+
     const answer = await send(new URL(path, this.server), {
       server: this.server,
       version: this.#client.version,
@@ -221,13 +234,9 @@ export class Wurmhol {
       headers: { authorization: `Bearer ${token}` },
       signal,
     });
-    if (answer.status >= 200 && answer.status < 300) {
-      try {
-        return JSON.parse(answer.body);
-      } catch {
-        return {};
-      }
-    }
+
+    if (answer.status >= 200 && answer.status < 300) return answer;
+
     throw explainRefusal(answer.status, answer.body, {
       server: this.server,
       viaProxy: answer.viaProxy,

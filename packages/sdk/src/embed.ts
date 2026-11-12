@@ -13,7 +13,7 @@
 import { embedCredentialKind } from "@wurmhol/protocol";
 import pkg from "../package.json" with { type: "json" };
 import { explainRefusal, FixError } from "./errors.ts";
-import { send } from "./http.ts";
+import { type Answer, type RequestJson, routeJson, send } from "./http.ts";
 import { DEFAULT_SERVER, originOf } from "./pipe.ts";
 
 export interface WurmholEmbedOptions {
@@ -26,7 +26,9 @@ export interface WurmholEmbedOptions {
 }
 
 export type SubjectKind = "user" | "service";
+
 export type GrantKind = "client" | "browser";
+
 export type EmbedTunnelState = "never" | "live" | "away" | "stopped" | "ended";
 
 export interface EmbedTenant {
@@ -119,19 +121,22 @@ export class WurmholEmbed {
 
   constructor(options: WurmholEmbedOptions) {
     // A page's code is anyone's to read: an integration key there would hand out every tunnel.
-    if (typeof (globalThis as { document?: unknown }).document !== "undefined") {
+    if ("document" in globalThis) {
       throw new FixError(
         "WurmholEmbed runs on your server only. Issue grants there and send the browser a launch URL.",
         { code: "unsupported" },
       );
     }
+
     const key = options.key?.trim();
+
     if (embedCredentialKind(key) !== "key") {
       throw new FixError(
         "Pass the application's integration key (whk_…). An owner makes one in the console.",
         { code: "no_token" },
       );
     }
+
     this.#key = key;
     this.server = originOf(options.server ?? DEFAULT_SERVER);
     this.#client = options.client ?? { name: "wurmhol-sdk", version: pkg.version };
@@ -146,7 +151,7 @@ export class WurmholEmbed {
         monthlyRequests?: number | null;
         activeTunnels?: number | null;
       } = {},
-    ) => (await this.#call<{ tenant: EmbedTenant }>("PUT", `tenants/${path(id)}`, change)).tenant,
+    ) => (await this.#json<{ tenant: EmbedTenant }>("PUT", `tenants/${path(id)}`, change)).tenant,
     /** Disables a tenant and deletes its tunnels. */
     remove: async (id: string) => {
       await this.#call("DELETE", `tenants/${path(id)}`);
@@ -157,7 +162,7 @@ export class WurmholEmbed {
     /** Makes or updates a tenant's subject. Disabling one revokes its grants. */
     put: async (tenant: string, id: string, input: { kind: SubjectKind; disabled?: boolean }) =>
       (
-        await this.#call<{ subject: EmbedSubject }>(
+        await this.#json<{ subject: EmbedSubject }>(
           "PUT",
           `tenants/${path(tenant, "subjects", id)}`,
           input,
@@ -170,7 +175,7 @@ export class WurmholEmbed {
     /** Revokes every grant of a subject, on every tunnel. Returns how many. */
     revokeGrants: async (tenant: string, id: string) =>
       (
-        await this.#call<{ revoked: number }>(
+        await this.#json<{ revoked: number }>(
           "POST",
           `tenants/${path(tenant, "subjects", id, "revoke-grants")}`,
         )
@@ -185,17 +190,20 @@ export class WurmholEmbed {
       /** More of the tenant's subjects who may be granted it. */
       access?: string[];
       connectorTtlSeconds?: number;
-    }) => this.#call<{ tunnel: EmbedTunnel; connector: EmbedConnector }>("POST", "tunnels", input),
+    }) => this.#json<{ tunnel: EmbedTunnel; connector: EmbedConnector }>("POST", "tunnels", input),
     /** The application's tunnels; of a tenant, or that one of its subjects may be granted. */
     list: async (filter: { tenant?: string; subject?: string } = {}) => {
       const query = new URLSearchParams();
+
       if (filter.tenant !== undefined) query.set("tenant", filter.tenant);
+
       if (filter.subject !== undefined) query.set("subject", filter.subject);
       const suffix = query.size ? `?${query}` : "";
-      return (await this.#call<{ tunnels: EmbedTunnel[] }>("GET", `tunnels${suffix}`)).tunnels;
+
+      return (await this.#json<{ tunnels: EmbedTunnel[] }>("GET", `tunnels${suffix}`)).tunnels;
     },
     get: async (id: string) =>
-      (await this.#call<{ tunnel: EmbedTunnel }>("GET", `tunnels/${path(id)}`)).tunnel,
+      (await this.#json<{ tunnel: EmbedTunnel }>("GET", `tunnels/${path(id)}`)).tunnel,
     /** Ends its session; its agent stops, and may open it again when restarted. */
     stop: async (id: string) => {
       await this.#call("POST", `tunnels/${path(id, "stop")}`);
@@ -215,7 +223,7 @@ export class WurmholEmbed {
     /** A new connector; `rotate` revokes the others and ends a session they opened. */
     connector: async (id: string, options: { rotate?: boolean; ttlSeconds?: number } = {}) =>
       (
-        await this.#call<{ connector: EmbedConnector }>(
+        await this.#json<{ connector: EmbedConnector }>(
           "POST",
           `tunnels/${path(id, "connectors")}`,
           options,
@@ -227,7 +235,7 @@ export class WurmholEmbed {
     },
     /** The tunnel's grant log, newest first. */
     grantLog: async (id: string) =>
-      (await this.#call<{ events: EmbedGrantEvent[] }>("GET", `tunnels/${path(id, "grants")}`))
+      (await this.#json<{ events: EmbedGrantEvent[] }>("GET", `tunnels/${path(id, "grants")}`))
         .events,
   };
 
@@ -240,7 +248,7 @@ export class WurmholEmbed {
       ttlSeconds?: number;
       /** A browser grant's first page on the tunnel. */
       next?: string;
-    }) => (await this.#call<{ grant: EmbedGrant }>("POST", "grants", input)).grant,
+    }) => (await this.#json<{ grant: EmbedGrant }>("POST", "grants", input)).grant,
     /** Refused at the next request; open WebSockets close with 4403. */
     revoke: async (id: string) => {
       await this.#call("DELETE", `grants/${path(id)}`);
@@ -250,11 +258,14 @@ export class WurmholEmbed {
   /** The application's usage this window, and each named tenant's, with the limits in effect. */
   async usage(options: { tenants?: string[] } = {}) {
     const query = new URLSearchParams();
+
     for (const tenant of options.tenants ?? []) query.append("tenant", tenant);
-    return this.#call<EmbedUsage>("GET", `usage${query.size ? `?${query}` : ""}`);
+
+    return this.#json<EmbedUsage>("GET", `usage${query.size ? `?${query}` : ""}`);
   }
 
-  async #call<T = unknown>(method: string, route: string, json?: unknown): Promise<T> {
+  /** One call to `/v1/embed`: the answer when it is a success, else the fix. */
+  async #call(method: string, route: string, json?: RequestJson): Promise<Answer> {
     const answer = await send(new URL(`/v1/embed/${route}`, this.server), {
       server: this.server,
       version: this.#client.version,
@@ -263,21 +274,26 @@ export class WurmholEmbed {
       headers: { authorization: `Bearer ${this.#key}` },
       json,
     });
-    if (answer.status >= 200 && answer.status < 300) {
-      try {
-        return JSON.parse(answer.body) as T;
-      } catch {
-        return {} as T;
-      }
-    }
+
+    if (answer.status >= 200 && answer.status < 300) return answer;
+
     throw explainRefusal(answer.status, answer.body, {
       server: this.server,
       viaProxy: answer.viaProxy,
     });
   }
+
+  /** `#call` for a route whose answer the caller reads: its JSON body. */
+  async #json<T extends object>(method: string, route: string, json?: RequestJson): Promise<T> {
+    return routeJson<T>(await this.#call(method, route, json), this.server);
+  }
+}
+
+export interface GrantHeaders {
+  "x-wurmhol-grant": string;
 }
 
 /** The header a program sends a client grant in, for `fetch` or a WebSocket's handshake. */
-export function grantHeaders(token: string): Record<string, string> {
+export function grantHeaders(token: string): GrantHeaders {
   return { "x-wurmhol-grant": token };
 }

@@ -22,7 +22,9 @@ export const RESERVED_PREFIX = "/__wurmhol/";
 export function isNavigation(request: Request) {
   if (request.method !== "GET") return false;
   const mode = request.headers.get("sec-fetch-mode");
+
   if (mode) return mode === "navigate";
+
   return (request.headers.get("accept") ?? "").includes("text/html");
 }
 
@@ -34,12 +36,16 @@ export async function handleShareHost(
   customHost: string | null = null,
 ) {
   const config = loadConfig(env);
+
   if (!shareId) return errorPage(404, "This pipe has ended.");
   const stub = shareStub(env, shareId);
+
   const open = async () => {
     const { state } = await stub.status();
+
     return state === "live" || state === "away";
   };
+
   const ended = () => errorPage(410, "This pipe has ended.");
   const url = new URL(request.url);
 
@@ -48,12 +54,15 @@ export async function handleShareHost(
     if (!(await open())) return ended();
     const code = url.searchParams.get("code");
     const userId = code ? await stub.redeemCode(code) : null;
+
     if (!userId) return errorPage(400, "This sign-in link has expired. Open the pipe's URL again.");
+
     const cookie = await signShareCookie(config.auth.secret, {
       shareId,
       userId,
       expiresAt: Math.floor(Date.now() / 1000) + SHARE_COOKIE_TTL_SECONDS,
     });
+
     return new Response(null, {
       status: 302,
       headers: {
@@ -68,8 +77,10 @@ export async function handleShareHost(
   // A client with no browser session (ADR 0028): a pipe opened with an access key takes it in
   // place of the sign-in, and the object checks it. Nothing here redirects to the app.
   const accessKey = request.headers.get(ACCESS_KEY_HEADER);
+
   if (accessKey !== null) {
     if (!(await open())) return ended();
+
     return fromShare(await stub.fetch(toShare(request, { key: accessKey }))).response;
   }
 
@@ -78,28 +89,36 @@ export async function handleShareHost(
     readCookie(request.headers.get("cookie"), SHARE_COOKIE),
     shareId,
   );
+
   if (!userId) {
     const status = await stub.status();
+
     if (status.state !== "live" && status.state !== "away") return ended();
+
     // An embedded tunnel is reached through its own host and a grant (`embedded-host.ts`); a
     // session found here anyway is never sent to Wurmhol's sign-in.
     if (status.embedded) return grantRequired();
+
     return signIn(request, config.auth.baseURL, shareId, customHost);
   }
 
   // The hot path, one trip to the object: it answers an ended or unknown share itself.
   const { response, orgId } = fromShare(await stub.fetch(toShare(request, { viewer: userId })));
+
   if (refusedViewer(response)) {
     // Removed from the org since the cookie was issued: sign in again, as someone who belongs.
     createLogger({ component: "viewer" }).info("viewer.refused", { shareId });
     const again = signIn(request, config.auth.baseURL, shareId, customHost);
     const out = new Response(again.body, again);
     out.headers.append("set-cookie", clearShareCookieHeader());
+
     return out;
   }
+
   if (orgId) {
     await noteOAuthRedirect(env, config, { id: shareId, orgId }, request, response, customHost);
   }
+
   return response;
 }
 
@@ -119,12 +138,15 @@ function signIn(request: Request, appURL: string, shareId: string, customHost: s
       headers: { "content-type": "text/plain", "cache-control": "no-store" },
     });
   }
+
   const url = new URL(request.url);
   const open = new URL("/open", appURL);
   open.searchParams.set("share", shareId);
+
   // Back to the host the viewer came to, which `/open` checks is this pipe's own (ADR 0033).
   if (customHost) open.searchParams.set("host", customHost);
   open.searchParams.set("next", `${url.pathname}${url.search}`);
+
   return new Response(null, {
     status: 302,
     headers: { location: open.toString(), "cache-control": "no-store" },

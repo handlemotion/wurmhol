@@ -4,7 +4,7 @@ import {
 } from "react-aria-components/Button";
 import { tv, type VariantProps } from "tailwind-variants";
 import { Children, isValidElement } from "react";
-import { cx } from "@/lib/primitive";
+import { cx, renderChildren } from "@/lib/primitive";
 import { Loader } from "./loader";
 
 /**
@@ -83,7 +83,8 @@ export function Button({ className, intent, size, ref, children, ...props }: But
       className={cx(buttonStyles({ intent, size }), className)}
     >
       {(values) => {
-        const content = typeof children === "function" ? children(values) : children;
+        const content = renderChildren(children, values);
+
         return values.isPending ? <Pending>{content}</Pending> : content;
       }}
     </ButtonPrimitive>
@@ -97,7 +98,9 @@ export function Button({ className, intent, size, ref, children, ...props }: But
 function Pending({ children }: { children: React.ReactNode }) {
   const items = Children.toArray(children);
   const icon = items.findIndex((item) => isValidElement(item));
+
   if (icon === -1) return <span className="shimmer">{children}</span>;
+
   return items.map((item, i) =>
     i === icon ? <Loader key="loader" className="size-icon" /> : item,
   );

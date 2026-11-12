@@ -20,9 +20,12 @@ import type { App, AppSettings } from "@/lib/api";
  */
 function limit(text: string): number | null | undefined {
   const value = text.trim();
+
   if (value === "") return null;
+
   if (!/^\d+$/.test(value)) return undefined;
   const number = Number(value);
+
   return Number.isSafeInteger(number) && number > 0 ? number : undefined;
 }
 
@@ -32,6 +35,7 @@ const LIMITS = [
   "tenantMonthlyRequests",
   "tenantActiveTunnels",
 ] as const;
+
 const shown = (value: number | null) => (value === null ? "" : String(value));
 
 /**
@@ -52,6 +56,7 @@ export function AppSettingsDialog({
 }) {
   const update = useUpdateApp(app.id);
   const remove = useDeleteApp();
+
   const initial = () => ({
     name: app.name,
     launchUrl: app.launchUrl ?? "",
@@ -61,9 +66,12 @@ export function AppSettingsDialog({
     tenantMonthlyRequests: shown(app.tenantMonthlyRequests),
     tenantActiveTunnels: shown(app.tenantActiveTunnels),
   });
+
   const [form, setForm] = useState(initial);
+
   const set = (field: keyof ReturnType<typeof initial>) => (value: string) =>
     setForm((current) => ({ ...current, [field]: value }));
+
   const [confirming, setConfirming] = useState(false);
   // The dialog opens from its prop, not through `onOpenChange`: every opening starts from the
   // app as saved, so edits dismissed without saving never come back with the next save.
@@ -74,16 +82,19 @@ export function AppSettingsDialog({
     }
     // Only on opening: `initial` reads the app, and a refetch while editing must not reset.
   }, [isOpen]);
+
   const limits = {
     monthlyRequests: limit(form.monthlyRequests),
     activeTunnels: limit(form.activeTunnels),
     tenantMonthlyRequests: limit(form.tenantMonthlyRequests),
     tenantActiveTunnels: limit(form.tenantActiveTunnels),
   };
+
   const invalid = LIMITS.filter((key) => limits[key] === undefined);
 
   const save = () => {
     if (invalid.length > 0) return;
+
     const settings: AppSettings = {
       name: form.name,
       launchUrl: form.launchUrl.trim() || null,
@@ -93,6 +104,7 @@ export function AppSettingsDialog({
       tenantMonthlyRequests: limits.tenantMonthlyRequests ?? null,
       tenantActiveTunnels: limits.tenantActiveTunnels ?? null,
     };
+
     update.mutate(settings, { onSuccess: () => onOpenChange(false) });
   };
 
@@ -105,7 +117,7 @@ export function AppSettingsDialog({
       value={form[key]}
       onChange={set(key)}
       type={props.type}
-      isInvalid={(LIMITS as readonly string[]).includes(key) && invalid.includes(key as never)}
+      isInvalid={invalid.some((invalidKey) => invalidKey === key)}
     >
       <Label>{label}</Label>
       <Input placeholder={props.placeholder} inputMode={props.inputMode} />

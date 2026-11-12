@@ -10,7 +10,12 @@
 // browser session in), PIPE_TTL (e.g. "2h").
 import { FixError, Wurmhol } from "../src/index.ts";
 
-const out = (event: string, fields: Record<string, unknown> = {}) =>
+/** One event's fields, printed on its JSON line. */
+interface EventFields {
+  [field: string]: string | number | boolean | null | undefined;
+}
+
+const out = (event: string, fields: EventFields = {}) =>
   console.log(JSON.stringify({ event, ...fields }));
 
 const wurmhol = new Wurmhol({
@@ -29,20 +34,25 @@ const pipe = wurmhol.pipes.keepOpen({
 });
 
 pipe.on("open", ({ url, id, reopened }) => out("open", { url, id, reopened }));
+
 pipe.on("reopening", ({ attempt, delayMs, reason }) =>
   out("reopening", { attempt, delayMs, reason }),
 );
+
 pipe.on("disconnected", ({ code }) => out("disconnected", { code }));
+
 pipe.on("reconnected", () => out("reconnected"));
+
 pipe.on("request", ({ method, path, status }) => out("request", { method, path, status }));
+
 pipe.on("closed", ({ reason, error }) => {
   out("closed", { reason, code: error?.code });
   // Nothing is left running once the pipe has closed, so the process ends by itself.
   process.exitCode = error ? 3 : 0;
 });
 
-pipe.ready().catch((error: unknown) => {
-  out("error", { code: error instanceof FixError ? error.code : "error", message: String(error) });
+pipe.ready().catch((cause: unknown) => {
+  out("error", { code: cause instanceof FixError ? cause.code : "error", message: String(cause) });
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

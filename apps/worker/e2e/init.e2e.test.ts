@@ -4,14 +4,24 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it } from "vite-plus/test";
 import { workerRoot } from "./global-setup.ts";
 import { cliPath } from "./support.ts";
 
-function project(manifest: object | null, files: Record<string, string> = {}) {
+/** The parts of a package.json that pick the dev port. */
+interface Manifest {
+  scripts?: Record<string, string>;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+}
+
+function project(manifest: Manifest | null, files: Record<string, string> = {}) {
   const dir = mkdtempSync(join(tmpdir(), "wurmhol-init-"));
+
   if (manifest) writeFileSync(join(dir, "package.json"), JSON.stringify(manifest));
+
   for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+
   return dir;
 }
 
@@ -26,7 +36,9 @@ function init(dir: string, args: string[] = [], env: Record<string, string> = {}
       ...env,
     },
   });
+
   expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: "" });
+
   return result.stdout;
 }
 
@@ -38,6 +50,7 @@ it("in a Vite project, appends the line with 5173 to CLAUDE.md once, and says th
     { scripts: { dev: "vite", build: "vite build" }, devDependencies: { vite: "^8.0.0" } },
     { "CLAUDE.md": "# Rules\n" },
   );
+
   const first = init(dir);
   // Catches a sandbox learning which hosts to allowlist only after a refused call.
   expect(first.split("\n")[0]).toBe(
@@ -51,13 +64,14 @@ it("in a Vite project, appends the line with 5173 to CLAUDE.md once, and says th
 });
 
 it("picks the framework's port over Vite's, and 8787 for anything else", () => {
-  const cases: [object | null, number][] = [
+  const cases: [Manifest | null, number][] = [
     // Astro and Next projects often carry Vite too; their own port is the one that serves.
     [{ dependencies: { astro: "^5", vite: "^8" } }, 4321],
     [{ scripts: { dev: "next dev --turbopack" } }, 3000],
     [{ scripts: { dev: "wrangler dev" } }, 8787],
     [null, 8787],
   ];
+
   for (const [manifest, port] of cases) {
     const dir = project(manifest);
     init(dir);
@@ -90,9 +104,11 @@ it("a token from wurmhol login counts as set, but only for the server it belongs
   const out = init(project(null), [], { WURMHOL_HOME: home });
   expect(out).toContain(`Logged in: wurmhol uses the token in ${join(home, "credentials.json")}.`);
   expect(out).not.toContain(stored.token);
+
   const elsewhere = init(project(null), [], {
     WURMHOL_HOME: home,
     WURMHOL_URL: "https://wurmhol.example.com",
   });
+
   expect(elsewhere).toContain("No token.");
 });

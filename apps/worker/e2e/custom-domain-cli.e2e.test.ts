@@ -1,13 +1,15 @@
 // `wurmhol domain` and the SDK's `domains()` client (ADR 0033): the same API as the console, from
 // the shell, with the token an orchestrator holds.
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
 import { DomainError, domains } from "wurmhol";
+import { z } from "zod";
 import { fakeCloudflare, fakeResolver, TOKEN, ZONE } from "./domain-fakes.ts";
 import {
   cli,
   cliEnv,
   createToken,
   localServer,
+  parseJson,
   shareStates,
   type Person,
   signIn,
@@ -43,37 +45,39 @@ afterAll(async () => {
   await resolver.close();
 });
 
-interface Domain {
-  hostname: string;
-  state: string;
-  dns: { type: string; name: string; value: string; done: boolean }[];
-}
+const domain = z.object({
+  hostname: z.string(),
+  state: z.string(),
+  dns: z.array(z.object({ type: z.string(), value: z.string() })),
+});
 
 it("adds a domain, waits until its records are published, lists it and removes it", async () => {
   const added = await cli(
     ["domain", "add", "preview.acme-cli.test", "--name", "acme-cli", "--json"],
     org,
   );
+
   expect(added.code).toBe(0);
-  const domain = JSON.parse(added.stdout) as Domain;
-  expect(domain.state).toBe("pending");
-  expect(domain.dns.map((r) => r.type)).toEqual(["TXT", "CNAME"]);
+  const pending = parseJson(domain, added.stdout);
+  expect(pending.state).toBe("pending");
+  expect(pending.dns.map((r) => r.type)).toEqual(["TXT", "CNAME"]);
 
   // The owner publishes both records while `--wait` is looking.
   const waiting = cli(["domain", "verify", "preview.acme-cli.test", "--wait", "--json"], org);
   await new Promise((resolve) => setTimeout(resolve, 1500));
-  resolver.publish("_wurmhol.preview.acme-cli.test", domain.dns[0]!.value);
+  resolver.publish("_wurmhol.preview.acme-cli.test", pending.dns[0]!.value);
   cloudflare.set("preview.acme-cli.test", { status: "active", sslStatus: "active" });
   const verified = await waiting;
   expect(verified.code).toBe(0);
-  expect((JSON.parse(verified.stdout) as Domain).state).toBe("active");
+  expect(parseJson(domain, verified.stdout).state).toBe("active");
 
   // A pipe opened with the name now has the domain as its URL, and is still found by its name.
   const local = await localServer((_req, res) => res.end("ok"));
+
   try {
     const opened = await cli([String(local.port), "--name", "acme-cli", "--json"], pipesOnly);
     expect(opened.code).toBe(0);
-    expect((JSON.parse(opened.stdout) as { url: string }).url).toBe(
+    expect(parseJson(z.object({ url: z.string() }), opened.stdout).url).toBe(
       `http://preview.acme-cli.test:${stack.port}`,
     );
     // Catches: `stop <name>` matching the first label of the URL (`preview`) instead of the name.
@@ -86,7 +90,7 @@ it("adds a domain, waits until its records are published, lists it and removes i
 
   const listed = await cli(["domain", "ls", "--json"], org);
   expect(
-    (JSON.parse(listed.stdout) as { domains: Domain[] }).domains.map((d) => d.hostname),
+    parseJson(z.object({ domains: z.array(domain) }), listed.stdout).domains.map((d) => d.hostname),
   ).toEqual(["preview.acme-cli.test"]);
   expect((await cli(["domain", "rm", "preview.acme-cli.test"], org)).code).toBe(0);
   expect(cloudflare.has("preview.acme-cli.test")).toBe(false);
@@ -115,10 +119,10 @@ it("the SDK's waitActive keeps to its timeout and its signal", async () => {
 
   // Catches: a timeout shorter than the interval giving up after the first look, at once.
   const started = Date.now();
-  const late = await client
-    .waitActive("patient.acme-cli.test", { timeoutMs: 1500, intervalMs: 10_000 })
-    .catch((error: unknown) => error);
-  expect(late).toBeInstanceOf(DomainError);
+
+  await expect(
+    client.waitActive("patient.acme-cli.test", { timeoutMs: 1500, intervalMs: 10_000 }),
+  ).rejects.toBeInstanceOf(DomainError);
   expect(Date.now() - started).toBeGreaterThanOrEqual(1500);
   expect(Date.now() - started).toBeLessThan(10_000);
 

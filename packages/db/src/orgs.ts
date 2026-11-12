@@ -25,6 +25,7 @@ export async function createPersonalOrg(db: Db, input: { userId: string; name: s
       createdAt: now,
     }),
   ]);
+
   return orgId;
 }
 
@@ -53,6 +54,7 @@ export async function findMember(
     .where(and(eq(members.userId, userId), orgId ? eq(members.organizationId, orgId) : undefined))
     .orderBy(asc(members.createdAt))
     .limit(1);
+
   return member ?? null;
 }
 
@@ -97,6 +99,7 @@ export async function countMembers(db: Db, orgId: string) {
     .select({ n: sql<number>`count(*)` })
     .from(members)
     .where(eq(members.organizationId, orgId));
+
   return row?.n ?? 0;
 }
 
@@ -109,12 +112,17 @@ export async function removeMember(db: Db, orgId: string, memberId: string) {
     .select({ id: members.id, role: members.role })
     .from(members)
     .where(eq(members.organizationId, orgId));
+
   const target = all.find((m) => m.id === memberId);
+
   if (!target) return "not_found" as const;
+
   if (target.role === "owner" && all.filter((m) => m.role === "owner").length === 1) {
     return "last_owner" as const;
   }
+
   await db.delete(members).where(and(eq(members.id, memberId), eq(members.organizationId, orgId)));
+
   return "removed" as const;
 }
 
@@ -132,6 +140,7 @@ export async function createInvite(db: Db, input: { orgId: string; createdBy: st
     createdBy: input.createdBy,
     expiresAt,
   });
+
   return { code, expiresAt };
 }
 
@@ -156,6 +165,7 @@ async function findLiveInvite(db: Db, hash: string) {
     .innerJoin(organizations, eq(organizations.id, inviteLinks.orgId))
     .where(liveInvite(hash))
     .limit(1);
+
   return invite ?? null;
 }
 
@@ -174,19 +184,25 @@ export async function acceptInvite(
 ) {
   const hash = await sha256Hex(code);
   const invite = await findLiveInvite(db, hash);
+
   if (!invite) return { status: "invalid" as const };
+
   if (await findMember(db, userId, invite.orgId)) {
     return { status: "already_member" as const, orgId: invite.orgId };
   }
+
   const cap = await maxMembers(invite.orgId);
+
   if (cap !== null && (await countMembers(db, invite.orgId)) >= cap) {
     return { status: "full" as const, orgId: invite.orgId, cap };
   }
+
   const claimed = await db
     .update(inviteLinks)
     .set({ usedAt: new Date(), usedBy: userId })
     .where(liveInvite(hash))
     .returning({ orgId: inviteLinks.orgId });
+
   if (!claimed.length) return { status: "invalid" as const };
   await db.insert(members).values({
     id: uuidv7(),
@@ -195,6 +211,7 @@ export async function acceptInvite(
     role: "member",
     createdAt: new Date(),
   });
+
   return { status: "joined" as const, orgId: invite.orgId };
 }
 
@@ -204,13 +221,17 @@ export async function acceptInvite(
  */
 export async function findMembersByEmail(db: Db, orgId: string, emails: string[]) {
   const wanted = [...new Set(emails.map((email) => email.trim().toLowerCase()))];
+
   if (!wanted.length) return { members: [], unknown: [] };
+
   const rows = await db
     .select({ userId: users.id, email: users.email })
     .from(members)
     .innerJoin(users, eq(users.id, members.userId))
     .where(and(eq(members.organizationId, orgId), inArray(sql`lower(${users.email})`, wanted)));
+
   const found = new Set(rows.map((row) => row.email.toLowerCase()));
+
   return { members: rows, unknown: wanted.filter((email) => !found.has(email)) };
 }
 
@@ -226,5 +247,6 @@ export async function isOrgBlocked(db: Db, orgId: string) {
     .from(orgBlocks)
     .where(eq(orgBlocks.orgId, orgId))
     .limit(1);
+
   return row !== undefined;
 }

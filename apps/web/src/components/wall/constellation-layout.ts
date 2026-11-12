@@ -25,24 +25,30 @@ export const ANCHOR = "anchor";
 
 /** Clear space between any two nodes, and between a node and the container's sides. */
 const GAP = 16;
+
 /** The ring's least spread around the anchor alone, so a few pipes don't huddle on it. */
 const MIN_RX = 260;
 const MIN_RY = 150;
+
 /** Clear space between an open card and the pills it pushes aside. */
 const CLEAR = GAP * 2;
+
 /** How far an open card shoves the network, as a share of its larger side, falling off with
  * distance: the pills beside it gather round it, the far ones lean away a little. */
 const SHOVE = 0.35;
+
 /** How freely the anchor gives way to an open pipe's card, against a pill's 1. */
 const ANCHOR_GIVE = 0.3;
 
 /** A stable number in [-1, 1) from a string (FNV-1a), for per-pipe jitter. */
 export function hash(id: string, salt = 0) {
   let h = 2166136261 ^ salt;
+
   for (let i = 0; i < id.length; i++) {
     h ^= id.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
+
   return ((h >>> 0) / 2 ** 32) * 2 - 1;
 }
 
@@ -57,10 +63,18 @@ function side(offset: number, half: number) {
  */
 export function grow(id: string, slot: Point, hub: Point, pill: Size, card: Size): Point {
   if (id === ANCHOR) return { x: 0, y: 0 };
+
   return {
     x: (side(slot.x - hub.x, pill.w / 2) * (card.w - pill.w)) / 2,
     y: (side(slot.y - hub.y, pill.h / 2) * (card.h - pill.h)) / 2,
   };
+}
+
+/** Where each node sits, around the anchor at the origin, and how far the nodes reach up and down. */
+export interface Layout {
+  at: Map<string, Point>;
+  top: number;
+  bottom: number;
 }
 
 export function layout(input: {
@@ -72,13 +86,14 @@ export function layout(input: {
    * then the pills the card would cover step aside. Its point stays the pill's (the frame loop
    * adds `grow`). */
   open?: { id: string; size: Size } | null;
-}): { at: Map<string, Point>; top: number; bottom: number } {
+}): Layout {
   const { width, anchor, pipes, open } = input;
   const at = new Map<string, Point>([[ANCHOR, { x: 0, y: 0 }]]);
   const sizes = new Map<string, Size>([[ANCHOR, anchor]]);
   const hub = { halfW: anchor.w / 2, halfH: anchor.h / 2, y: 0 };
 
   const n = pipes.length;
+
   if (n > 0) {
     const widest = Math.max(...pipes.map((p) => p.size.w));
     const tallest = Math.max(...pipes.map((p) => p.size.h));
@@ -88,14 +103,17 @@ export function layout(input: {
     // Room on the ring for every pipe: grow both radii until its length holds them.
     const need = n * (widest * 0.55 + tallest + GAP * 2);
     const ring = () => 2 * Math.PI * Math.sqrt((rx * rx + ry * ry) / 2);
+
     if (ring() < need) {
       const s = need / ring();
       rx *= s;
       ry *= s;
     }
+
     // Too wide for the container (a phone): a column instead of a ring.
     if (rx > Math.max(0, width / 2 - GAP - widest / 2)) {
       for (const [id, p] of column({ width, hub, clear, pipes, at })) at.set(id, p);
+
       for (const pipe of pipes) sizes.set(pipe.id, pipe.size);
     } else {
       const step = (Math.PI * 2) / n;
@@ -114,6 +132,7 @@ export function layout(input: {
 
   // The card, where it grows from its pill, holds still with the anchor; the rest make room.
   const slot = open ? at.get(open.id) : undefined;
+
   if (open && slot) {
     const d = grow(open.id, slot, at.get(ANCHOR)!, sizes.get(open.id)!, open.size);
     const centre = { x: slot.x + d.x, y: slot.y + d.y };
@@ -121,16 +140,20 @@ export function layout(input: {
     sizes.set(open.id, open.size);
     shove(at, open.id, centre, Math.max(open.size.w, open.size.h));
   }
+
   relax(at, sizes, width, open && slot ? open.id : null);
 
   let top = Infinity;
   let bottom = -Infinity;
+
   for (const [id, p] of at) {
     const h = sizes.get(id)!.h;
     top = Math.min(top, p.y - h / 2);
     bottom = Math.max(bottom, p.y + h / 2);
   }
+
   if (open && slot) at.set(open.id, slot);
+
   return { at, top, bottom };
 }
 
@@ -157,15 +180,18 @@ function column(input: {
   const byWidth = pipes.toSorted((a, b) => a.size.w - b.size.w);
   const orders = [pipes, byWidth, byWidth.toReversed()];
   let best: { score: number[]; at: Map<string, Point> } | null = null;
+
   for (const order of orders) {
     for (let above = 0; above <= n; above++) {
       const up = order.slice(0, above);
       const down = order.slice(above);
+
       for (const upSlots of patterns(up.length)) {
         for (const downSlots of patterns(down.length)) {
           const at = new Map<string, Point>();
           let top = hub.y - hub.halfH;
           let bottom = hub.y + hub.halfH;
+
           const place = (
             pipe: { id: string; size: Size },
             slot: Slot,
@@ -176,30 +202,39 @@ function column(input: {
             const x = slot === "left" ? -half : slot === "right" ? half : 0;
             const edge = dir < 0 ? top : bottom;
             const y = edge + dir * ((first ? clear : GAP) + pipe.size.h / 2);
+
             if (dir < 0) top = y - pipe.size.h / 2;
             else bottom = y + pipe.size.h / 2;
             at.set(pipe.id, { x, y });
           };
+
           up.forEach((pipe, i) => place(pipe, upSlots[i]!, -1, i === 0));
           down.forEach((pipe, i) => place(pipe, downSlots[i]!, 1, i === 0));
+
           const nodes = pipes.map((pipe): [string, Point, Size] => [
             pipe.id,
             at.get(pipe.id)!,
             pipe.size,
           ]);
+
           let crossings = 0;
+
           for (const pipe of pipes) {
             const end = at.get(pipe.id)!;
+
             for (const [id, p, size] of nodes) {
               if (id !== pipe.id && crosses(anchor, end, p, size)) crossings++;
             }
           }
+
           const score = [crossings, bottom - top, Math.abs(n - 2 * above)];
+
           if (!best || less(score, best.score)) best = { score, at };
         }
       }
     }
   }
+
   return best!.at;
 }
 
@@ -209,13 +244,16 @@ function patterns(k: number): Slot[][] {
     Array.from({ length: k }, (_, i) =>
       i % 2 === 0 ? first : first === "left" ? "right" : "left",
     );
+
   const sides = [zig("left"), zig("right")];
+
   return k > 0 ? [...sides, ...sides.map((p) => [...p.slice(0, -1), "centre" as const])] : sides;
 }
 
 /** Lexicographic `a < b`. */
 function less(a: number[], b: number[]) {
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i]! < b[i]!;
+
   return false;
 }
 
@@ -230,6 +268,7 @@ function crosses(a: Point, b: Point, centre: Point, size: Size, spare = 4) {
   let hi = 1;
   const dx = b.x - a.x;
   const dy = b.y - a.y;
+
   for (const [p, q] of [
     [-dx, a.x - x0],
     [dx, x1 - a.x],
@@ -240,10 +279,12 @@ function crosses(a: Point, b: Point, centre: Point, size: Size, spare = 4) {
       if (q < 0) return false;
     } else {
       const t = q / p;
+
       if (p < 0) lo = Math.max(lo, t);
       else hi = Math.min(hi, t);
     }
   }
+
   return lo < hi;
 }
 
@@ -257,6 +298,7 @@ function shove(at: Map<string, Point>, open: string, centre: Point, reach: numbe
     const dx = p.x - centre.x;
     const dy = p.y - centre.y;
     const dist = Math.hypot(dx, dy);
+
     if (dist === 0) continue;
     const push = SHOVE * reach * Math.exp(-dist / reach) * (id === ANCHOR ? ANCHOR_GIVE : 1);
     p.x += (dx / dist) * push;
@@ -277,31 +319,35 @@ function relax(
   const give = (id: string) => (id === open ? 0 : id === ANCHOR ? (open ? ANCHOR_GIVE : 0) : 1);
   const fixed = (id: string) => give(id) === 0;
   const ids = [...at.keys()];
+
   const clampX = (id: string) => {
     const p = at.get(id)!;
     const half = Math.max(0, width / 2 - GAP - sizes.get(id)!.w / 2);
     p.x = Math.min(half, Math.max(-half, p.x));
   };
+
   for (let round = 0; round < 120; round++) {
     let moved = false;
-    for (let i = 0; i < ids.length; i++) {
-      for (let j = i + 1; j < ids.length; j++) {
-        const a = ids[i] as string;
-        const b = ids[j] as string;
+
+    for (const [i, a] of ids.entries()) {
+      for (const b of ids.slice(i + 1)) {
         const [pa, pb] = [at.get(a)!, at.get(b)!];
         const [sa, sb] = [sizes.get(a)!, sizes.get(b)!];
         const dx = pb.x - pa.x;
         const dy = pb.y - pa.y;
+
         if (fixed(a) && fixed(b)) continue;
         const gap = a === open || b === open ? CLEAR : GAP;
         const ox = (sa.w + sb.w) / 2 + gap - Math.abs(dx);
         const oy = (sa.h + sb.h) / 2 + gap - Math.abs(dy);
+
         if (ox <= 0 || oy <= 0) continue;
         moved = true;
         // Sideways only when there is room for it: on a narrow screen, stack instead.
         const sideways = ox < oy && width / 2 - GAP > Math.max(sa.w, sb.w);
         const ma = give(a) / (give(a) + give(b));
         const mb = 1 - ma;
+
         if (sideways) {
           const d = ox * (dx < 0 ? -1 : 1);
           pa.x -= d * ma;
@@ -313,7 +359,9 @@ function relax(
         }
       }
     }
+
     for (const id of ids) if (!fixed(id)) clampX(id);
+
     if (!moved) break;
   }
 }

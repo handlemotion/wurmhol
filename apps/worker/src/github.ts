@@ -6,6 +6,7 @@
 import { orgInstallations, type Db } from "@wurmhol/db";
 import type { PipeSource } from "@wurmhol/protocol";
 import githubAppJwt from "universal-github-app-jwt";
+import { z } from "zod";
 import type { GithubConfig } from "./env.ts";
 
 export const DEPLOYMENT_ENVIRONMENT = "wurmhol-preview";
@@ -28,25 +29,53 @@ export class GithubError extends Error {
   }
 }
 
-/** One GitHub REST call. Bodies of errors are not kept: they can echo what we sent. */
-export async function github<T>(
+/** The deployment a pipe posts on its pull request. */
+interface DeploymentRequest {
+  ref: string;
+  environment: string;
+  description: string;
+  auto_merge: boolean;
+  required_contexts: string[];
+  transient_environment: boolean;
+  production_environment: boolean;
+  payload: { pipe: string };
+}
+
+/** A deployment's new status: live while the pipe is open, inactive once it ends. */
+interface DeploymentStatusRequest {
+  state: "success" | "inactive";
+  description: string;
+  environment_url?: string;
+  auto_inactive?: boolean;
+}
+
+/**
+ * One GitHub REST call, its answer parsed with `answer`. Bodies of errors are not kept: they can
+ * echo what we sent.
+ */
+export async function github<Answer extends z.ZodType>(
   config: GithubConfig,
   auth: string,
   method: string,
   path: string,
-  body?: unknown,
-): Promise<T> {
+  answer: Answer,
+  body?: DeploymentRequest | DeploymentStatusRequest,
+): Promise<z.infer<Answer>> {
+  const headers = new Headers({
+    accept: "application/vnd.github+json",
+    authorization: auth,
+    "user-agent": "wurmhol",
+    "x-github-api-version": "2022-11-28",
+  });
+
+  if (body !== undefined) headers.set("content-type", "application/json");
+
   const response = await fetch(`${config.apiUrl}${path}`, {
     method,
-    headers: {
-      accept: "application/vnd.github+json",
-      authorization: auth,
-      "user-agent": "wurmhol",
-      "x-github-api-version": "2022-11-28",
-      ...(body === undefined ? {} : { "content-type": "application/json" }),
-    },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+
   if (!response.ok) {
     await response.body?.cancel();
     throw new GithubError(
@@ -54,14 +83,17 @@ export async function github<T>(
       `GitHub ${method} ${path.split("?")[0]}: ${response.status}`,
     );
   }
-  return (response.status === 204 ? null : await response.json()) as T;
+
+  return answer.parse(response.status === 204 ? null : await response.json());
 }
 
 /** DER length: short form under 128, else 0x80 | byte count, then the bytes. */
 function derLength(length: number) {
   if (length < 128) return [length];
   const bytes: number[] = [];
+
   for (let n = length; n > 0; n >>= 8) bytes.unshift(n & 0xff);
+
   return [0x80 | bytes.length, ...bytes];
 }
 
@@ -72,27 +104,34 @@ function derLength(length: number) {
  */
 export function pkcs8(pem: string) {
   const match = /-----BEGIN RSA PRIVATE KEY-----([\s\S]+?)-----END RSA PRIVATE KEY-----/.exec(pem);
+
   if (!match) return pem;
   const pkcs1 = Uint8Array.from(atob(match[1]!.replace(/\s+/g, "")), (c) => c.charCodeAt(0));
+
   const rsaAlgorithm = [
     0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
   ];
+
   const octets = [0x04, ...derLength(pkcs1.length), ...pkcs1];
   const body = [0x02, 0x01, 0x00, ...rsaAlgorithm, ...octets];
   const der = Uint8Array.from([0x30, ...derLength(body.length), ...body]);
   const base64 = btoa(String.fromCharCode(...der)).replace(/(.{64})/g, "$1\n");
+
   return `-----BEGIN PRIVATE KEY-----\n${base64}\n-----END PRIVATE KEY-----\n`;
 }
 
 /** A token for one installation, good for an hour; minted per use. */
 async function installationToken(config: GithubConfig, installationId: number) {
   const { token } = await githubAppJwt({ id: config.appId, privateKey: pkcs8(config.privateKey) });
-  const minted = await github<{ token: string }>(
+
+  const minted = await github(
     config,
     `Bearer ${token}`,
     "POST",
     `/app/installations/${installationId}/access_tokens`,
+    z.object({ token: z.string() }),
   );
+
   return `token ${minted.token}`;
 }
 
@@ -104,12 +143,12 @@ function onGithub(
   return Boolean(source?.repo && source.branch && source.repoHost === new URL(config.webUrl).host);
 }
 
-interface PullRequest {
-  number: number;
-  html_url: string;
-  head: { sha: string };
-  base: { repo: { full_name: string } };
-}
+const pullRequest = z.object({
+  number: z.number(),
+  html_url: z.string(),
+  head: z.object({ sha: z.string() }),
+  base: z.object({ repo: z.object({ full_name: z.string() }) }),
+});
 
 /**
  * Posts `pipeUrl` as a deployment on the open pull request of the pipe's branch, through the
@@ -121,27 +160,35 @@ export async function postPreview(
   pipe: { id: string; orgId: string; url: string; source: PipeSource | null },
 ): Promise<Preview | null> {
   const { source } = pipe;
+
   if (!onGithub(config, source)) return null;
   const owner = source.repo.split("/")[0]!.toLowerCase();
+
   const installation = (await orgInstallations(db, pipe.orgId)).find(
     (row) => row.account.toLowerCase() === owner,
   );
+
   if (!installation) return null;
   const auth = await installationToken(config, installation.installationId);
   const head = encodeURIComponent(`${owner}:${source.branch}`);
-  const [pull] = await github<PullRequest[]>(
+
+  const [pull] = await github(
     config,
     auth,
     "GET",
     `/repos/${source.repo}/pulls?state=open&head=${head}&per_page=1`,
+    z.array(pullRequest),
   );
+
   if (!pull) return null;
   const repo = pull.base.repo.full_name;
-  const deployment = await github<{ id: number }>(
+
+  const deployment = await github(
     config,
     auth,
     "POST",
     `/repos/${repo}/deployments`,
+    z.object({ id: z.number() }),
     {
       ref: pull.head.sha,
       environment: DEPLOYMENT_ENVIRONMENT,
@@ -153,13 +200,22 @@ export async function postPreview(
       payload: { pipe: pipe.id },
     },
   );
-  await github(config, auth, "POST", `/repos/${repo}/deployments/${deployment.id}/statuses`, {
-    state: "success",
-    environment_url: pipe.url,
-    description: "Pipe open",
-    // Several pipes of one repo can be open at once; each is retired when its pipe ends.
-    auto_inactive: false,
-  });
+
+  await github(
+    config,
+    auth,
+    "POST",
+    `/repos/${repo}/deployments/${deployment.id}/statuses`,
+    z.unknown(),
+    {
+      state: "success",
+      environment_url: pipe.url,
+      description: "Pipe open",
+      // Several pipes of one repo can be open at once; each is retired when its pipe ends.
+      auto_inactive: false,
+    },
+  );
+
   return {
     installationId: installation.installationId,
     repo,
@@ -177,6 +233,7 @@ export async function retirePreview(config: GithubConfig, preview: Preview) {
     auth,
     "POST",
     `/repos/${preview.repo}/deployments/${preview.deploymentId}/statuses`,
+    z.unknown(),
     { state: "inactive", description: "Pipe ended" },
   );
 }
@@ -191,6 +248,7 @@ async function hmac(secret: string, data: string) {
     false,
     ["sign"],
   );
+
   return new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(data)));
 }
 
@@ -203,6 +261,7 @@ export async function verifyWebhook(secret: string, body: string, signature: str
   if (!signature?.startsWith("sha256=")) return false;
   const expected = encoder.encode(`sha256=${hex(await hmac(secret, body))}`);
   const given = encoder.encode(signature);
+
   return expected.byteLength === given.byteLength && crypto.subtle.timingSafeEqual(expected, given);
 }
 
@@ -215,23 +274,39 @@ export async function signState(
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
+
   return `${body}.${hex(await hmac(`github-link:${secret}`, body))}`;
 }
+
+/** What `signState` signed. */
+const linkState = z.object({
+  orgId: z.string(),
+  userId: z.string(),
+  installationId: z.number(),
+  exp: z.number(),
+});
 
 export async function readState(
   secret: string,
   value: string | undefined,
 ): Promise<{ orgId: string; userId: string; installationId: number } | null> {
   const [body, mac] = (value ?? "").split(".");
+
   if (!body || !mac) return null;
   const expected = encoder.encode(hex(await hmac(`github-link:${secret}`, body)));
   const given = encoder.encode(mac);
+
   if (expected.byteLength !== given.byteLength || !crypto.subtle.timingSafeEqual(expected, given)) {
     return null;
   }
+
   try {
-    const state = JSON.parse(atob(body.replace(/-/g, "+").replace(/_/g, "/")));
-    return typeof state.exp === "number" && state.exp > Date.now() ? state : null;
+    const state = linkState.safeParse(JSON.parse(atob(body.replace(/-/g, "+").replace(/_/g, "/"))));
+
+    if (!state.success || state.data.exp <= Date.now()) return null;
+    const { orgId, userId, installationId } = state.data;
+
+    return { orgId, userId, installationId };
   } catch {
     return null;
   }

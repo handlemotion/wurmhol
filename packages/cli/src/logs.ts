@@ -12,16 +12,22 @@ import {
   statSync,
   appendFileSync,
 } from "node:fs";
-import type { RequestEvent } from "@wurmhol/sdk";
+import {
+  isFiniteNumber,
+  isJsonObject,
+  isString,
+  type JsonObject,
+  parseJson,
+} from "@wurmhol/protocol";
+import type { LogFields, RequestEvent } from "@wurmhol/sdk";
 import { logFile } from "./state.ts";
 
 /** Where a log moves on; at most twice this is kept per pipe. */
 const MAX_BYTES = 1024 * 1024;
 
-export interface LogRecord {
+export interface LogRecord extends JsonObject {
   time: string;
   event: string;
-  [field: string]: unknown;
 }
 
 /** A logged request: what `wurmhol logs` and `recent_requests` show. */
@@ -45,15 +51,17 @@ function sizeOf(file: string) {
 }
 
 /** Appends one record to `name`'s log, moving it to `.1` once it is full. Never throws. */
-export function appendLog(name: string, event: string, fields: Record<string, unknown> = {}) {
+export function appendLog(name: string, event: string, fields: LogFields = {}) {
   try {
     const file = logFile(name);
     const line = `${JSON.stringify({ time: new Date().toISOString(), event, ...fields })}\n`;
     let size = sizes.get(file) ?? sizeOf(file);
+
     if (size > 0 && size + line.length > MAX_BYTES) {
       renameSync(file, `${file}.1`);
       size = 0;
     }
+
     appendFileSync(file, line, { mode: 0o600 });
     sizes.set(file, size + Buffer.byteLength(line));
   } catch {
@@ -67,35 +75,41 @@ export function appendLog(name: string, event: string, fields: Record<string, un
  */
 export function loggedPath(path: string) {
   const at = path.indexOf("?");
+
   if (at === -1) return path;
+
   const names = path
     .slice(at + 1)
     .split("&")
     .filter(Boolean)
     .map((pair) => `${pair.split("=")[0]}=`);
+
   return `${path.slice(0, at)}?${names.join("&")}`;
 }
 
 /** Logs a request the dev server answered, metadata only. */
-export function appendRequest(
-  name: string,
-  request: RequestEvent,
-  fields: Record<string, unknown>,
-) {
+export function appendRequest(name: string, request: RequestEvent, fields: LogFields) {
   const { method, path, status, durationMs } = request;
   appendLog(name, "request", { ...fields, method, path: loggedPath(path), status, durationMs });
 }
 
 function parse(text: string): LogRecord[] {
   const records: LogRecord[] = [];
+
   for (const line of text.split("\n")) {
     if (!line) continue;
+
     try {
-      records.push(JSON.parse(line) as LogRecord);
+      const record = parseJson(line);
+
+      if (isJsonObject(record) && isString(record.time) && isString(record.event)) {
+        records.push({ ...record, time: record.time, event: record.event });
+      }
     } catch {
       // A line cut short by a crash.
     }
   }
+
   return records;
 }
 
@@ -112,23 +126,37 @@ export function readLog(name: string): LogRecord[] | null {
   const file = logFile(name);
   const older = readIfExists(`${file}.1`);
   const current = readIfExists(file);
+
   if (older === null && current === null) return null;
+
   return parse(`${older ?? ""}${current ?? ""}`);
 }
 
-export function isRequest(record: LogRecord): boolean {
-  return record.event === "request";
-}
+/** The request a record logs, or null when it is another event. */
+export function requestOf(record: LogRecord): RequestRecord | null {
+  const { time, event, method, path, status, durationMs } = record;
 
-export function toRequest(record: LogRecord): RequestRecord {
-  const { time, method, path, status, durationMs } = record as unknown as RequestRecord;
+  if (event !== "request" || !isString(method) || !isString(path)) return null;
+
+  if (!isFiniteNumber(status) || !isFiniteNumber(durationMs)) return null;
+
   return { time, method, path, status, durationMs };
 }
 
 /** The last `limit` requests in `name`'s log, oldest first; null when it has no log. */
 export function recentRequests(name: string, limit: number): RequestRecord[] | null {
   const records = readLog(name);
-  return records && records.filter(isRequest).slice(-limit).map(toRequest);
+
+  return (
+    records &&
+    records
+      .flatMap((record) => {
+        const request = requestOf(record);
+
+        return request ? [request] : [];
+      })
+      .slice(-limit)
+  );
 }
 
 /**
@@ -143,28 +171,36 @@ export function followLog(
   const file = logFile(name);
   let offset = sizeOf(file);
   let partial = "";
+
   const timer = setInterval(() => {
     const size = sizeOf(file);
+
     // Moved to `.1` and started again: read the new file from its start.
     if (size < offset) offset = 0;
+
     if (size === offset) return;
     const buffer = Buffer.alloc(size - offset);
     let fd: number;
+
     try {
       fd = openSync(file, "r");
     } catch {
       return;
     }
+
     try {
       readSync(fd, buffer, 0, buffer.length, offset);
     } finally {
       closeSync(fd);
     }
+
     offset = size;
     const text = partial + buffer.toString("utf8");
     const end = text.lastIndexOf("\n");
     partial = text.slice(end + 1);
+
     for (const record of parse(text.slice(0, end + 1))) onRecord(record);
   }, 250);
+
   signal.addEventListener("abort", () => clearInterval(timer), { once: true });
 }

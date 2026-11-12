@@ -24,6 +24,7 @@ export function Wormhole({
 }) {
   const backdrop = useRef<HTMLDivElement>(null);
   useWormholeMotion(backdrop);
+
   return (
     <div className={className}>
       <div className="relative">

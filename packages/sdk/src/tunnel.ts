@@ -35,6 +35,18 @@ import { Loopback, refused } from "./loopback.ts";
 import type { CloseReason, PipeSource } from "./pipe.ts";
 import { selectTransport, type Transport, type WsConnection, WS_OPEN } from "./transport/index.ts";
 
+/** Headers of the 502 the relay gets when the dev server fails; `waiting` marks the wait page. */
+function failureHeaders(waiting: boolean, port: number): HeaderList {
+  const headers: HeaderList = [
+    ["content-type", waiting ? "text/html; charset=utf-8" : "text/plain; charset=utf-8"],
+    ["cache-control", "no-store"],
+  ];
+
+  if (waiting) headers.push([WAITING_HEADER, String(port)]);
+
+  return headers;
+}
+
 export interface ShareInfo {
   id: string;
   url: string;
@@ -42,7 +54,12 @@ export interface ShareInfo {
   endsAt: string;
 }
 
-export type Logger = (event: string, fields?: Record<string, unknown>) => void;
+/** A diagnostic event's fields: plain values, so a log line can carry them as they are. */
+export interface LogFields {
+  [field: string]: string | number | boolean | null | undefined;
+}
+
+export type Logger = (event: string, fields?: LogFields) => void;
 
 /** One viewer request the dev server answered: metadata only, never bodies or headers. */
 export interface RequestEvent {
@@ -113,8 +130,10 @@ function waitingPage(port: number) {
 
 function pairs(rawHeaders: string[]): HeaderList {
   const list: HeaderList = [];
+
   for (let i = 0; i + 1 < rawHeaders.length; i += 2)
     list.push([rawHeaders[i]!, rawHeaders[i + 1]!]);
+
   return forwardable(list);
 }
 
@@ -141,6 +160,7 @@ export class Tunnel {
   /** Connects and resolves with the share's id and URL, or rejects with a FixError. */
   async start(): Promise<ShareInfo> {
     await this.#dial();
+
     return this.#share!;
   }
 
@@ -148,6 +168,7 @@ export class Tunnel {
   async stop() {
     this.#stopping = true;
     const socket = this.#socket;
+
     if (!socket || socket.readyState !== WS_OPEN) return this.#finish("stopped");
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, 3000);
@@ -162,30 +183,44 @@ export class Tunnel {
 
   #url() {
     const url = new URL("/connect", this.#options.server);
+
     if (this.#share) url.searchParams.set("share", this.#share.id);
     else {
       url.searchParams.set("port", String(this.#options.port));
+
       if (this.#options.ttl !== undefined) url.searchParams.set("ttl", String(this.#options.ttl));
+
       if (this.#options.name) url.searchParams.set("name", this.#options.name);
     }
+
     return url;
   }
 
+  /** Who may open a new share and where it comes from; a reconnect keeps what it started with. */
+  #connectHeaders(access: string | null) {
+    const { viewers, source } = this.#options;
+    const headers: Record<string, string> = {};
+
+    if (!this.#share && viewers.length) headers[CONNECT_HEADERS.viewers] = viewers.join(",");
+
+    if (!this.#share && source) {
+      headers[CONNECT_HEADERS.source] = encodeURIComponent(JSON.stringify(source));
+    }
+
+    if (access) headers[CONNECT_HEADERS.access] = access;
+
+    return headers;
+  }
+
   async #dial(): Promise<WsConnection> {
-    const { server, token, version, viewers, source, accessKey } = this.#options;
+    const { server, token, version, accessKey } = this.#options;
     const access = !this.#share && accessKey ? await accessKeyHash(accessKey) : null;
+
     return dial(this.#url(), {
       server,
       token,
       version,
-      // Who may open a new share and where it comes from; a reconnect keeps what it started with.
-      headers: {
-        ...(!this.#share && viewers.length ? { [CONNECT_HEADERS.viewers]: viewers.join(",") } : {}),
-        ...(!this.#share && source
-          ? { [CONNECT_HEADERS.source]: encodeURIComponent(JSON.stringify(source)) }
-          : {}),
-        ...(access ? { [CONNECT_HEADERS.access]: access } : {}),
-      },
+      headers: this.#connectHeaders(access),
       maxPayload: 2 * MAX_WS_MESSAGE_BYTES,
       transport: this.#options.transport,
       product: this.#options.product,
@@ -193,7 +228,8 @@ export class Tunnel {
         const id = response.headers[SHARE_HEADERS.id];
         const shareUrl = response.headers[SHARE_HEADERS.url];
         const endsAt = response.headers[SHARE_HEADERS.endsAt];
-        if (typeof id === "string" && typeof shareUrl === "string" && typeof endsAt === "string") {
+
+        if (id !== undefined && shareUrl !== undefined && endsAt !== undefined) {
           this.#share = { id, url: shareUrl, endsAt };
         }
       },
@@ -208,16 +244,20 @@ export class Tunnel {
     socket.on("message", (data, isBinary) => this.#onMessage(data, isBinary));
     socket.on("close", (code, reason) => this.#onClose(socket, code, reason.toString()));
     socket.on("error", (error) => this.#options.log("socket.error", { message: error.message }));
+
     if (this.#heartbeat) clearInterval(this.#heartbeat);
     // A heartbeat every 20 s keeps proxies from cutting an idle socket; a missed pong means
     // the socket is dead without a close, so drop it and reconnect.
     this.#heartbeat = setInterval(() => {
       if (this.#socket !== socket) return;
+
       if (this.#awaitingPong) {
         this.#options.log("heartbeat.missed");
         socket.terminate();
+
         return;
       }
+
       this.#awaitingPong = true;
       socket.send(PING_TEXT);
     }, HEARTBEAT_MS);
@@ -231,8 +271,10 @@ export class Tunnel {
 
   #send(frame: Frame) {
     const socket = this.#socket;
+
     if (!socket || socket.readyState !== WS_OPEN) return false;
     socket.send(encodeFrame(frame));
+
     return true;
   }
 
@@ -245,21 +287,29 @@ export class Tunnel {
   #onMessage(data: Buffer, isBinary: boolean) {
     if (!isBinary) {
       if (data.toString() === PONG_TEXT) this.#awaitingPong = false;
+
       return;
     }
+
     let frame: Frame;
+
     try {
       frame = decodeFrame(data);
     } catch (error) {
-      this.#options.log("protocol.error", { message: (error as Error).message });
+      const message = error instanceof Error ? error.message : String(error);
+      this.#options.log("protocol.error", { message });
+
       return;
     }
+
     switch (frame.type) {
       case "request":
         this.#openHttp(frame.stream, frame.payload);
+
         return;
       case "ws-open":
         this.#openWs(frame.stream, frame.payload);
+
         return;
       default:
         this.#onStreamFrame(frame);
@@ -268,24 +318,31 @@ export class Tunnel {
 
   #onStreamFrame(frame: Frame) {
     const stream = this.#streams.get(frame.stream);
+
     if (!stream) return;
+
     if (stream.kind === "ws") {
       const { socket } = stream;
+
       if (frame.type === "ws-message") {
         if (socket?.readyState === WS_OPEN) {
           socket.send(frame.payload.data, { binary: frame.payload.binary });
         }
       } else if (frame.type === "ws-close") {
         stream.cancelled = true;
+
         try {
           socket?.close(sendableCloseCode(frame.payload.code), frame.payload.reason);
         } catch {
           socket?.terminate();
         }
+
         this.#streams.delete(frame.stream);
       }
+
       return;
     }
+
     if (frame.type === "window") {
       stream.send.grant(frame.payload.bytes);
     } else if (frame.type === "data") {
@@ -294,6 +351,7 @@ export class Tunnel {
       const bytes = frame.payload.byteLength;
       stream.request.write(frame.payload, () => {
         const grant = stream.receive.consumed(bytes);
+
         if (grant) this.#send({ stream: frame.stream, type: "window", payload: { bytes: grant } });
       });
     } else if (frame.type === "end") {
@@ -309,6 +367,7 @@ export class Tunnel {
 
   #openHttp(id: number, head: RequestHead) {
     const port = this.#options.port;
+
     const request = http.request({
       ...this.#loopback.target(port, this.#options.host),
       port,
@@ -318,6 +377,7 @@ export class Tunnel {
       headers: localRequestHeaders(head.headers, port).flat(),
       setHost: false,
     });
+
     const stream: LocalHttp = {
       kind: "http",
       method: head.method,
@@ -332,6 +392,7 @@ export class Tunnel {
       bodyEnded: false,
       cancelled: false,
     };
+
     this.#streams.set(id, stream);
     request.on("socket", (socket) => this.#loopback.watch(port, socket));
     request.on("response", (response) => {
@@ -346,28 +407,29 @@ export class Tunnel {
     });
     request.on("error", (error: NodeJS.ErrnoException) => {
       if (stream.cancelled) return;
+
       if (stream.status === null) {
         stream.status = 502;
         const waiting = refused(error);
+
         const body = Buffer.from(
           waiting
             ? waitingPage(port)
             : `The local server on port ${port} failed: ${error.code ?? error.message}\n`,
         );
+
         this.#send({
           stream: id,
           type: "response",
           payload: {
             status: 502,
-            headers: [
-              ["content-type", waiting ? "text/html; charset=utf-8" : "text/plain; charset=utf-8"],
-              ["cache-control", "no-store"],
-              ...(waiting ? [[WAITING_HEADER, String(port)] as [string, string]] : []),
-            ],
+            headers: failureHeaders(waiting, port),
           },
         });
+
         for (const piece of chunk(body)) this.#send({ stream: id, type: "data", payload: piece });
       }
+
       this.#send({ stream: id, type: "end", payload: {} });
       this.#streams.delete(id);
       this.#report(stream);
@@ -389,22 +451,27 @@ export class Tunnel {
 
   async #pumpResponse(id: number, stream: LocalHttp, response: http.IncomingMessage) {
     try {
+      // SAFETY: nothing calls `setEncoding` on the response, so Node yields its body as Buffers.
       for await (const buffer of response as AsyncIterable<Buffer>) {
         for (const piece of chunk(
           new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
         )) {
           await stream.send.ready(piece.byteLength);
+
           if (stream.cancelled) return;
           stream.send.take(piece.byteLength);
           await this.#drain();
+
           // A copy: `ws` may hold the frame after this returns, and Node reuses its buffers.
           if (!this.#send({ stream: id, type: "data", payload: piece.slice() })) return;
         }
       }
+
       if (!stream.cancelled) this.#send({ stream: id, type: "end", payload: {} });
     } catch (error) {
       if (!stream.cancelled) {
-        this.#send({ stream: id, type: "end", payload: { error: (error as Error).message } });
+        const message = error instanceof Error ? error.message : String(error);
+        this.#send({ stream: id, type: "end", payload: { error: message } });
       }
     } finally {
       this.#streams.delete(id);
@@ -445,14 +512,10 @@ export class Tunnel {
           onOpen: (socket) => {
             if (stream.cancelled || !this.#streams.has(id)) return socket.terminate();
             stream.socket = socket;
-            this.#send({
-              stream: id,
-              type: "ws-open",
-              payload: {
-                accepted: true,
-                ...(socket.protocol ? { protocol: socket.protocol } : {}),
-              },
-            });
+            const accepted: WsOpenPayload = { accepted: true };
+
+            if (socket.protocol) accepted.protocol = socket.protocol;
+            this.#send({ stream: id, type: "ws-open", payload: accepted });
             socket.on("message", (data, isBinary) => {
               this.#send({ stream: id, type: "ws-message", payload: { binary: isBinary, data } });
             });
@@ -485,6 +548,7 @@ export class Tunnel {
         stream.socket?.terminate();
       }
     }
+
     this.#streams.clear();
   }
 
@@ -500,7 +564,9 @@ export class Tunnel {
       reason,
       reconnecting: !this.#stopping && !ended,
     });
+
     if (this.#stopping) return;
+
     if (ended) return this.#finish(ended);
     void this.#reconnect();
   }
@@ -509,24 +575,31 @@ export class Tunnel {
   async #reconnect() {
     this.#disconnectedAt ??= Date.now();
     let delay = 250;
+
     while (!this.#stopping && Date.now() - this.#disconnectedAt < RECONNECT_GRACE_MS) {
       await new Promise((resolve) => setTimeout(resolve, delay));
       delay = Math.min(delay * 2, 5000);
+
       try {
         await this.#dial();
         this.#options.log("reconnected", { shareId: this.#share?.id });
+
         return;
       } catch (error) {
-        this.#options.log("reconnect.failed", { message: (error as Error).message });
+        const message = error instanceof Error ? error.message : String(error);
+        this.#options.log("reconnect.failed", { message });
+
         if (error instanceof FixError && error.reason) return this.#finish(error.reason);
       }
     }
+
     if (!this.#stopping) this.#finish("disconnected");
   }
 
   #finish(reason: CloseReason) {
     if (this.#ended) return;
     this.#ended = true;
+
     if (this.#heartbeat) clearInterval(this.#heartbeat);
     this.#dropStreams();
     this.#options.onEnd(reason);

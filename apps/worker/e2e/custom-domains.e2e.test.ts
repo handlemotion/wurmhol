@@ -3,26 +3,44 @@
 // two services it calls out to are local HTTP servers speaking their real wire shapes: Cloudflare's
 // custom hostnames API and a DNS-over-HTTPS JSON resolver, because no test may create real
 // hostnames or publish real DNS records.
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   api,
   browserFetch,
   createToken,
+  me,
   type Person,
   signIn,
   type Stack,
+  readJson,
   startStack,
 } from "./support.ts";
 import { fakeCloudflare, fakeResolver, TOKEN, ZONE } from "./domain-fakes.ts";
 
-interface Domain {
-  hostname: string;
-  pipe: string;
-  state: "pending" | "verifying" | "active" | "failed";
-  url: string | null;
-  dns: { type: string; name: string; value: string; purpose: string; done: boolean }[];
-  error: { code: string; message: string; fix: string } | null;
-}
+const domain = z.object({
+  hostname: z.string(),
+  pipe: z.string(),
+  state: z.enum(["pending", "verifying", "active", "failed"]),
+  url: z.string().nullable(),
+  dns: z.array(
+    z.object({
+      type: z.string(),
+      name: z.string(),
+      value: z.string(),
+      purpose: z.string(),
+      done: z.boolean(),
+    }),
+  ),
+  error: z.object({ code: z.string(), message: z.string(), fix: z.string() }).nullable(),
+});
+
+/** A domain answer, or a refusal whose `code` says why (an invalid body has none). */
+const domainAnswer = z.object({ domain: domain.optional(), code: z.string().optional() });
+
+const domainList = z.object({ domains: z.array(domain) });
+
+const inviteBody = z.object({ url: z.string() });
 
 let stack: Stack;
 let cloudflare: Awaited<ReturnType<typeof fakeCloudflare>>;
@@ -53,28 +71,25 @@ afterAll(async () => {
 });
 
 const add = (person: Person, hostname: string, pipe: string) =>
-  api<{ domain?: Domain; error?: string; code?: string }>(stack, person, "/api/domains", {
-    method: "POST",
-    body: { hostname, pipe },
-  });
+  api(stack, person, "/api/domains", { method: "POST", body: { hostname, pipe } }, domainAnswer);
+
 const verify = (person: Person, hostname: string) =>
-  api<{ domain?: Domain; code?: string }>(stack, person, `/api/domains/${hostname}/verify`, {
-    method: "POST",
-  });
+  api(stack, person, `/api/domains/${hostname}/verify`, { method: "POST" }, domainAnswer);
+
 const read = async (person: Person, hostname: string) =>
-  (await api<{ domain: Domain }>(stack, person, `/api/domains/${hostname}`)).body.domain;
+  (await api(stack, person, `/api/domains/${hostname}`, {}, z.object({ domain }))).body.domain;
 
 it("adds a domain with the two records to publish, and returns the same one when asked again", async () => {
   const first = await add(ada, "Preview.Acme-One.test", "acme-one");
   expect(first.status).toBe(201);
-  const domain = first.body.domain!;
-  expect(domain).toMatchObject({
+  const added = first.body.domain!;
+  expect(added).toMatchObject({
     hostname: "preview.acme-one.test",
     pipe: "acme-one",
     state: "pending",
     url: null,
   });
-  expect(domain.dns).toEqual([
+  expect(added.dns).toEqual([
     {
       type: "TXT",
       name: "_wurmhol.preview.acme-one.test",
@@ -93,13 +108,14 @@ it("adds a domain with the two records to publish, and returns the same one when
   expect(cloudflare.has("preview.acme-one.test")).toBe(true);
 
   const again = await add(ada, "preview.acme-one.test", "acme-one");
-  expect(again.body.domain!.dns[0]!.value).toBe(domain.dns[0]!.value);
+  expect(again.body.domain!.dns[0]!.value).toBe(added.dns[0]!.value);
 });
 
 it("refuses a hostname or pipe name another org has, and a host the install serves", async () => {
   // Catches: one org's claim of a hostname or name silently shadowing another org's.
   expect((await add(bea, "preview.acme-one.test", "bea-pipe")).body.code).toBe("hostname_taken");
   expect((await add(bea, "other.acme-one.test", "acme-one")).body.code).toBe("pipe_taken");
+
   // Catches: a customer domain that is the console or a pipe host of the install itself.
   for (const host of [
     `foo.pipe.localhost`,
@@ -111,6 +127,7 @@ it("refuses a hostname or pipe name another org has, and a host the install serv
     expect(refused.status).toBeGreaterThanOrEqual(400);
     expect(refused.body.domain).toBeUndefined();
   }
+
   expect((await add(bea, "x.example.test", "domains")).body.code).toBe("pipe_reserved");
 });
 
@@ -124,8 +141,8 @@ it("never routes on Cloudflare's word alone: a CNAME left behind is not ownershi
   expect(checked.body.domain!.state).toBe("pending");
   expect(checked.body.domain!.url).toBeNull();
 
-  const domain = await read(ada, hostname);
-  resolver.publish(`_wurmhol.${hostname}`, domain.dns[0]!.value);
+  const current = await read(ada, hostname);
+  resolver.publish(`_wurmhol.${hostname}`, current.dns[0]!.value);
   const proven = await verify(ada, hostname);
   expect(proven.body.domain).toMatchObject({
     state: "active",
@@ -150,6 +167,7 @@ it("expires a domain that was never finished and frees its Cloudflare hostname",
   const hostname = "late.acme-one.test";
   await add(ada, hostname, "acme-one");
   const db = stack.db({ write: true });
+
   try {
     db.prepare("update custom_domains set expires_at = ? where hostname = ?").run(
       Date.now() - 1000,
@@ -158,6 +176,7 @@ it("expires a domain that was never finished and frees its Cloudflare hostname",
   } finally {
     db.close();
   }
+
   const expired = await verify(ada, hostname);
   expect(expired.body.domain).toMatchObject({ state: "failed", error: { code: "expired" } });
   expect(cloudflare.has(hostname)).toBe(false);
@@ -184,23 +203,28 @@ it("answers on the CLI's host to an org token, and not to a pipes token", async 
   const host = `http://api.localhost:${stack.port}`;
   const org = await createToken(stack, ada, "orgs", { scope: "org" });
   const pipes = await createToken(stack, ada, "pipes");
+
   const listed = await browserFetch(`${host}/v1/domains`, {
     headers: { authorization: `Bearer ${org.token}` },
   });
+
   expect(listed.status).toBe(200);
-  const hostnames = ((await listed.json()) as { domains: Domain[] }).domains.map((d) => d.hostname);
+  const hostnames = (await readJson(domainList, listed)).domains.map((d) => d.hostname);
   expect(hostnames).toContain("preview.acme-one.test");
+
   const refused = await browserFetch(`${host}/v1/domains`, {
     headers: { authorization: `Bearer ${pipes.token}` },
   });
+
   expect(refused.status).toBe(403);
 });
 
 it("is off unless configured: every call says so, and nothing else changes", async () => {
   const plain = await startStack();
+
   try {
     const person = await signIn(plain);
-    const answer = await api<{ code?: string }>(plain, person, "/api/domains");
+    const answer = await api(plain, person, "/api/domains", {}, domainAnswer);
     // Catches: a self-hosted install that never set up Cloudflare for SaaS reaching for it anyway.
     expect(answer.status).toBe(404);
     expect(answer.body.code).toBe("custom_domains_off");
@@ -233,14 +257,18 @@ it("holds the limit when adds arrive together, and a refused add keeps no pipe n
   const passed = answers.filter((answer) => answer.status === 201).length;
   expect(passed).toBeLessThanOrEqual(3);
   expect(answers.every((a) => a.status === 201 || a.body.code === "domain_limit")).toBe(true);
+
   const count = async () =>
-    (await api<{ domains: Domain[] }>(stack, dana, "/api/domains")).body.domains.length;
+    (await api(stack, dana, "/api/domains", {}, domainList)).body.domains.length;
+
   expect(await count()).toBe(passed);
   // The ones that backed out left nothing at Cloudflare.
   expect(hosts.filter((host) => cloudflare.has(host))).toHaveLength(passed);
+
   for (const host of hosts.slice(0, 3 - passed).map((h) => `again-${h}`)) {
     expect((await add(dana, host, "dana-app")).status).toBe(201);
   }
+
   expect(await count()).toBe(3);
 
   // Catches: a refused add that still reserved a fresh pipe name for the org, for good.
@@ -256,20 +284,23 @@ it("moves a domain whose check fails to the back of the daily job's queue", asyn
   const hostname = "servfail.fay.test";
   await add(fay, hostname, "fay-app");
   resolver.fail(`_wurmhol.${hostname}`);
+
   const checkedAt = () => {
     const db = stack.db();
+
     try {
-      return (
-        db
-          .prepare("select checked_at as at from custom_domains where hostname = ?")
-          .get(hostname) as {
-          at: number;
-        }
-      ).at;
+      return z
+        .object({ at: z.number() })
+        .parse(
+          db
+            .prepare("select checked_at as at from custom_domains where hostname = ?")
+            .get(hostname),
+        ).at;
     } finally {
       db.close();
     }
   };
+
   const before = checkedAt();
   expect((await browserFetch(`${stack.url}/cdn-cgi/local/scheduled`)).ok).toBe(true);
   // Catches: a domain whose DNS keeps failing staying the oldest checked, so the daily job's batch
@@ -280,9 +311,9 @@ it("moves a domain whose check fails to the back of the daily job's queue", asyn
 it("deleting an org takes its domains out of Cloudflare, and waits while Cloudflare is down", async () => {
   const gus = await signIn(stack);
   const hal = await signIn(stack);
-  const gusOrg = (await api<{ activeOrgId: string }>(stack, gus, "/api/me")).body.activeOrgId;
+  const gusOrg = (await me(stack, gus)).activeOrgId;
   // Gus joins Hal's org, so his own is not his only one, then goes back to his own.
-  const invite = await api<{ url: string }>(stack, hal, "/api/invites", { method: "POST" });
+  const invite = await api(stack, hal, "/api/invites", { method: "POST" }, inviteBody);
   const code = invite.body.url.split("/join/")[1]!;
   expect((await api(stack, gus, `/api/invites/${code}/accept`, { method: "POST" })).status).toBe(
     200,
@@ -295,6 +326,7 @@ it("deleting an org takes its domains out of Cloudflare, and waits while Cloudfl
   expect((await add(gus, hostname, "gus-app")).status).toBe(201);
 
   cloudflare.setDown(true);
+
   try {
     const refused = await api(stack, gus, "/api/org", { method: "DELETE" });
     // Catches: the org's rows going while Cloudflare keeps its billed hostnames, with nothing
@@ -304,6 +336,7 @@ it("deleting an org takes its domains out of Cloudflare, and waits while Cloudfl
   } finally {
     cloudflare.setDown(false);
   }
+
   expect((await api(stack, gus, "/api/org", { method: "DELETE" })).status).toBe(200);
   expect(cloudflare.has(hostname)).toBe(false);
 });

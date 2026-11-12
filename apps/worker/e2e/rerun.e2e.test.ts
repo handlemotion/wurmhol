@@ -1,12 +1,14 @@
 // Agents re-run commands: `npx wurmhol <port>` again with the same flags prints the pipe that is
 // already open instead of opening a second one (and using another of the org's active pipes).
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   api,
   cli,
   cliEnv,
   createToken,
   localServer,
+  parseJson,
   type Person,
   shareStates,
   signIn,
@@ -33,18 +35,20 @@ afterAll(async () => {
   await stack.stop();
 });
 
+const wallSchema = z.object({ shares: z.array(z.object({ id: z.string() })) });
+
 const open = async () =>
-  (await api<{ shares: { id: string }[] }>(stack, ada, "/api/shares")).body.shares.map((s) => s.id);
+  (await api(stack, ada, "/api/shares", {}, wallSchema)).body.shares.map((s) => s.id);
 
 async function run(args: string[]) {
   const result = await cli([String(local.port), ...args, "--json"], env);
+
   if (result.code !== 0) throw new Error(`wurmhol exited ${result.code}: ${result.stderr}`);
-  return JSON.parse(result.stdout.split("\n")[0]!) as {
-    id: string;
-    url: string;
-    port: number;
-    endsAt: string;
-  };
+
+  return parseJson(
+    z.object({ id: z.string(), url: z.string(), port: z.number(), endsAt: z.string() }),
+    result.stdout.split("\n")[0]!,
+  );
 }
 
 it("the same command again prints the open pipe, in the same shape, and opens no other", async () => {

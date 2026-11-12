@@ -1,26 +1,29 @@
 import { cn } from "cn";
 import { useState } from "react";
 
+const AVATAR_SIZES = {
+  xs: "[--avatar-size:--spacing(5)]",
+  sm: "[--avatar-size:--spacing(6)]",
+  md: "[--avatar-size:--spacing(8)]",
+  lg: "[--avatar-size:--spacing(10)]",
+  xl: "[--avatar-size:--spacing(12)]",
+  "2xl": "[--avatar-size:--spacing(14)]",
+  "3xl": "[--avatar-size:--spacing(16)]",
+  "4xl": "[--avatar-size:--spacing(20)]",
+  "5xl": "[--avatar-size:--spacing(24)]",
+  "6xl": "[--avatar-size:--spacing(28)]",
+  "7xl": "[--avatar-size:--spacing(32)]",
+  "8xl": "[--avatar-size:--spacing(36)]",
+  "9xl": "[--avatar-size:--spacing(42)]",
+};
+
 export interface AvatarProps {
   src?: string | null;
   initials?: string;
   alt?: string;
   className?: string;
   isSquare?: boolean;
-  size?:
-    | "xs"
-    | "sm"
-    | "md"
-    | "lg"
-    | "xl"
-    | "2xl"
-    | "3xl"
-    | "4xl"
-    | "5xl"
-    | "6xl"
-    | "7xl"
-    | "8xl"
-    | "9xl";
+  size?: keyof typeof AVATAR_SIZES;
 }
 
 export function Avatar({
@@ -35,25 +38,14 @@ export function Avatar({
   // A picture that fails to load (gone, blocked, offline) leaves the initials showing instead of
   // the browser's broken-image glyph over them.
   const [failed, setFailed] = useState<string | null>(null);
+
   return (
     <span
       data-slot="avatar"
       {...props}
       className={cn(
         "inline-grid size-(--avatar-size) shrink-0 align-middle outline-1 outline-foreground/(--ring-opacity) -outline-offset-1 [--avatar-radius:0] [--ring-opacity:20%] *:col-start-1 *:row-start-1 *:size-(--avatar-size)",
-        size === "xs" && "[--avatar-size:--spacing(5)]",
-        size === "sm" && "[--avatar-size:--spacing(6)]",
-        size === "md" && "[--avatar-size:--spacing(8)]",
-        size === "lg" && "[--avatar-size:--spacing(10)]",
-        size === "xl" && "[--avatar-size:--spacing(12)]",
-        size === "2xl" && "[--avatar-size:--spacing(14)]",
-        size === "3xl" && "[--avatar-size:--spacing(16)]",
-        size === "4xl" && "[--avatar-size:--spacing(20)]",
-        size === "5xl" && "[--avatar-size:--spacing(24)]",
-        size === "6xl" && "[--avatar-size:--spacing(28)]",
-        size === "7xl" && "[--avatar-size:--spacing(32)]",
-        size === "8xl" && "[--avatar-size:--spacing(36)]",
-        size === "9xl" && "[--avatar-size:--spacing(42)]",
+        AVATAR_SIZES[size],
         isSquare
           ? "rounded-(--avatar-radius) *:rounded-(--avatar-radius)"
           : "rounded-none *:rounded-none",

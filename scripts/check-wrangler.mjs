@@ -12,6 +12,7 @@ const root = join(import.meta.dirname, "..");
 function read(path) {
   const errors = [];
   const config = parse(readFileSync(path, "utf8"), errors, { allowTrailingComma: true });
+
   if (errors.length > 0) throw new Error(`${path}: not valid JSONC`);
   const dir = dirname(path);
   const at = (relative) => resolve(dir, relative);
@@ -19,17 +20,22 @@ function read(path) {
   delete config.build;
   config.main = at(config.main);
   config.assets.directory = at(config.assets.directory);
+
   for (const db of config.d1_databases) db.migrations_dir = at(db.migrations_dir);
   config.vars = Object.keys(config.vars).sort();
+
   return config;
 }
 
 const button = read(join(root, "wrangler.jsonc"));
 const worker = read(join(root, "apps/worker/wrangler.jsonc"));
 const keys = [...new Set([...Object.keys(button), ...Object.keys(worker)])];
-const problems = keys
-  .filter((key) => !isDeepStrictEqual(button[key], worker[key]))
-  .map((key) => `  ${key}: wrangler.jsonc and apps/worker/wrangler.jsonc differ`);
+
+const problems = keys.flatMap((key) =>
+  isDeepStrictEqual(button[key], worker[key])
+    ? []
+    : [`  ${key}: wrangler.jsonc and apps/worker/wrangler.jsonc differ`],
+);
 
 if (problems.length > 0) {
   console.error(`Wrangler configs drifted apart:\n${problems.join("\n")}`);

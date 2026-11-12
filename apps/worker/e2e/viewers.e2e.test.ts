@@ -1,8 +1,9 @@
 // Per-pipe access and the view log (ADR 0008): `--only` narrows a pipe to named members of the
 // token's org, and the relay records who opened it (first and last seen, a count), never what
 // they opened.
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { FixError, openPipe } from "wurmhol";
+import { z } from "zod";
 import {
   api,
   browserFetch,
@@ -11,6 +12,7 @@ import {
   createToken,
   localServer,
   me,
+  parseJson,
   type Person,
   signIn,
   type Stack,
@@ -29,19 +31,31 @@ let token: string;
 let local: Awaited<ReturnType<typeof localServer>>;
 let hits: string[];
 
+const sharesBody = z.object({ shares: z.array(z.json()) });
+
 /** `person` joins `owner`'s org through an invite link. */
 async function join(owner: Person, person: Person) {
-  const { body } = await api<{ url: string }>(stack, owner, "/api/invites", { method: "POST" });
+  const { body } = await api(
+    stack,
+    owner,
+    "/api/invites",
+    { method: "POST" },
+    z.object({ url: z.string() }),
+  );
+
   const code = body.url.split("/join/")[1]!;
   const accepted = await api(stack, person, `/api/invites/${code}/accept`, { method: "POST" });
+
   if (accepted.status !== 200) throw new Error(`invite: ${accepted.status}`);
 }
 
 /** Opens a pipe with `wurmhol <port> --only <only>`. */
 async function shareOnly(only: string) {
   const result = await cli([String(local.port), "--json", "--only", only], env);
+
   if (result.code !== 0) throw new Error(`wurmhol --only failed: ${result.stderr}`);
-  return JSON.parse(result.stdout.split("\n")[0]!) as { id: string; url: string };
+
+  return parseJson(z.object({ id: z.string(), url: z.string() }), result.stdout.split("\n")[0]!);
 }
 
 beforeAll(async () => {
@@ -94,13 +108,13 @@ describe("a pipe opened with --only", () => {
 
   it("is refused at connect when it names someone outside the org, with the fix", async () => {
     const outsider = await signIn(stack);
-    const before = (await api<{ shares: unknown[] }>(stack, ada, "/api/shares")).body.shares;
+    const before = (await api(stack, ada, "/api/shares", {}, sharesBody)).body.shares;
     const result = await cli([String(local.port), "--only", `${bo.email},${outsider.email}`], env);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain(`${outsider.email} is not a member of the token's org`);
     expect(result.stderr).toContain("menu → Members");
     expect(result.stderr).not.toContain(bo.email);
-    const after = (await api<{ shares: unknown[] }>(stack, ada, "/api/shares")).body.shares;
+    const after = (await api(stack, ada, "/api/shares", {}, sharesBody)).body.shares;
     expect(after).toHaveLength(before.length);
   });
 });
@@ -108,14 +122,16 @@ describe("a pipe opened with --only", () => {
 describe("openPipe({ viewers })", () => {
   it("narrows the pipe to the listed members, and rejects a name outside the org", async () => {
     const outsider = await signIn(stack);
-    const refused = await openPipe({
+
+    const refused = openPipe({
       port: local.port,
       token,
       server: stack.url,
       viewers: [outsider.email],
-    }).catch((error: unknown) => error);
-    expect(refused).toBeInstanceOf(FixError);
-    expect((refused as FixError).message).toContain(`${outsider.email} is not a member`);
+    });
+
+    await expect(refused).rejects.toBeInstanceOf(FixError);
+    await expect(refused).rejects.toThrow(`${outsider.email} is not a member`);
 
     const pipe = await openPipe({
       port: local.port,
@@ -123,6 +139,7 @@ describe("openPipe({ viewers })", () => {
       server: stack.url,
       viewers: [bo.email],
     });
+
     try {
       const cookie = await viewerCookie(stack, bo, pipe.url);
       expect((await browserFetch(`${pipe.url}/`, { cookie, headers: page })).status).toBe(200);
@@ -142,6 +159,7 @@ describe("the view log", () => {
     const shared = await shareOnly(`${bo.email}, ${cleo.email}`);
     const secret = `/private/${crypto.randomUUID()}?q=${crypto.randomUUID()}`;
     const cookie = await viewerCookie(stack, bo, shared.url);
+
     for (let i = 0; i < 3; i++) {
       expect((await browserFetch(`${shared.url}${secret}`, { cookie })).status).toBe(200);
     }
@@ -149,14 +167,28 @@ describe("the view log", () => {
     // The wall's card names the viewer as soon as they first open it.
     const card = await waitFor(
       async () => {
-        const { body } = await api<{
-          shares: { id: string; views: { name: string; lastSeenAt: number }[] }[];
-        }>(stack, ada, "/api/shares");
+        const { body } = await api(
+          stack,
+          ada,
+          "/api/shares",
+          {},
+          z.object({
+            shares: z.array(
+              z.object({
+                id: z.string(),
+                views: z.array(z.looseObject({ name: z.string(), lastSeenAt: z.number() })),
+              }),
+            ),
+          }),
+        );
+
         const found = body.shares.find((s) => s.id === shared.id);
+
         return found?.views.length ? found : null;
       },
       { what: "the viewer on the wall" },
     );
+
     expect(card.views).toEqual([{ name: bo.email, lastSeenAt: expect.any(Number) }]);
     expect(Date.now() - card.views[0]!.lastSeenAt).toBeLessThan(30_000);
 
@@ -165,13 +197,14 @@ describe("the view log", () => {
     expect(stopped.code).toBe(0);
     const { activeOrgId } = await me(stack, ada);
     const { user } = await me(stack, bo);
+
     const rows = await waitFor(
       () => {
         const db = stack.db();
+
         try {
-          const all = db
-            .prepare("select * from share_views where share_id = ?")
-            .all(shared.id) as Record<string, unknown>[];
+          const all = db.prepare("select * from share_views where share_id = ?").all(shared.id);
+
           return all.length && all[0]!.requests === 3 ? all : null;
         } finally {
           db.close();
@@ -179,6 +212,7 @@ describe("the view log", () => {
       },
       { what: "the view log in D1" },
     );
+
     expect(rows).toEqual([
       {
         share_id: shared.id,

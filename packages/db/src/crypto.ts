@@ -10,12 +10,14 @@ import {
 /** Lowercase hex SHA-256 of a UTF-8 string. */
 export async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** `bytes` random bytes as unpadded base64url. */
 export function randomSecret(bytes = 32): string {
   const raw = crypto.getRandomValues(new Uint8Array(bytes));
+
   return btoa(String.fromCharCode(...raw))
     .replaceAll("+", "-")
     .replaceAll("/", "_")
@@ -27,11 +29,13 @@ function randomLabel(length: number): string {
   const size = SHARE_ID_ALPHABET.length;
   const below = 256 - (256 % size);
   let label = "";
+
   while (label.length < length) {
     for (const byte of crypto.getRandomValues(new Uint8Array(length * 2))) {
       if (byte < below && label.length < length) label += SHARE_ID_ALPHABET[byte % size];
     }
   }
+
   return label;
 }
 
@@ -48,5 +52,6 @@ export function randomEmbedTunnelName(): string {
 /** A new embedded credential of `kind` and its hash; only the hash is ever stored. */
 export async function newEmbedCredential(kind: EmbedCredentialKind) {
   const value = `${EMBED_CREDENTIAL_PREFIXES[kind]}${randomSecret(32)}`;
+
   return { value, hash: await sha256Hex(value) };
 }

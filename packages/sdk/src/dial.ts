@@ -46,6 +46,7 @@ export async function dial(target: URL, options: DialOptions): Promise<WsConnect
   const url = new URL(target);
   url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
   const transport = options.transport ?? selectTransport();
+
   try {
     const { socket } = await transport.connect(url, {
       headers: {
@@ -56,22 +57,26 @@ export async function dial(target: URL, options: DialOptions): Promise<WsConnect
       proxy: proxy || undefined,
       handshakeTimeout: 15_000,
       closeTimeout: CLOSE_TIMEOUT_MS,
-      ...(options.maxPayload === undefined ? {} : { maxPayload: options.maxPayload }),
+      // Both transports treat an undefined limit as their default.
+      maxPayload: options.maxPayload,
       onOpen: (socket, response) => {
         options.onUpgrade?.(response);
         options.onOpen?.(socket);
       },
     });
+
     return socket;
   } catch (error) {
     if (error instanceof FixError) throw error;
+
     if (error instanceof HandshakeRefused) {
       throw explainRefusal(error.status, error.body, {
         server: options.server,
         viaProxy: Boolean(proxy),
       });
     }
-    throw explainConnectError(error as Error & { code?: string }, {
+
+    throw explainConnectError(error instanceof Error ? error : new Error(String(error)), {
       server: options.server,
       proxy,
     });

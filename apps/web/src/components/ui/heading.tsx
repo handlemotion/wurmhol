@@ -12,6 +12,7 @@ export interface HeadingProps extends HeadingType {
 
 export function Heading({ className, level = 1, size = "md", ...props }: HeadingProps) {
   const Element: `h${typeof level}` = `h${level}`;
+
   return (
     <Element
       className={cn(size === "md" ? "text-lg" : "text-base", "text-foreground", className)}

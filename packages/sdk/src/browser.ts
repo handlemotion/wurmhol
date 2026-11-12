@@ -21,12 +21,17 @@ export function grantProtocols(token: string, own: readonly string[] = []): stri
   return protocol.grantProtocols(token, own);
 }
 
-/** The close codes the relay ends a grant's WebSocket with. */
-export const GRANT_CLOSE_CODES = {
+export interface GrantCloseCodes {
   /** The grant expired: issue a new one and reconnect. */
-  expired: protocol.GRANT_CLOSE.expired.code as number,
+  expired: number;
   /** The grant was revoked: final. */
-  revoked: protocol.GRANT_CLOSE.revoked.code as number,
+  revoked: number;
+}
+
+/** The close codes the relay ends a grant's WebSocket with. */
+export const GRANT_CLOSE_CODES: GrantCloseCodes = {
+  expired: protocol.GRANT_CLOSE.expired.code,
+  revoked: protocol.GRANT_CLOSE.revoked.code,
 };
 
 /** The part of a WebSocket the helper uses: the browser's, or any with the same shape. */
@@ -70,12 +75,14 @@ export interface TunnelSocketOptions {
  */
 export function tunnelSocket(url: string, options: TunnelSocketOptions): TunnelSocket {
   const events = new EventTarget();
+
   const connect =
     options.connect ??
     ((target: string, protocols: string[]) =>
-      new (
-        globalThis as unknown as { WebSocket: new (u: string, p: string[]) => SocketLike }
-      ).WebSocket(target, protocols));
+      // SAFETY: a WebSocket has every member SocketLike names. SocketLike types a listener's event
+      // as `never` so any listener fits; the socket calls each with its event type's own event.
+      new WebSocket(target, protocols) as SocketLike);
+
   const limit = options.reconnects ?? 5;
   let socket: SocketLike | null = null;
   let renewals = 0;
@@ -94,11 +101,14 @@ export function tunnelSocket(url: string, options: TunnelSocketOptions): TunnelS
     );
     current.addEventListener("close", (event: CloseEvent) => {
       if (socket !== current) return;
+
       if (!closedByUs && event.code === GRANT_CLOSE_CODES.expired && renewals < limit) {
         renewals += 1;
-        void open(true).catch((error: unknown) => finish(1006, String(error)));
+        void open(true).catch((cause: unknown) => finish(1006, String(cause)));
+
         return;
       }
+
       finish(event.code, event.reason);
     });
   };
@@ -108,10 +118,12 @@ export function tunnelSocket(url: string, options: TunnelSocketOptions): TunnelS
     events.dispatchEvent(Object.assign(new Event("close"), { code, reason }));
   };
 
-  void open(false).catch((error: unknown) => finish(1006, String(error)));
+  void open(false).catch((cause: unknown) => finish(1006, String(cause)));
 
   return {
     addEventListener: (type, listener) =>
+      // SAFETY: `events` dispatches only plain Events, MessageEvents (with `data`) and close Events
+      // given `code` and `reason`, so every event the listener gets has the shape it is typed for.
       events.addEventListener(type, listener as (e: Event) => void),
     removeEventListener: (type, listener) => events.removeEventListener(type, listener),
     get protocol() {

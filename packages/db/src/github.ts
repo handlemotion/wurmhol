@@ -59,5 +59,6 @@ export async function openSharesForBranch(
         isNull(shares.endedAt),
       ),
     );
+
   return rows.filter((row) => row.repo?.toLowerCase() === input.repo.toLowerCase());
 }

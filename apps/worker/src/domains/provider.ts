@@ -1,6 +1,7 @@
 // Cloudflare for SaaS custom hostnames (ADR 0033), behind an interface: nothing else in the Worker
 // knows Cloudflare's shapes. Needs a token scoped to `SSL and Certificates: Edit` on the SaaS zone.
 import type { HostnameSnapshot } from "@wurmhol/protocol";
+import { z } from "zod";
 
 /** A custom hostname as the provider holds it. */
 export interface ProviderHostname extends HostnameSnapshot {
@@ -33,18 +34,28 @@ export interface HostnameProvider {
   delete(id: string): Promise<void>;
 }
 
-interface CloudflareEnvelope {
-  success?: boolean;
-  errors?: { code?: number; message?: string }[];
-  result?: unknown;
-}
+/** Every Cloudflare API answer; `result` is parsed per call. */
+const cloudflareEnvelope = z.object({
+  success: z.boolean().optional(),
+  errors: z
+    .array(z.object({ code: z.number().optional(), message: z.string().optional() }))
+    .optional(),
+  result: z.unknown(),
+});
 
-interface CloudflareHostname {
-  id: string;
-  status?: string;
-  verification_errors?: string[];
-  ssl?: { status?: string; validation_errors?: { message?: string }[] };
-}
+const cloudflareHostname = z.object({
+  id: z.string(),
+  status: z.string().optional(),
+  verification_errors: z.array(z.string()).optional(),
+  ssl: z
+    .object({
+      status: z.string().optional(),
+      validation_errors: z.array(z.object({ message: z.string().optional() })).optional(),
+    })
+    .optional(),
+});
+
+type CloudflareHostname = z.infer<typeof cloudflareHostname>;
 
 function hostnameStatus(status: string | undefined): HostnameSnapshot["status"] {
   switch (status) {
@@ -67,12 +78,14 @@ function hostnameStatus(status: string | undefined): HostnameSnapshot["status"] 
 
 function sslStatus(status: string | undefined): HostnameSnapshot["ssl"] {
   if (status === "active") return "active";
+
   if (status === "expired" || status?.endsWith("_timed_out")) return "failed";
+
   return "pending";
 }
 
 /** Cloudflare's custom hostname, as ours. */
-export function fromCloudflare(raw: CloudflareHostname): ProviderHostname {
+function fromCloudflare(raw: CloudflareHostname): ProviderHostname {
   return {
     id: raw.id,
     status: hostnameStatus(raw.status),
@@ -99,27 +112,32 @@ export function cloudflareProvider(options: {
 }): HostnameProvider {
   const base = `${options.apiUrl}/zones/${options.zoneId}/custom_hostnames`;
 
-  async function call(
+  async function call<Result extends z.ZodType>(
     method: string,
     path: string,
-    body?: unknown,
-  ): Promise<{ status: number; result: unknown }> {
+    result: Result,
+    body?: ReturnType<typeof createBody>,
+  ): Promise<{ status: 200; result: z.infer<Result> } | { status: 404; result: null }> {
+    const headers = new Headers({ authorization: `Bearer ${options.token}` });
+
+    if (body !== undefined) headers.set("content-type", "application/json");
     let response: Response;
+
     try {
       response = await fetch(`${base}${path}`, {
         method,
-        headers: {
-          authorization: `Bearer ${options.token}`,
-          ...(body === undefined ? {} : { "content-type": "application/json" }),
-        },
+        headers,
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(15_000),
       });
     } catch {
       throw new ProviderError("Cloudflare did not answer");
     }
+
     if (response.status === 404) return { status: 404, result: null };
-    const envelope = (await response.json().catch(() => null)) as CloudflareEnvelope | null;
+    const parsed = cloudflareEnvelope.safeParse(await response.json().catch(() => null));
+    const envelope = parsed.success ? parsed.data : null;
+
     if (!response.ok || !envelope?.success) {
       const first = envelope?.errors?.[0];
       throw new ProviderError(
@@ -127,34 +145,52 @@ export function cloudflareProvider(options: {
         first?.code,
       );
     }
-    return { status: response.status, result: envelope.result };
+
+    const answer = result.safeParse(envelope.result);
+
+    if (!answer.success) throw new ProviderError("Cloudflare answered in an unexpected shape");
+
+    return { status: 200, result: answer.data };
   }
 
   return {
     async create(hostname) {
       try {
-        const { result } = await call("POST", "", createBody(hostname));
-        return fromCloudflare(result as CloudflareHostname);
+        const created = await call("POST", "", cloudflareHostname, createBody(hostname));
+
+        if (created.status === 404) throw new ProviderError("Cloudflare refused: HTTP 404");
+
+        return fromCloudflare(created.result);
       } catch (error) {
         if (!(error instanceof ProviderError) || error.code !== DUPLICATE) throw error;
+
         // The zone is ours alone, so a hostname it already holds is one we lost track of: adopt it.
-        const { result } = await call("GET", `?hostname=${encodeURIComponent(hostname)}`);
-        const [found] = (result as CloudflareHostname[] | null) ?? [];
+        const { result } = await call(
+          "GET",
+          `?hostname=${encodeURIComponent(hostname)}`,
+          z.array(cloudflareHostname).nullable(),
+        );
+
+        const [found] = result ?? [];
+
         if (!found) throw error;
+
         return fromCloudflare(found);
       }
     },
     async get(id) {
-      const { status, result } = await call("GET", `/${id}`);
-      return status === 404 ? null : fromCloudflare(result as CloudflareHostname);
+      const found = await call("GET", `/${id}`, cloudflareHostname);
+
+      return found.status === 404 ? null : fromCloudflare(found.result);
     },
     async recheck(id, hostname) {
       // A PATCH with the creation settings makes Cloudflare validate again without changing them.
-      const { status, result } = await call("PATCH", `/${id}`, createBody(hostname));
-      return status === 404 ? null : fromCloudflare(result as CloudflareHostname);
+      const found = await call("PATCH", `/${id}`, cloudflareHostname, createBody(hostname));
+
+      return found.status === 404 ? null : fromCloudflare(found.result);
     },
     async delete(id) {
-      await call("DELETE", `/${id}`);
+      await call("DELETE", `/${id}`, z.unknown());
     },
   };
 }

@@ -10,6 +10,7 @@ import { Separator, type SeparatorProps } from "react-aria-components/Separator"
 import { Text, type TextProps } from "react-aria-components/Text";
 import { twJoin, cn } from "cn";
 import { tv } from "tailwind-variants";
+import { plainText } from "@/lib/primitive";
 import { Keyboard } from "./keyboard";
 
 export const dropdownSectionStyles = tv({
@@ -117,7 +118,8 @@ export interface DropdownItemProps extends ListBoxItemProps {
 }
 
 export function DropdownItem({ className, children, intent, ...props }: DropdownItemProps) {
-  const textValue = typeof children === "string" ? children : undefined;
+  const textValue = plainText(children);
+
   return (
     <ListBoxItemPrimitive
       textValue={textValue}
@@ -138,7 +140,7 @@ export function DropdownItem({ className, children, intent, ...props }: Dropdown
               data-slot="check-indicator"
             />
           )}
-          {typeof children === "string" ? <DropdownLabel>{children}</DropdownLabel> : children}
+          {plainText(children) === undefined ? children : <DropdownLabel>{children}</DropdownLabel>}
         </>
       ))}
     </ListBoxItemPrimitive>

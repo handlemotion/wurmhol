@@ -19,6 +19,7 @@ import { useClipboard } from "@/hooks/use-clipboard";
 import type { Machine } from "@wurmhol/protocol";
 
 const COMMAND = "npx wurmhol <port>";
+
 const PROMPT =
   "Start the dev server, then run `npx wurmhol <port>` with its port and send me the URL it prints.";
 
@@ -75,6 +76,7 @@ export function CreateCard({ onOpened }: { onOpened: (url: string) => void }) {
   const [last, setLast] = useState<string | null>(null);
   const [view, setView] = useState<"ways" | "machine">("ways");
   const docs = useAppConfig().data?.docsUrl;
+
   return (
     <section
       data-open
@@ -94,7 +96,9 @@ export function CreateCard({ onOpened }: { onOpened: (url: string) => void }) {
             autoFocus="first"
             onAction={(key) => {
               const option = CREATE.find((item) => item.id === key);
+
               if (!option) return;
+
               if (option.value === null) return setView("machine");
               setLast(option.id);
               void copy(option.value);
@@ -155,6 +159,7 @@ function MachineSteps({
   const connected = machines?.length ? machines : null;
   const setup = useSetupCode(!connected);
   const row = "flex h-8 items-center gap-2.5 px-2 text-sm";
+
   return (
     <>
       <div className="flex h-8 items-center gap-1">
@@ -228,9 +233,11 @@ function Ports(props: {
   onPick: (machine: string, port: number) => void;
 }) {
   const several = props.machines.length > 1;
+
   const items = props.machines.flatMap((machine) =>
     machine.ports.map((p) => ({ key: `${machine.id}:${p.port}`, machine, ...p })),
   );
+
   if (!items.length) {
     return (
       <span className="flex min-h-8 items-center gap-2.5 px-2 text-xs text-muted-foreground">
@@ -239,12 +246,14 @@ function Ports(props: {
       </span>
     );
   }
+
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <ActionList
         aria-label="Ports"
         onAction={(key) => {
           const item = items.find((i) => i.key === key);
+
           if (item && !props.pending) props.onPick(item.machine.id, item.port);
         }}
       >

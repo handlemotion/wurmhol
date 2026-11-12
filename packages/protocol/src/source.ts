@@ -3,6 +3,8 @@
 // checks it with the same rules, so whatever the CLI sends is what the Worker accepts. Every
 // field is optional and bounded; URLs are http or https only.
 
+import { isJsonObject, isString, type JsonValue } from "./json.ts";
+
 export interface PipeSource {
   /** The forge's host, like `github.com`. */
   repoHost: string | null;
@@ -34,15 +36,19 @@ export const SOURCE_LIMITS = {
 const HOST = /^[a-z0-9-]+(\.[a-z0-9-]+)*(:\d{1,5})?$/;
 const REPO_SEGMENT = /^[A-Za-z0-9._-]+$/;
 const COMMIT = /^[0-9a-f]{7,64}$/;
+
 // oxlint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 
 /** `value` as an http(s) URL of at most `max` characters, or null. */
 function httpUrl(value: string, max: number): string | null {
   if (value.length > max) return null;
+
   try {
     const url = new URL(value);
+
     if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+
     return url.href.length > max ? null : url.href;
   } catch {
     return null;
@@ -51,17 +57,20 @@ function httpUrl(value: string, max: number): string | null {
 
 function line(value: string, max: number): string | null {
   const text = value.replace(/\s+/g, " ").trim();
+
   return text && text.length <= max && !CONTROL.test(text) ? text : null;
 }
 
 /** Each field's check: the field's value, normalised, or null when it is not valid. */
-const FIELDS: { [K in keyof PipeSource]: (value: string) => string | null } = {
+const FIELDS = {
   repoHost: (value) => {
     const host = value.toLowerCase();
+
     return host.length <= SOURCE_LIMITS.repoHost && HOST.test(host) ? host : null;
   },
   repo: (value) => {
     const segments = value.split("/");
+
     return value.length <= SOURCE_LIMITS.repo &&
       segments.length >= 2 &&
       segments.every((s) => REPO_SEGMENT.test(s) && s !== "." && s !== "..")
@@ -79,8 +88,9 @@ const FIELDS: { [K in keyof PipeSource]: (value: string) => string | null } = {
   note: (value) => line(value, SOURCE_LIMITS.note),
   agent: (value) => line(value, SOURCE_LIMITS.agent),
   agentUrl: (value) => httpUrl(value, SOURCE_LIMITS.agentUrl),
-};
+} satisfies { [K in keyof PipeSource]: (value: string) => string | null };
 
+// SAFETY: `satisfies` holds FIELDS to exactly one own key per PipeSource field.
 export const SOURCE_FIELDS = Object.keys(FIELDS) as (keyof PipeSource)[];
 
 /** One field's value, normalised, or null when it is not valid for that field. */
@@ -109,24 +119,37 @@ export type SourceResult =
  * are ignored; null or absent fields are left out; any other invalid field is refused. A source
  * with no field set is null.
  */
-export function parsePipeSource(raw: unknown): SourceResult {
+export function parsePipeSource(raw: JsonValue | undefined): SourceResult {
   if (raw === null || raw === undefined) return { ok: true, source: null };
-  if (typeof raw !== "object" || Array.isArray(raw)) {
+
+  if (!isJsonObject(raw)) {
     return { ok: false, field: "note", fix: "The pipe's source is not an object." };
   }
-  const source = Object.fromEntries(SOURCE_FIELDS.map((f) => [f, null])) as Record<
-    keyof PipeSource,
-    string | null
-  >;
+
+  const source: PipeSource = {
+    repoHost: null,
+    repo: null,
+    branch: null,
+    commit: null,
+    link: null,
+    note: null,
+    agent: null,
+    agentUrl: null,
+  };
+
   let any = false;
+
   for (const field of SOURCE_FIELDS) {
-    const value = (raw as Record<string, unknown>)[field];
+    const value = raw[field];
+
     if (value === null || value === undefined) continue;
-    const checked = typeof value === "string" ? sourceField(field, value) : null;
+    const checked = isString(value) ? sourceField(field, value) : null;
+
     if (checked === null) return { ok: false, field, fix: SOURCE_FIXES[field] };
     source[field] = checked;
     any = true;
   }
+
   return { ok: true, source: any ? source : null };
 }
 
@@ -134,8 +157,11 @@ export function parsePipeSource(raw: unknown): SourceResult {
 function trimSlashes(path: string) {
   let start = 0;
   let end = path.length;
+
   while (start < end && path[start] === "/") start++;
+
   while (end > start && path[end - 1] === "/") end--;
+
   return path.slice(start, end);
 }
 
@@ -145,34 +171,42 @@ function trimSlashes(path: string) {
  */
 export function repoFromRemote(remote: string): { repoHost: string; repo: string } | null {
   const value = remote.trim();
+
   if (value.length > 2048) return null;
   let host: string;
   let path: string;
   // scp-like syntax: `git@github.com:owner/name.git`.
   const scp = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)(.+)$/.exec(value);
+
   if (scp && !/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
     host = scp[1]!;
     path = scp[2]!;
   } else {
     let url: URL;
+
     try {
       url = new URL(value);
     } catch {
       return null;
     }
+
     if (!["https:", "http:", "ssh:", "git:", "git+ssh:", "ssh+git:"].includes(url.protocol)) {
       return null;
     }
+
     host = url.port && url.protocol.startsWith("http") ? url.host : url.hostname;
     path = decodeURIComponent(url.pathname);
   }
+
   const repoHost = sourceField("repoHost", host);
+
   const repo = sourceField(
     "repo",
     trimSlashes(path)
       .replace(/\.git$/, "")
       .replace(/^~[^/]*\//, ""),
   );
+
   return repoHost && repo ? { repoHost, repo } : null;
 }
 
@@ -192,8 +226,10 @@ const AGENTS: [agent: string, matches: (env: Record<string, string | undefined>)
 /** The GitHub Actions run the CLI runs in (GitHub's coding agent, or any workflow), or null. */
 function actionsRun(env: Record<string, string | undefined>): string | null {
   if (env.GITHUB_ACTIONS !== "true" || !/^\d+$/.test(env.GITHUB_RUN_ID ?? "")) return null;
+
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY ?? "")) return null;
   const server = sourceField("agentUrl", env.GITHUB_SERVER_URL || "https://github.com");
+
   return (
     server &&
     sourceField(
@@ -212,11 +248,15 @@ export function agentFromEnv(
 ): { agent: string; agentUrl: string | null } | null {
   // Claude Code on the web: `cse_<id>` is the session `session_<id>` at claude.ai/code.
   const remote = /^cse_([A-Za-z0-9]{10,64})$/.exec(env.CLAUDE_CODE_REMOTE_SESSION_ID ?? "");
+
   if (remote) {
     return { agent: "Claude Code", agentUrl: `https://claude.ai/code/session_${remote[1]}` };
   }
+
   const run = actionsRun(env);
   const agent = AGENTS.find(([, matches]) => matches(env))?.[0];
+
   if (agent) return { agent, agentUrl: run };
+
   return run ? { agent: "GitHub Actions", agentUrl: run } : null;
 }

@@ -37,7 +37,9 @@ function rateLimit(fallback: string) {
     )
     .transform((value) => {
       if (value === "off") return null;
+      // SAFETY: the regex above admits only "off" or exactly two numbers around one "/".
       const [count, windowSeconds] = value.split("/").map(Number) as [number, number];
+
       return { count, windowSeconds };
     });
 }
@@ -73,6 +75,7 @@ const githubSchema = z
   })
   .superRefine((vars, ctx) => {
     if (!vars.GITHUB_APP_ID) return;
+
     for (const name of [
       "GITHUB_APP_SLUG",
       "GITHUB_APP_CLIENT_ID",
@@ -125,6 +128,7 @@ const customDomainsSchema = z
   })
   .superRefine((vars, ctx) => {
     if (!vars.CUSTOM_DOMAIN_TARGET) return;
+
     for (const name of ["CLOUDFLARE_ZONE_ID", "CLOUDFLARE_API_TOKEN"] as const) {
       if (!vars[name])
         ctx.addIssue({
@@ -307,6 +311,7 @@ const configSchema = z
   .and(z.object({ auth: authEnvSchema, github: githubSchema, customDomains: customDomainsSchema }))
   .superRefine((config, ctx) => {
     const app = new URL(config.auth.baseURL).hostname;
+
     if (app === config.SHARE_DOMAIN || app.endsWith(`.${config.SHARE_DOMAIN}`)) {
       ctx.addIssue({
         code: "custom",
@@ -314,7 +319,9 @@ const configSchema = z
         message: "must not contain the app's host: shares and the app are separate sites",
       });
     }
+
     const target = config.customDomains?.target;
+
     if (target) {
       if (target === app || target === config.CONNECT_HOST || target === config.OAUTH_RELAY_HOST) {
         ctx.addIssue({
@@ -323,6 +330,7 @@ const configSchema = z
           message: "must be a host of its own, not the app's, the CLI's or the relay's",
         });
       }
+
       if (config.APP_ALIASES.includes(target)) {
         ctx.addIssue({
           code: "custom",
@@ -330,7 +338,9 @@ const configSchema = z
           message: "must not be an alias of the app",
         });
       }
+
       const label = labelUnder(target, config.SHARE_DOMAIN);
+
       if (label !== null && (label.includes(".") || SHARE_ID.test(label))) {
         ctx.addIssue({
           code: "custom",
@@ -339,7 +349,9 @@ const configSchema = z
         });
       }
     }
+
     const relay = config.OAUTH_RELAY_HOST;
+
     if (relay) {
       if (relay === app || relay === config.CONNECT_HOST || config.APP_ALIASES.includes(relay)) {
         ctx.addIssue({
@@ -348,7 +360,9 @@ const configSchema = z
           message: "must be a host of its own, not the app's, the CLI's or an alias",
         });
       }
+
       const label = labelUnder(relay, config.SHARE_DOMAIN);
+
       if (label !== null && (label.includes(".") || SHARE_ID.test(label))) {
         ctx.addIssue({
           code: "custom",
@@ -376,7 +390,9 @@ export function mcpResource(config: Config): string | null {
   if (!config.MCP_ENABLED) return null;
   const app = new URL(config.auth.baseURL);
   const hostname = config.CONNECT_HOST ?? app.hostname;
+
   if (app.protocol !== "https:" && !isLoopback(hostname)) return null;
+
   return `${app.protocol}//${hostname}${app.port ? `:${app.port}` : ""}/mcp`;
 }
 
@@ -385,6 +401,7 @@ const cache = new WeakMap<object, Config>();
 /** Validates the Worker's vars and secrets once per isolate; throws naming every bad variable. */
 export function loadConfig(env: Env): Config {
   let config = cache.get(env);
+
   if (!config) {
     const parsed = configSchema.safeParse({
       ...env,
@@ -392,14 +409,17 @@ export function loadConfig(env: Env): Config {
       github: env,
       customDomains: env,
     });
+
     if (!parsed.success) {
       // Names only: values may be secrets.
       const problems = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
       throw new Error(`invalid Worker config:\n  ${problems.join("\n  ")}`);
     }
+
     config = parsed.data;
     cache.set(env, config);
   }
+
   return config;
 }
 
@@ -419,6 +439,7 @@ export function customDomainOrigin(config: Config, hostname: string) {
 /** `hostname`'s origin on the app's scheme and port (BETTER_AUTH_URL). */
 function originOnAppPort(config: Config, hostname: string) {
   const app = new URL(config.auth.baseURL);
+
   return `${app.protocol}//${hostname}${app.port ? `:${app.port}` : ""}`;
 }
 
@@ -430,6 +451,7 @@ function hostnameOf(host: string | null) {
 /** What `hostname` puts before `.<domain>`, or null when it is not under `domain`. */
 function labelUnder(hostname: string, domain: string) {
   const suffix = `.${domain}`;
+
   return hostname.endsWith(suffix) ? hostname.slice(0, -suffix.length) : null;
 }
 
@@ -440,7 +462,9 @@ function labelUnder(hostname: string, domain: string) {
 export function shareLabelFromHost(config: Config, host: string | null): string | null {
   if (!host) return null;
   const label = labelUnder(hostnameOf(host), config.SHARE_DOMAIN);
+
   if (label === null) return null;
+
   return SHARE_ID.test(label) || pipeName(label) === label ? label : "";
 }
 
@@ -452,12 +476,14 @@ export function relayOrigin(config: Config) {
 /** The pipe name the relay's host takes from SHARE_DOMAIN, or null when it lives elsewhere. */
 export function reservedPipeName(config: Config) {
   const relay = config.OAUTH_RELAY_HOST;
+
   return relay ? labelUnder(relay, config.SHARE_DOMAIN) : null;
 }
 
 /** Every pipe name SHARE_DOMAIN's own hosts take: the relay's and the custom domains' target. */
 export function reservedPipeNames(config: Config) {
   const target = config.customDomains?.target;
+
   return [reservedPipeName(config), target ? labelUnder(target, config.SHARE_DOMAIN) : null].filter(
     (name): name is string => name !== null,
   );
@@ -466,6 +492,7 @@ export function reservedPipeNames(config: Config) {
 /** Whether `hostname` is one this install already serves, so no org may attach it (ADR 0033). */
 export function isServedHost(config: Config, hostname: string) {
   const app = new URL(config.auth.baseURL).hostname;
+
   return (
     hostname === app ||
     hostname === config.CONNECT_HOST ||
@@ -489,16 +516,22 @@ export type HostRole =
 
 export function hostRole(config: Config, host: string | null): HostRole {
   const hostname = hostnameOf(host);
+
   // Before share labels: the relay may live under SHARE_DOMAIN, with its label reserved.
   if (config.OAUTH_RELAY_HOST && hostname === config.OAUTH_RELAY_HOST) return { role: "oauth" };
   const label = shareLabelFromHost(config, host);
+
   if (label !== null) return { role: "share", label };
+
   if (config.CONNECT_HOST && hostname === config.CONNECT_HOST) return { role: "connect" };
+
   if (config.APP_ALIASES.includes(hostname)) return { role: "alias" };
+
   // With custom domains on, the zone's `*/*` route sends every host here, so only the app's own
   // host is the app: any other is looked up as a customer's domain and is not found otherwise.
   if (config.customDomains && hostname !== new URL(config.auth.baseURL).hostname) {
     return { role: "custom", hostname };
   }
+
   return { role: "app" };
 }

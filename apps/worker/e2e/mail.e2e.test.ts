@@ -2,7 +2,7 @@
 // `send_email` binding: each email's text lands in a file whose path it logs, so this signs in
 // from the email itself, the way a person would.
 import { readFileSync } from "node:fs";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
 import { browserFetch, cookiesOf, type Stack, startStack, waitFor } from "./support.ts";
 
 let stack: Stack;

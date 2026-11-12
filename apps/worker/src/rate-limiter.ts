@@ -4,6 +4,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { sha256Hex } from "@wurmhol/db";
 import { createMiddleware } from "hono/factory";
+import { z } from "zod";
 import type { AppEnv } from "./context.ts";
 import type { Config, RateLimit } from "./env.ts";
 
@@ -27,12 +28,15 @@ export class RateLimiter extends DurableObject<Env> {
     const now = Date.now();
     const windowMs = windowSeconds * 1000;
     let state = await this.ctx.storage.get<{ start: number; count: number }>("window");
+
     if (!state || now >= state.start + windowMs) state = { start: now, count: 0 };
+
     if (state.count >= limit) return Math.max(1, Math.ceil((state.start + windowMs - now) / 1000));
     state.count += 1;
     await this.ctx.storage.put("window", state);
     // Nothing outlives its window: the alarm clears this instance's storage.
     await this.ctx.storage.setAlarm(state.start + windowMs);
+
     return 0;
   }
 
@@ -52,9 +56,11 @@ export async function checkRateLimit(
   key: string,
 ): Promise<number> {
   const limit: RateLimit = config[RULES[rule]];
+
   if (!limit) return 0;
   const name = await sha256Hex(`${rule}:${key}`);
   const stub = env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName(name));
+
   return stub.hit(limit.count, limit.windowSeconds);
 }
 
@@ -74,6 +80,7 @@ export function clientIp(request: Request) {
 export function limitPerIp(rule: RateLimitRule) {
   return createMiddleware<AppEnv>(async (c, next) => {
     const wait = await checkRateLimit(c.env, c.var.config, rule, clientIp(c.req.raw));
+
     if (wait) return tooManyRequests(wait);
     await next();
   });
@@ -83,10 +90,14 @@ export function limitPerIp(rule: RateLimitRule) {
 export function limitPerMember(rule: RateLimitRule) {
   return createMiddleware<AppEnv>(async (c, next) => {
     const wait = await checkRateLimit(c.env, c.var.config, rule, c.var.member.id);
+
     if (wait) return tooManyRequests(wait);
     await next();
   });
 }
+
+/** The address a magic-link request mails. */
+const magicLinkBody = z.object({ email: z.string() });
 
 /**
  * Better Auth's routes: every sign-in step (passkey options and verification, OAuth start and
@@ -95,21 +106,28 @@ export function limitPerMember(rule: RateLimitRule) {
 export const limitAuth = createMiddleware<AppEnv>(async (c, next) => {
   const path = new URL(c.req.url).pathname.replace(/^\/api\/auth/, "");
   const signInStep = c.req.method === "POST" || /^\/(callback|magic-link|passkey)\//.test(path);
+
   if (!signInStep) return next();
   const checks = [checkRateLimit(c.env, c.var.config, "auth", clientIp(c.req.raw))];
+
   // A magic link sends mail: also per address, so nobody mail-bombs an inbox through us.
   if (c.req.method === "POST" && path === "/sign-in/magic-link") {
-    const body = (await c.req.raw
-      .clone()
-      .json()
-      .catch(() => null)) as { email?: unknown } | null;
-    if (typeof body?.email === "string") {
+    const body = magicLinkBody.safeParse(
+      await c.req.raw
+        .clone()
+        .json()
+        .catch(() => null),
+    );
+
+    if (body.success) {
       checks.push(
-        checkRateLimit(c.env, c.var.config, "magicLink", body.email.trim().toLowerCase()),
+        checkRateLimit(c.env, c.var.config, "magicLink", body.data.email.trim().toLowerCase()),
       );
     }
   }
+
   const wait = Math.max(...(await Promise.all(checks)));
+
   if (wait) return tooManyRequests(wait);
   await next();
 });

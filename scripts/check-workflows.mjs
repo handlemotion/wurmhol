@@ -22,17 +22,22 @@ const problems = [];
 
 for (const file of files) {
   let source;
+
   try {
     source = readFileSync(file, "utf8");
   } catch {
     continue; // deleted in the working tree
   }
+
   source.split("\n").forEach((line, index) => {
     const match = USES.exec(line);
+
     if (!match) return;
     const [, , ref, comment] = match;
     const where = `${file}:${index + 1}`;
+
     if (ref.startsWith("./") || DIGEST_PINNED.test(ref)) return;
+
     if (!SHA_PINNED.test(ref)) {
       problems.push(`${where}: pin ${ref} to a full commit SHA (uses: owner/repo@<sha> # vX.Y.Z)`);
     } else if (!comment) {

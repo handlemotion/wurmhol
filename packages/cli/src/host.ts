@@ -2,7 +2,13 @@
 // `<WURMHOL_URL>/host`, dialed like a pipe's (HTTPS_PROXY, NODE_EXTRA_CA_CERTS). It reports the
 // web ports open here as they come and go; when its owner picks one in Create pipe, the relay
 // asks it to open a pipe to that port, and it answers with the pipe's URL or why it could not.
-import { type HostMessage, MACHINE_LIMITS, parseRelayMessage } from "@wurmhol/protocol";
+import {
+  type HostMessage,
+  type JsonValue,
+  MACHINE_LIMITS,
+  parseJson,
+  parseRelayMessage,
+} from "@wurmhol/protocol";
 import { FixError } from "@wurmhol/sdk";
 import { dial, type WsConnection, WS_OPEN } from "@wurmhol/sdk/internal";
 import { PortScanner } from "./ports.ts";
@@ -25,6 +31,7 @@ const SCAN_MS = 3000;
 function connect(options: HostOptions): Promise<WsConnection> {
   const url = new URL("/host", options.server);
   url.searchParams.set("name", options.name);
+
   return dial(url, { server: options.server, token: options.token, version: options.version });
 }
 
@@ -36,8 +43,10 @@ export async function host(options: HostOptions): Promise<never> {
   const scanner = new PortScanner(options.server);
   let delay = 1000;
   let first = true;
+
   for (;;) {
     let socket: WsConnection;
+
     try {
       socket = await connect(options);
     } catch (error) {
@@ -47,13 +56,16 @@ export async function host(options: HostOptions): Promise<never> {
       delay = Math.min(delay * 2, 30_000);
       continue;
     }
+
     delay = 1000;
+
     if (first) {
       options.say(`Connected as ${options.name}. Open a pipe from Create pipe on the wall.`);
       first = false;
     } else {
       options.say("Reconnected.");
     }
+
     await session(socket, scanner, options);
   }
 }
@@ -63,28 +75,34 @@ function session(socket: WsConnection, scanner: PortScanner, options: HostOption
   return new Promise<void>((resolve) => {
     let sent = "";
     const send = (message: HostMessage) => socket.send(JSON.stringify(message));
+
     const report = async () => {
       const message = JSON.stringify({
         type: "ports",
         ports: await scanner.scan(),
       } satisfies HostMessage);
+
       if (message === sent || socket.readyState !== WS_OPEN) return;
       socket.send(message);
       sent = message;
     };
+
     void report();
     const timer = setInterval(() => void report(), SCAN_MS);
     // Keeps proxies from dropping a socket that is quiet while no ports change.
     const ping = setInterval(() => socket.ping(), 30_000);
     socket.on("message", (data, binary) => {
       if (binary) return;
-      let raw: unknown;
+      let raw: JsonValue;
+
       try {
-        raw = JSON.parse(String(data));
+        raw = parseJson(String(data));
       } catch {
         return;
       }
+
       const message = parseRelayMessage(raw);
+
       if (!message) return;
       options.say(`Opening a pipe to port ${message.port}…`);
       options.open(message.port).then(
@@ -92,8 +110,8 @@ function session(socket: WsConnection, scanner: PortScanner, options: HostOption
           options.say(`${message.port} → ${url}`);
           send({ type: "opened", id: message.id, url });
         },
-        (error: unknown) => {
-          const text = error instanceof Error ? error.message : String(error);
+        (cause: unknown) => {
+          const text = cause instanceof Error ? cause.message : String(cause);
           options.say(`Could not open port ${message.port}: ${text}`);
           send({ type: "failed", id: message.id, message: text.slice(0, MACHINE_LIMITS.message) });
         },
@@ -102,6 +120,7 @@ function session(socket: WsConnection, scanner: PortScanner, options: HostOption
     socket.once("close", (code, reason) => {
       clearInterval(timer);
       clearInterval(ping);
+
       if (code === 4001) options.say(`Disconnected: ${String(reason) || "token revoked"}.`);
       resolve();
     });

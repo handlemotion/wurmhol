@@ -44,12 +44,16 @@ function readOr(path, fallback) {
 
 function runningPid() {
   const pid = Number(readOr(pidFile, ""));
+
   if (!pid) return undefined;
+
   try {
     process.kill(pid, 0);
+
     return pid;
   } catch {
     rmSync(pidFile, { force: true });
+
     return undefined;
   }
 }
@@ -68,38 +72,49 @@ function tail(lines = 30) {
 
 async function start() {
   const pid = runningPid();
+
   if (pid) {
     console.log(`Worker already running (pid ${pid}): ${url}  log: ${logFile}`);
+
     return;
   }
+
   const devVars = join(worker, ".dev.vars");
+
   try {
     // COPYFILE_EXCL: copy only when missing, in one step (never overwrite a hand-made file).
     copyFileSync(join(worker, ".dev.vars.example"), devVars, constants.COPYFILE_EXCL);
+
     // The example leaves the signing secrets empty, and config validation rejects every auth
     // request without them: give this local copy random ones.
     const filled = readFileSync(devVars, "utf8").replace(
       /^(BETTER_AUTH_SECRET)=$/gm,
       (_, key) => `${key}=${randomBytes(32).toString("hex")}`,
     );
+
     writeFileSync(devVars, filled);
     console.log("apps/worker/.dev.vars was missing; copied .dev.vars.example with local secrets");
   } catch (error) {
     if (error.code !== "EEXIST") throw error;
   }
+
   mkdirSync(stateDir, { recursive: true });
+
   // Local D1: apply any new migration before the Worker reads it.
   const migrate = spawnSync(
     "pnpm",
     ["exec", "wrangler", "d1", "migrations", "apply", "wurmhol", "--local"],
     { cwd: worker, env: { ...process.env, CI: "1" }, encoding: "utf8" },
   );
+
   if (migrate.status !== 0) {
     console.error(`Local D1 migration failed:
 ${migrate.stdout}${migrate.stderr}`);
     process.exit(1);
   }
+
   const log = openSync(logFile, "w");
+
   const child = spawn(
     "pnpm",
     [
@@ -114,12 +129,14 @@ ${migrate.stdout}${migrate.stderr}`);
     ],
     { cwd: worker, detached: true, stdio: [log, log, log] },
   );
+
   child.unref();
   writeFileSync(pidFile, String(child.pid));
 
   let exited = false;
   child.on("exit", () => (exited = true));
   const deadline = Date.now() + readyTimeoutMs;
+
   while (!(await healthy())) {
     if (exited || Date.now() > deadline) {
       console.error(
@@ -128,8 +145,10 @@ ${migrate.stdout}${migrate.stderr}`);
       stop({ quiet: true });
       process.exit(1);
     }
+
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
+
   console.log(`Worker ready (pid ${child.pid}): ${url}  log: ${logFile}`);
   // Exit now: the child holds none of our fds, so nothing keeps the caller's pipe open.
   process.exit(0);
@@ -137,15 +156,20 @@ ${migrate.stdout}${migrate.stderr}`);
 
 function stop({ quiet = false } = {}) {
   const pid = runningPid();
+
   if (!pid) {
     if (!quiet) console.log("Worker not running");
+
     return;
   }
+
   // The whole group: pnpm, wrangler, workerd and the web build share it.
   try {
     process.kill(-pid, "SIGTERM");
   } catch {}
+
   rmSync(pidFile, { force: true });
+
   if (!quiet) console.log(`Worker stopped (pid ${pid})`);
 }
 
@@ -159,6 +183,7 @@ async function status() {
 }
 
 const command = process.argv[2] ?? "start";
+
 if (command === "start") await start();
 else if (command === "stop") stop();
 else if (command === "status") await status();

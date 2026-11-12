@@ -64,6 +64,7 @@ function Failure({ error }: { error: Error | null }) {
 function Create({ onDone }: { onDone: () => void }) {
   const [name, setName] = useState("");
   const create = useCreateOrg();
+
   return (
     <form
       className="contents"
@@ -108,6 +109,7 @@ function Settings({
   const rename = useRenameOrg();
   const leave = useLeaveOrg();
   const changed = name.trim() !== "" && name.trim() !== orgName;
+
   return (
     <>
       <DialogHeader>
@@ -164,6 +166,7 @@ function Settings({
 
 function Delete({ orgName, onDone }: { orgName: string; onDone: () => void }) {
   const remove = useDeleteOrg();
+
   return (
     <>
       <DialogHeader>
@@ -197,10 +200,12 @@ function SpendCap() {
   const cap = billing.data?.spendCap;
   const set = useSetSpendCap();
   const [dollars, setDollars] = useState<string | null>(null);
+
   if (!cap) return null;
   const value = dollars ?? String(cap.cents / 100);
   const cents = Math.round(Number(value) * 100);
   const changed = Number.isFinite(cents) && cents !== cap.cents;
+
   return (
     <form
       className="flex flex-col gap-3"

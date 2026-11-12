@@ -13,9 +13,11 @@ import {
 
 function handshakeOf(response: IncomingMessage): Handshake {
   const headers: Record<string, string> = {};
+
   for (const [name, value] of Object.entries(response.headers)) {
     if (value !== undefined) headers[name] = Array.isArray(value) ? value.join(", ") : value;
   }
+
   return { status: response.statusCode ?? 101, headers };
 }
 
@@ -24,27 +26,39 @@ export const nodeTransport: Transport = {
   async connect(url, options: ConnectOptions) {
     const { default: WebSocket } = await import("ws");
     const agent = options.proxy ? new HttpsProxyAgent(options.proxy) : undefined;
-    // `closeTimeout` (ws 8.22) is not in @types/ws yet.
-    const socketOptions: import("ws").ClientOptions & { closeTimeout?: number } = {
+
+    // `closeTimeout` (ws 8.22) is not in @types/ws yet. `ws` hands `lookup` and `autoSelectFamily`
+    // on to `net.connect`, which @types/ws leaves out of ClientOptions.
+    const socketOptions: import("ws").ClientOptions & {
+      closeTimeout?: number;
+      lookup?: ConnectOptions["lookup"];
+      autoSelectFamily?: boolean;
+    } = {
       headers: options.headers,
       agent,
       perMessageDeflate: false,
       handshakeTimeout: options.handshakeTimeout ?? 15_000,
-      ...(options.closeTimeout === undefined ? {} : { closeTimeout: options.closeTimeout }),
-      ...(options.maxPayload === undefined ? {} : { maxPayload: options.maxPayload }),
-      ...(options.lookup ? { lookup: options.lookup } : {}),
-      ...(options.autoSelectFamily === undefined
-        ? {}
-        : { autoSelectFamily: options.autoSelectFamily }),
     };
+
+    if (options.closeTimeout !== undefined) socketOptions.closeTimeout = options.closeTimeout;
+
+    if (options.maxPayload !== undefined) socketOptions.maxPayload = options.maxPayload;
+
+    if (options.lookup) socketOptions.lookup = options.lookup;
+
+    if (options.autoSelectFamily !== undefined) {
+      socketOptions.autoSelectFamily = options.autoSelectFamily;
+    }
+
     return new Promise((resolve, reject) => {
       const socket = new WebSocket(url, options.protocols ?? [], socketOptions);
       socket.binaryType = "nodebuffer";
       let response: Handshake = { status: 101, headers: {} };
       socket.once("upgrade", (res) => (response = handshakeOf(res)));
       socket.once("open", () => {
-        options.onOpen?.(socket as unknown as WsConnection, response);
-        resolve({ socket: socket as unknown as WsConnection, response });
+        const connection: WsConnection = socket;
+        options.onOpen?.(connection, response);
+        resolve({ socket: connection, response });
       });
       socket.once("unexpected-response", (_request, res) => {
         const chunks: Buffer[] = [];

@@ -40,9 +40,11 @@ const CLI_DEFAULT_SERVER = "https://api.wurmhol.com";
 /** A share of the member's org, or 404: another org's shares do not exist here. */
 async function ownShare(c: { var: AppEnv["Variables"] }, id: string) {
   const share = await shareOfOrg(c.var.db, c.var.member.orgId, id);
+
   if (!share) {
     throw new HTTPException(404, { message: "no such share" });
   }
+
   return share;
 }
 
@@ -51,7 +53,9 @@ export const account = new Hono<AppEnv>()
   /** Who is signed in, their orgs, and which one is active. */
   .get("/me", async (c) => {
     const session = await resolveSession(c);
+
     if (!session) throw new HTTPException(401, { message: "sign in first" });
+
     const [orgs, standing] = await Promise.all([
       listOrgsForUser(c.var.db, session.user.id),
       session.member
@@ -60,6 +64,7 @@ export const account = new Hono<AppEnv>()
           })
         : null,
     ]);
+
     // Embedded applications (ADR 0032): for owners, when the install has them and the org may
     // use them (Business, or billing off).
     const apps = Boolean(
@@ -68,6 +73,7 @@ export const account = new Hono<AppEnv>()
       standing?.ok &&
       (standing.reason === "billing_off" || standing.plan === "business"),
     );
+
     return c.json({
       user: session.user,
       orgs,
@@ -80,24 +86,31 @@ export const account = new Hono<AppEnv>()
   /** Which org an invite link is for, so the join page can name it. */
   .get("/invites/:code", async (c) => {
     const invite = await peekInvite(c.var.db, c.req.param("code"));
+
     if (!invite)
       throw new HTTPException(404, { message: "this invite link has expired or was used" });
+
     return c.json({ orgName: invite.orgName });
   })
   .post("/invites/:code/accept", async (c) => {
     const session = await resolveSession(c);
+
     if (!session) throw new HTTPException(401, { message: "sign in first" });
+
     const result = await acceptInvite(c.var.db, c.req.param("code"), session.user.id, (orgId) =>
       memberCap(c.var.db, c.var.config, orgId),
     );
+
     if (result.status === "invalid") {
       throw new HTTPException(404, { message: "this invite link has expired or was used" });
     }
+
     if (result.status === "full") throw orgFull(result.cap);
     await c.var.auth.api.setActiveOrganization({
       headers: c.req.raw.headers,
       body: { organizationId: result.orgId },
     });
+
     return c.json({ orgId: result.orgId, status: result.status });
   });
 
@@ -131,13 +144,16 @@ export const api = new Hono<AppEnv>()
   .post("/shares/:id/terminate", limitPerMember("manage"), async (c) => {
     const share = await ownShare(c, c.req.param("id"));
     await endShare(c, share, "terminated", "wall");
+
     return c.json({ ok: true });
   })
   /** The dev server's favicon, for the wall (the share host itself needs its own cookie). */
   .get("/shares/:id/favicon", async (c) => {
     const share = await ownShare(c, c.req.param("id"));
     const icon = await shareStub(c.env, share.id).favicon();
+
     if (!icon) return c.body(null, 404);
+
     return c.body(icon.body, 200, {
       "content-type": icon.type,
       "cache-control": "private, max-age=300",
@@ -153,6 +169,7 @@ export const api = new Hono<AppEnv>()
    */
   .post("/tokens", limitPerMember("manage"), zValidator("json", tokenBody), async (c) => {
     const { name, scope, expiresInDays } = c.req.valid("json");
+
     const { id, token } = await createToken(c.var.db, {
       orgId: c.var.member.orgId,
       name,
@@ -160,18 +177,24 @@ export const api = new Hono<AppEnv>()
       expiresAt: expiresInDays === null ? null : new Date(Date.now() + expiresInDays * DAY_MS),
       createdBy: c.var.user.id,
     });
+
     const server = new URL(c.var.config.auth.baseURL);
+
     if (c.var.config.CONNECT_HOST) server.hostname = c.var.config.CONNECT_HOST;
     const url = server.origin === CLI_DEFAULT_SERVER ? null : server.origin;
+
     return c.json({ id, token, host: server.hostname, url }, 201);
   })
   /** Revokes a token and ends every share it started (spec section 6, "Token leaked"). */
   .delete("/tokens/:id", async (c) => {
     const tokenId = c.req.param("id");
+
     if (!(await revokeToken(c.var.db, c.var.member.orgId, tokenId))) {
       throw new HTTPException(404, { message: "no such token" });
     }
+
     await endTokens(c, c.var.member.orgId, [tokenId]);
+
     return c.json({ ok: true });
   })
   .get("/members", async (c) =>
@@ -183,23 +206,31 @@ export const api = new Hono<AppEnv>()
     const memberId = c.req.param("id");
     const target = (await listMembers(c.var.db, orgId)).find((m) => m.id === memberId);
     const result = await removeMember(c.var.db, orgId, memberId);
+
     if (result === "not_found") throw new HTTPException(404, { message: "no such member" });
+
     if (result === "last_owner") {
       throw new HTTPException(409, { message: "an org needs at least one owner" });
     }
+
     if (target) await revokeTokensOfLeaver(c, orgId, target.userId);
+
     return c.json({ ok: true });
   })
   /** A single-use invite link (spec section 3, Members). */
   .post("/invites", requireOwner, limitPerMember("manage"), async (c) => {
     const { db, config, member } = c.var;
     const cap = await memberCap(db, config, member.orgId);
+
     if (cap !== null && (await countMembers(db, member.orgId)) >= cap) throw orgFull(cap);
+
     const { code, expiresAt } = await createInvite(c.var.db, {
       orgId: c.var.member.orgId,
       createdBy: c.var.user.id,
     });
+
     const url = new URL(`/join/${code}`, c.var.config.auth.baseURL).toString();
+
     return c.json({ url, expiresAt: expiresAt.toISOString() }, 201);
   })
   .route("/apps", apps)

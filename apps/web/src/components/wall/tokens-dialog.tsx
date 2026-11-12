@@ -39,6 +39,7 @@ export function TokensDialog({
   const [name, setName] = useState("");
   const [expiresIn, setExpiresIn] = useState("90");
   const [orgScope, setOrgScope] = useState(false);
+
   const reset = () => {
     setName("");
     setExpiresIn("90");
@@ -53,6 +54,7 @@ export function TokensDialog({
           create.reset();
           reset();
         }
+
         onOpenChange(open);
       }}
       size="lg"
@@ -95,6 +97,7 @@ export function TokensDialog({
               selectedKeys={[expiresIn]}
               onSelectionChange={(keys) => {
                 const [key] = keys;
+
                 if (key !== undefined) setExpiresIn(String(key));
               }}
               className="w-full sm:w-auto"
@@ -159,6 +162,7 @@ export function TokensDialog({
             const computers = list.filter((token) => token.source === "login");
             const made = list.filter((token) => token.source !== "login");
             const pending = (token: Token) => revoke.isPending && revoke.variables === token.id;
+
             return (
               <>
                 {made.length > 0 && (

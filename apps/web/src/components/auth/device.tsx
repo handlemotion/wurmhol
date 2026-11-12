@@ -17,6 +17,7 @@ const SLOW_PIPE_MS = 30_000;
 /** No code in the link: type the one the terminal shows. */
 function EnterCode() {
   const [code, setCode] = useState("");
+
   return (
     <form
       className="flex flex-col gap-6"
@@ -53,14 +54,17 @@ function OpenPipe({ code, name, port }: { code: string; name: string | null; por
       api<{ url: string | null }>(`/api/device/pipe?code=${encodeURIComponent(code)}&port=${port}`),
     refetchInterval: (query) => (query.state.data?.url ? false : 1000),
   });
+
   const [slow, setSlow] = useState(false);
   useEffect(() => {
     const timer = setTimeout(() => setSlow(true), SLOW_PIPE_MS);
+
     return () => clearTimeout(timer);
   }, []);
   useEffect(() => {
     if (pipe.data?.url) location.replace(pipe.data.url);
   }, [pipe.data?.url]);
+
   return (
     <div className="flex flex-col gap-2">
       <Heading>Approved</Heading>
@@ -86,6 +90,7 @@ function OpenPipe({ code, name, port }: { code: string; name: string | null; por
 function NeedsPlan({ data }: { data: DeviceLogin }) {
   const billing = useOpenBilling();
   const owner = data.role === "owner";
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
@@ -128,6 +133,7 @@ function Review({ code }: { code: string }) {
     queryFn: () => api<DeviceLogin>(`/api/device?code=${encodeURIComponent(code)}`),
     retry: false,
   });
+
   const decide = useMutation({
     mutationFn: (decision: "approve" | "deny") =>
       api(`/api/device/${decision}`, { method: "POST", body: { code } }),
@@ -135,8 +141,10 @@ function Review({ code }: { code: string }) {
       if (isSignedOut(error)) toLogin();
     },
   });
+
   if (isSignedOut(login.error)) {
     toLogin();
+
     return null;
   }
 
@@ -150,9 +158,11 @@ function Review({ code }: { code: string }) {
       </div>
     );
   }
+
   if (decide.isSuccess && decide.variables === "approve" && login.data?.port) {
     return <OpenPipe code={code} name={login.data.name} port={login.data.port} />;
   }
+
   if (decide.isSuccess) {
     return (
       <div className="flex flex-col gap-2">
@@ -165,6 +175,7 @@ function Review({ code }: { code: string }) {
       </div>
     );
   }
+
   return (
     <Skeleton
       id="device-login"
@@ -242,6 +253,7 @@ function Review({ code }: { code: string }) {
 /** `/device` and `/device?code=ABCD-1234`, where `wurmhol login` sends people. */
 export function Device() {
   const code = new URLSearchParams(location.search).get("code")?.trim();
+
   return (
     <SkeletonProvider>
       <main className="flex min-h-dvh items-center justify-center bg-surface px-4">

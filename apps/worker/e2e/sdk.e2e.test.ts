@@ -2,9 +2,9 @@
 // orchestrator imports it (built `packages/cli/dist/index.js`).
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { WebSocketServer } from "ws";
+import { z } from "zod";
 import { FixError, openPipe, type CloseReason, type Pipe, type RequestEvent } from "wurmhol";
 import {
   api,
@@ -12,6 +12,7 @@ import {
   browserSocket,
   connectProxy,
   createToken,
+  listeningPort,
   localServer,
   type Person,
   signIn,
@@ -27,6 +28,7 @@ const watch = (pipe: Pipe) => {
   const closes: CloseReason[] = [];
   pipe.on("request", (event) => requests.push(event));
   pipe.on("close", (reason) => closes.push(reason));
+
   return { requests, closes };
 };
 
@@ -45,16 +47,28 @@ describe("openPipe", () => {
   });
 
   const wall = async () =>
-    (await api<{ shares: { id: string }[] }>(stack, ada, "/api/shares")).body.shares.map(
-      (s) => s.id,
-    );
+    (
+      await api(
+        stack,
+        ada,
+        "/api/shares",
+        {},
+        z.object({ shares: z.array(z.object({ id: z.string() })) }),
+      )
+    ).body.shares.map((s) => s.id);
+
   /** Every share row a token started, as D1 has it. */
   const sharesOf = (tokenId: string) => {
     const db = stack.db();
+
     try {
-      return db
-        .prepare("select id, end_reason from shares where token_id = ? order by started_at")
-        .all(tokenId) as { id: string; end_reason: string | null }[];
+      return z
+        .array(z.object({ id: z.string(), end_reason: z.string().nullable() }))
+        .parse(
+          db
+            .prepare("select id, end_reason from shares where token_id = ? order by started_at")
+            .all(tokenId),
+        );
     } finally {
       db.close();
     }
@@ -64,14 +78,17 @@ describe("openPipe", () => {
     const local = await localServer((_req, res) =>
       res.writeHead(201, { "content-type": "text/html" }).end("<title>SDK</title>hello"),
     );
+
     // `log` must reach the caller, or an orchestrator cannot tell why a pipe dropped.
     const logged: string[] = [];
+
     const pipe = await openPipe({
       port: local.port,
       token,
       server: stack.url,
       log: (event) => logged.push(event),
     });
+
     const requests: RequestEvent[] = [];
     const closes: CloseReason[] = [];
     pipe.on("request", (event) => requests.push(event));
@@ -83,9 +100,11 @@ describe("openPipe", () => {
     const response = await browserFetch(`${pipe.url}/page?q=1`, { cookie });
     expect(response.status).toBe(201);
     expect(await response.text()).toBe("<title>SDK</title>hello");
+
     const event = await waitFor(() => requests.find((r) => r.path === "/page?q=1"), {
       what: "the request event",
     });
+
     expect(event).toMatchObject({ method: "GET", status: 201 });
     expect(event.durationMs).toBeGreaterThanOrEqual(0);
 
@@ -97,6 +116,7 @@ describe("openPipe", () => {
       what: "the pipe to leave the wall",
     });
     const db = stack.db();
+
     try {
       expect(db.prepare("select end_reason from shares where id = ?").get(pipe.id)).toEqual({
         end_reason: "stopped",
@@ -104,18 +124,22 @@ describe("openPipe", () => {
     } finally {
       db.close();
     }
+
     await local.close();
   });
 
   it("lets a client with no browser session open the pipe with its access key, and no one else", async () => {
     const seen: string[] = [];
+
     const local = await localServer((req, res) => {
       seen.push(Object.keys(req.headers).join(","));
       res.writeHead(200, { "content-type": "text/plain" }).end("ok");
     });
+
     const accessKey = randomBytes(24).toString("hex");
     const keyed = await openPipe({ port: local.port, token, server: stack.url, accessKey });
     const keyless = await openPipe({ port: local.port, token, server: stack.url });
+
     try {
       const ok = await browserFetch(keyed.url, { headers: { "x-wurmhol-key": accessKey } });
       expect(ok.status).toBe(200);
@@ -125,9 +149,11 @@ describe("openPipe", () => {
       expect(seen[0]).not.toMatch(/x-wurmhol|cookie/);
 
       const hitsBefore = seen.length;
+
       const wrong = await browserFetch(keyed.url, {
         headers: { "x-wurmhol-key": `${accessKey}x` },
       });
+
       expect(wrong.status).toBe(401);
       expect((await browserFetch(keyed.url)).status).toBe(401);
       // A pipe opened without a key has none to accept, however well-formed the one presented.
@@ -142,11 +168,11 @@ describe("openPipe", () => {
   });
 
   it("rejects with the one-line fix the CLI prints", async () => {
-    const error = await openPipe({ port: 3000, token: "wh_unknown", server: stack.url }).catch(
-      (e: unknown) => e,
-    );
-    expect(error).toBeInstanceOf(FixError);
-    expect((error as FixError).message).toBe(
+    const refused = openPipe({ port: 3000, token: "wh_unknown", server: stack.url });
+
+    await expect(refused).rejects.toBeInstanceOf(FixError);
+    await expect(refused).rejects.toHaveProperty(
+      "message",
       `Create a new token at ${stack.url} (menu → Tokens) and set WURMHOL_TOKEN.`,
     );
   });
@@ -161,9 +187,11 @@ describe("openPipe", () => {
         ),
       ),
     );
+
     const pipes = await Promise.all(
       locals.map((local) => openPipe({ port: local.port, token, server: stack.url })),
     );
+
     expect(new Set(pipes.map((p) => p.id)).size).toBe(3);
     const seen = pipes.map(watch);
     const cookies = await Promise.all(pipes.map((p) => viewerCookie(stack, ada, p.url)));
@@ -174,9 +202,11 @@ describe("openPipe", () => {
         const response = await browserFetch(`${pipe.url}/from-${names[i]}`, {
           cookie: cookies[i],
         });
+
         expect(await response.text()).toBe(`${names[i]} /from-${names[i]}`);
       }),
     );
+
     for (const [i, { requests }] of seen.entries()) {
       await waitFor(() => requests.length >= 1, { what: `pipe ${names[i]}'s request event` });
       expect(requests.map((r) => r.path)).toEqual([`/from-${names[i]}`]);
@@ -185,10 +215,12 @@ describe("openPipe", () => {
     await pipes[0]!.close();
     expect(seen.map((s) => s.closes)).toEqual([["stopped"], [], []]);
     expect((await browserFetch(`${pipes[0]!.url}/`, { cookie: cookies[0] })).status).toBe(410);
+
     for (const i of [1, 2]) {
       const response = await browserFetch(`${pipes[i]!.url}/still`, { cookie: cookies[i] });
       expect(await response.text()).toBe(`${names[i]} /still`);
     }
+
     const open = await wall();
     expect(open).not.toContain(pipes[0]!.id);
     expect(open).toEqual(expect.arrayContaining([pipes[1]!.id, pipes[2]!.id]));
@@ -201,13 +233,15 @@ describe("openPipe", () => {
   // Catches a dial that starts before the signal is checked: a share nobody asked for.
   it("rejects an already aborted signal without starting a share", async () => {
     const own = await createToken(stack, ada, "pre-aborted");
-    const error = await openPipe({
+
+    const aborted = openPipe({
       port: 3000,
       token: own.token,
       server: stack.url,
       signal: AbortSignal.abort(),
-    }).catch((e: unknown) => e);
-    expect((error as Error).name).toBe("AbortError");
+    });
+
+    await expect(aborted).rejects.toHaveProperty("name", "AbortError");
 
     // A real pipe on the same token afterwards: the relay sees requests in order, so a stray
     // dial from the aborted call would show up as a second row.
@@ -224,23 +258,26 @@ describe("openPipe", () => {
     const own = await createToken(stack, ada, "mid-dial");
     const local = await localServer((_req, res) => res.end("ok"));
     const controller = new AbortController();
+
     const pending = openPipe({
       port: local.port,
       token: own.token,
       server: stack.url,
       signal: controller.signal,
     });
+
     controller.abort();
-    const error = await pending.catch((e: unknown) => e);
-    expect((error as Error).name).toBe("AbortError");
+    await expect(pending).rejects.toHaveProperty("name", "AbortError");
 
     const [row] = await waitFor(
       () => {
         const rows = sharesOf(own.id);
+
         return rows.length > 0 && rows.every((r) => r.end_reason) && rows;
       },
       { what: "the dialed share to end" },
     );
+
     expect(row!.end_reason).toBe("stopped");
     expect(await wall()).not.toContain(row!.id);
     await local.close();
@@ -250,12 +287,14 @@ describe("openPipe", () => {
   it("closes an open pipe when its signal aborts", async () => {
     const local = await localServer((_req, res) => res.end("ok"));
     const controller = new AbortController();
+
     const pipe = await openPipe({
       port: local.port,
       token,
       server: stack.url,
       signal: controller.signal,
     });
+
     const { closes } = watch(pipe);
     expect(await wall()).toContain(pipe.id);
     controller.abort();
@@ -273,10 +312,11 @@ describe("openPipe", () => {
     const server = createServer((req, res) =>
       res.writeHead(200, { "content-type": "text/plain" }).end(`host=${req.headers.host}`),
     );
+
     const sockets = new WebSocketServer({ server });
     sockets.on("connection", (socket, req) => socket.send(`ws host=${req.headers.host}`));
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.2", resolve));
-    const { port } = server.address() as AddressInfo;
+    const port = listeningPort(server);
     // Nothing answers on the default host, so only `host` can make this pipe work.
     expect(await fetch(`http://127.0.0.1:${port}/`).catch(() => null)).toBeNull();
 
@@ -287,10 +327,12 @@ describe("openPipe", () => {
     expect(await response.text()).toBe(`host=localhost:${port}`);
 
     const socket = browserSocket(pipe.url, [], { cookie, origin: pipe.url });
+
     const message = await new Promise<string>((resolve, reject) => {
       socket.once("message", (data: Buffer) => resolve(data.toString()));
       socket.once("error", reject);
     });
+
     expect(message).toBe(`ws host=localhost:${port}`);
     socket.close();
 
@@ -333,19 +375,23 @@ describe("openPipe", () => {
     const proxy = await connectProxy([stack.port]);
     const saved = { ...process.env };
     Object.assign(process.env, { HTTP_PROXY: proxy.url, HTTPS_PROXY: proxy.url });
+
     for (const name of ["NO_PROXY", "no_proxy", "http_proxy", "https_proxy"]) {
       delete process.env[name];
     }
+
     try {
       const pipe = await openPipe({ port: local.port, token: own.token, server: stack.url });
       expect(proxy.connects).toBe(1);
       const { closes } = watch(pipe);
       const db = stack.db({ write: true });
+
       try {
         db.prepare("update tokens set expires_at = ? where id = ?").run(Date.now() - 1000, own.id);
       } finally {
         db.close();
       }
+
       proxy.cutAll();
       await waitFor(() => closes.length > 0, { what: "the close event" });
       expect(closes).toEqual(["revoked"]);
@@ -367,9 +413,11 @@ describe("openPipe", () => {
     expect(Date.now() - before).toBeLessThan(6000);
     await local.close();
 
-    const error = await openPipe({ port: 3000, token, server: stack.url, ttl: 13 * 3600 }).catch(
-      (e: unknown) => e,
+    const tooLong = openPipe({ port: 3000, token, server: stack.url, ttl: 13 * 3600 });
+
+    await expect(tooLong).rejects.toHaveProperty(
+      "message",
+      "Pipes last at most 12h. Pass --ttl 12h or less.",
     );
-    expect((error as FixError).message).toBe("Pipes last at most 12h. Pass --ttl 12h or less.");
   });
 });

@@ -23,6 +23,7 @@ export function Separator({
       </div>
     );
   }
+
   return (
     <Divider
       orientation={orientation}

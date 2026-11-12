@@ -4,9 +4,11 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { buffer } from "node:stream/consumers";
 import { createServer as createVite, type ViteDevServer } from "vite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { WebSocketServer } from "ws";
+import { z } from "zod";
 import {
   alive,
   api,
@@ -16,7 +18,9 @@ import {
   cliEnv,
   connectProxy,
   createToken,
+  listeningPort,
   localServer,
+  parseJson,
   type Person,
   sha256,
   share,
@@ -46,26 +50,36 @@ afterAll(async () => {
 
 const BIG = 50 * 1024 * 1024;
 const big = Buffer.alloc(BIG);
+
 for (let i = 0; i < BIG; i += 4096) big.writeUInt32BE((i * 2654435761) >>> 0, i);
 
 describe("a share round-trip", () => {
   it("prints the URL fast, forwards to the local server, and keeps the share cookie from it", async () => {
     // Also catches: a dev server setting a cookie for the whole pipe domain (every other pipe
     // gets it), or setting the viewer's share cookie on its pipe host.
-    const seen: { host?: string; xfh?: string; xfp?: string; cookie?: string; path?: string }[] =
-      [];
+    const seen: {
+      host?: string;
+      xfh?: string | string[];
+      xfp?: string | string[];
+      cookie?: string;
+      path?: string;
+    }[] = [];
+
     const local = await localServer((req, res) => {
       seen.push({
         host: req.headers.host,
-        xfh: req.headers["x-forwarded-host"] as string,
-        xfp: req.headers["x-forwarded-proto"] as string,
+        xfh: req.headers["x-forwarded-host"],
+        xfp: req.headers["x-forwarded-proto"],
         cookie: req.headers.cookie,
         path: req.url,
       });
+
       if (req.url === "/favicon.ico") {
         res.writeHead(200, { "content-type": "image/x-icon" }).end(Buffer.from([0, 0, 1, 0, 1]));
+
         return;
       }
+
       res.writeHead(201, {
         "content-type": "text/html",
         "set-cookie": [
@@ -81,6 +95,7 @@ describe("a share round-trip", () => {
         "<!doctype html><html><head><title>Ada&#39;s app</title></head><body>hi</body></html>",
       );
     });
+
     const started = await share(stack, env, local.port);
     expect(started.url).toBe(stack.shareUrl(started.id));
     expect(started.id).toMatch(/^[a-z0-9]{10}$/);
@@ -88,9 +103,11 @@ describe("a share round-trip", () => {
     expect(started.ms).toBeLessThan(3000);
 
     const cookie = await viewerCookie(stack, ada, started.url);
+
     const response = await browserFetch(`${started.url}/deep/path?q=1&r=%20`, {
       cookie: `app=keep; ${cookie}`,
     });
+
     expect(response.status).toBe(201);
     expect(await response.text()).toContain("<body>hi</body>");
     expect(response.headers.getSetCookie()).toEqual(["a=1; Path=/", "b=2; Path=/"]);
@@ -106,18 +123,36 @@ describe("a share round-trip", () => {
     // The wall has it, with the page's title and the favicon fetched through the CLI.
     const card = await waitFor(
       async () => {
-        const { body } = await api<{
-          shares: { id: string; title: string | null; favicon: boolean; port: number }[];
-        }>(stack, ada, "/api/shares");
+        const { body } = await api(
+          stack,
+          ada,
+          "/api/shares",
+          {},
+          z.object({
+            shares: z.array(
+              z.object({
+                id: z.string(),
+                title: z.string().nullable(),
+                favicon: z.boolean(),
+                port: z.number(),
+              }),
+            ),
+          }),
+        );
+
         const found = body.shares.find((s) => s.id === started.id);
+
         return found?.title && found.favicon ? found : null;
       },
       { what: "title and favicon on the wall" },
     );
+
     expect(card).toMatchObject({ title: "Ada's app", favicon: true, port: local.port });
+
     const icon = await browserFetch(`${stack.url}/api/shares/${started.id}/favicon`, {
       cookie: ada.cookie,
     });
+
     expect(Buffer.from(await icon.arrayBuffer())).toEqual(Buffer.from([0, 0, 1, 0, 1]));
 
     await cli(["stop", String(local.port)], env);
@@ -128,10 +163,12 @@ describe("a share round-trip", () => {
     // Catches: `/connect` on a pipe host reaching the CLI's socket handler instead of the dev
     // server.
     const seen: string[] = [];
+
     const local = await localServer((req, res) => {
       seen.push(`${req.method} ${req.url}`);
       res.end("dev server");
     });
+
     local.server.on("upgrade", (req, socket) => {
       seen.push(`upgrade ${req.url}`);
       socket.destroy();
@@ -144,11 +181,13 @@ describe("a share round-trip", () => {
     expect(await plain.text()).toBe("dev server");
 
     const socket = browserSocket(`${started.url}/connect`, [], { cookie });
+
     const status = await new Promise<number>((resolve) => {
       socket.once("upgrade", (res) => resolve(res.statusCode ?? 0));
       socket.once("unexpected-response", (_req, res) => resolve(res.statusCode ?? 0));
       socket.once("error", () => {});
     });
+
     socket.terminate();
     expect(status).toBe(502);
     expect(seen).toEqual(["GET /connect", "upgrade /connect"]);
@@ -160,22 +199,25 @@ describe("a share round-trip", () => {
   it("carries a 50 MB download and a 50 MB upload intact", async () => {
     const local = await localServer(async (req, res) => {
       if (req.method === "POST") {
-        const chunks: Buffer[] = [];
-        for await (const c of req) chunks.push(c as Buffer);
-        const body = Buffer.concat(chunks);
+        const body = await buffer(req);
         res
           .writeHead(200, { "content-type": "application/json" })
           .end(JSON.stringify({ bytes: body.length, sha: sha256(body) }));
+
         return;
       }
+
       res.writeHead(200, { "content-type": "application/octet-stream", "content-length": BIG });
+
       // Several writes, as a real file server streams.
       for (let i = 0; i < BIG; i += 1024 * 1024) {
         if (!res.write(big.subarray(i, i + 1024 * 1024)))
           await new Promise((r) => res.once("drain", r));
       }
+
       res.end();
     });
+
     const { url } = await share(stack, env, local.port);
     const cookie = await viewerCookie(stack, ada, url);
 
@@ -191,6 +233,7 @@ describe("a share round-trip", () => {
       headers: { "content-type": "application/octet-stream" },
       body: big,
     });
+
     expect(await upload.json()).toEqual({ bytes: BIG, sha: sha256(big) });
 
     await cli(["stop", String(local.port)], env);
@@ -199,6 +242,7 @@ describe("a share round-trip", () => {
 
   it("streams server-sent events as they happen, and stops the local stream when the viewer leaves", async () => {
     let closedByViewer = false;
+
     const local = await localServer((req, res) => {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       let n = 0;
@@ -208,21 +252,26 @@ describe("a share round-trip", () => {
         closedByViewer = true;
       });
     });
+
     const { url } = await share(stack, env, local.port);
     const cookie = await viewerCookie(stack, ada, url);
+
     const response = await browserFetch(`${url}/events`, {
       cookie,
       headers: { accept: "text/event-stream" },
     });
+
     const reader = response.body!.getReader();
     const arrivals: number[] = [];
     let text = "";
     const decoder = new TextDecoder();
+
     while (arrivals.length < 5) {
       const { value } = await reader.read();
       text += decoder.decode(value);
       arrivals.push(Date.now());
     }
+
     expect(text).toContain("data: tick 0\n\n");
     // Events arrive spread out as sent, not buffered until the end.
     expect(arrivals.at(-1)! - arrivals[0]!).toBeGreaterThan(150);
@@ -272,7 +321,7 @@ describe("browser WebSockets", () => {
   });
 
   it("Vite hot reload works through the share", async () => {
-    const port = (vite.httpServer!.address() as { port: number }).port;
+    const port = listeningPort(vite.httpServer!);
     const { url } = await share(stack, env, port);
     const cookie = await viewerCookie(stack, ada, url);
     const page = await browserFetch(`${url}/`, { cookie });
@@ -284,7 +333,9 @@ describe("browser WebSockets", () => {
 
     const socket = browserSocket(`${url}/?token=${token}`, ["vite-hmr"], { cookie, origin: url });
     const messages: { type: string }[] = [];
-    socket.on("message", (data) => messages.push(JSON.parse(data.toString()) as { type: string }));
+    socket.on("message", (data) =>
+      messages.push(parseJson(z.looseObject({ type: z.string() }), data.toString())),
+    );
     await new Promise<void>((resolve, reject) => {
       socket.once("open", () => resolve());
       socket.once("error", reject);
@@ -308,6 +359,7 @@ describe("through a sandbox's CONNECT proxy", () => {
     const local = await localServer((_req, res) =>
       res.writeHead(200, { "content-type": "text/plain" }).end("still here"),
     );
+
     const proxy = await connectProxy([stack.port]);
     const proxied = { ...env, HTTPS_PROXY: proxy.url, HTTP_PROXY: proxy.url };
     const { id, url } = await share(stack, proxied, local.port);
@@ -319,19 +371,26 @@ describe("through a sandbox's CONNECT proxy", () => {
     proxy.cutAll();
     // The CLI dials again through the proxy and the same URL keeps working.
     await waitFor(() => proxy.connects > before, { what: "a reconnect through the proxy" });
+
     const again = await waitFor(
       async () => {
         const response = await browserFetch(`${url}/`, { cookie });
+
         return response.status === 200 ? response.text() : null;
       },
       { what: "the share to answer after the reconnect" },
     );
+
     expect(again).toBe("still here");
-    const { body } = await api<{ shares: { id: string; state: string }[] }>(
+
+    const { body } = await api(
       stack,
       ada,
       "/api/shares",
+      {},
+      z.object({ shares: z.array(z.object({ id: z.string(), state: z.string() })) }),
     );
+
     expect(body.shares.find((s) => s.id === id)?.state).toBe("live");
 
     await cli(["stop", id], proxied);
@@ -364,11 +423,13 @@ describe("browser WebSocket limits", () => {
     });
     const { url } = await share(stack, env, local.port);
     const cookie = await viewerCookie(stack, ada, url);
+
     const status = await new Promise<number>((resolve) => {
       const socket = browserSocket(`${url}/slow`, [], { cookie, origin: url });
       socket.once("unexpected-response", (_req, res) => resolve(res.statusCode ?? 0));
       socket.once("open", () => resolve(101));
     });
+
     expect(status).toBe(502);
     expect(upgrades).toBe(1);
     await waitFor(() => dropped, { timeoutMs: 5_000, what: "the CLI's local connection closed" });
@@ -386,6 +447,7 @@ describe("browser WebSocket limits", () => {
       wss.handleUpgrade(req, socket, head, (ws) => {
         ws.on("close", (code) => (serverClose = code));
         const piece = Buffer.alloc(512 * 1024, 7);
+
         for (let i = 0; i < 48 && ws.readyState === ws.OPEN; i++) ws.send(piece);
       }),
     );
@@ -408,17 +470,22 @@ describe("the CLI", () => {
   it("ls lists open shares and stop ends one by port, removing its process", async () => {
     const local = await localServer((_req, res) => res.end("x"));
     const started = await share(stack, env, local.port);
-    const listed = JSON.parse((await cli(["ls", "--json"], env)).stdout) as {
-      id: string;
-      port: number;
-    }[];
+
+    const listed = parseJson(
+      z.array(z.object({ id: z.string(), port: z.number() })),
+      (await cli(["ls", "--json"], env)).stdout,
+    );
+
     expect(listed).toContainEqual(expect.objectContaining({ id: started.id, port: local.port }));
-    const pid = JSON.parse(
+
+    const { pid } = parseJson(
+      z.object({ pid: z.number() }),
       (await import("node:fs")).readFileSync(
         join(env.WURMHOL_HOME!, "shares", `${started.id}.json`),
         "utf8",
       ),
-    ).pid as number;
+    );
+
     const stopped = await cli(["stop", String(local.port)], env);
     expect(stopped.stdout).toContain(started.url);
     expect(alive(pid)).toBe(false);

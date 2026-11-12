@@ -8,10 +8,10 @@
 //   // publish `dns` at the hostname's DNS host, then:
 //   const domain = await client.waitActive("preview.acme.dev");
 //   domain.url; // https://preview.acme.dev, the pipe's URL from now on
-import type { Domain as ProtocolDomain } from "@wurmhol/protocol";
+import { type Domain as ProtocolDomain, isString } from "@wurmhol/protocol";
 import pkg from "../package.json" with { type: "json" };
 import { FixError } from "./errors.ts";
-import { send } from "./http.ts";
+import { type Answer, answerJson, type RequestJson, routeJson, send } from "./http.ts";
 import { DEFAULT_SERVER, originOf } from "./pipe.ts";
 
 /**
@@ -51,6 +51,7 @@ export interface Domain {
 // The public type is written out (the protocol package is bundled in, not published); these two
 // lines fail the build if it and the Worker's drift apart.
 type Assert<T extends true> = T;
+
 type _DomainMatchesProtocol = Assert<
   [Domain] extends [ProtocolDomain] ? ([ProtocolDomain] extends [Domain] ? true : false) : false
 >;
@@ -124,14 +125,17 @@ interface Body {
 const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
     if (signal?.aborted) return reject(signal.reason);
+
     const onAbort = () => {
       clearTimeout(timer);
       reject(signal?.reason);
     };
+
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
       resolve();
     }, ms);
+
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 
@@ -141,14 +145,16 @@ export function domains(options: DomainsOptions): DomainsClient {
   const client = options.client ?? { name: "wurmhol-sdk", version: pkg.version };
   const token = options.token;
 
-  async function call<T>(
+  /** One call to `/v1/domains`: the answer when it is a success, else a DomainError. */
+  async function call(
     method: string,
     path: string,
-    json: unknown,
+    json: RequestJson | undefined,
     signal: AbortSignal | undefined,
-  ): Promise<T> {
+  ): Promise<Answer> {
     signal?.throwIfAborted();
-    const bearer = typeof token === "function" ? await token() : token;
+    const bearer = isString(token) ? token : await token();
+
     const answer = await send(new URL(`/v1/domains${path}`, server), {
       server,
       version: client.version,
@@ -158,42 +164,38 @@ export function domains(options: DomainsOptions): DomainsClient {
       headers: { authorization: `Bearer ${bearer}` },
       signal,
     });
-    let body: Body & Record<string, unknown> = {};
-    try {
-      body = JSON.parse(answer.body) as typeof body;
-    } catch {
-      // A proxy's or portal's page: handled below.
-    }
+
     if (answer.status < 200 || answer.status >= 300) {
+      // Not JSON when a proxy or portal answered: the fix then names the status.
+      const body = answerJson<Body>(answer);
+
       throw new DomainError(
-        body.fix ??
+        body?.fix ??
           `${server} answered HTTP ${answer.status}. Check WURMHOL_URL and the token, or try again.`,
-        { domainCode: body.code ?? null, status: answer.status },
+        { domainCode: body?.code ?? null, status: answer.status },
       );
     }
-    return body as T;
+
+    return answer;
   }
 
   const path = (hostname: string, rest = "") => `/${encodeURIComponent(hostname)}${rest}`;
+  const one = (answer: Answer) => routeJson<{ domain: Domain }>(answer, server).domain;
 
   const domainsClient: DomainsClient = {
     async list(opts = {}) {
-      return (await call<{ domains: Domain[] }>("GET", "", undefined, opts.signal)).domains;
+      const answer = await call("GET", "", undefined, opts.signal);
+
+      return routeJson<{ domains: Domain[] }>(answer, server).domains;
     },
     async add(input, opts = {}) {
-      return (await call<{ domain: Domain }>("POST", "", input, opts.signal)).domain;
+      return one(await call("POST", "", input, opts.signal));
     },
     async get(hostname, opts = {}) {
-      return (await call<{ domain: Domain }>("GET", path(hostname), undefined, opts.signal)).domain;
+      return one(await call("GET", path(hostname), undefined, opts.signal));
     },
     async verify(hostname, opts = {}) {
-      const answer = await call<{ domain: Domain }>(
-        "POST",
-        path(hostname, "/verify"),
-        undefined,
-        opts.signal,
-      );
-      return answer.domain;
+      return one(await call("POST", path(hostname, "/verify"), undefined, opts.signal));
     },
     async remove(hostname, opts = {}) {
       await call("DELETE", path(hostname), undefined, opts.signal);
@@ -201,19 +203,24 @@ export function domains(options: DomainsOptions): DomainsClient {
     async waitActive(hostname, wait = {}) {
       const deadline = Date.now() + (wait.timeoutMs ?? 10 * 60_000);
       const interval = wait.intervalMs ?? 10_000;
+
       for (;;) {
         const domain = await domainsClient.verify(hostname, { signal: wait.signal });
         // A look that finished as the signal aborted still counts as aborted.
         wait.signal?.throwIfAborted();
         wait.onUpdate?.(domain);
+
         if (domain.state === "active") return domain;
+
         if (domain.state === "failed") {
           throw new DomainError(
             domain.error?.fix ?? `${hostname} failed. Remove it and add it again.`,
             { domainCode: domain.error?.code ?? null, status: 200 },
           );
         }
+
         const left = deadline - Date.now();
+
         if (left <= 0) {
           const missing = domain.dns.filter((record) => !record.done);
           throw new DomainError(
@@ -225,10 +232,12 @@ export function domains(options: DomainsOptions): DomainsClient {
             { domainCode: null, code: "error" },
           );
         }
+
         // The last wait is cut short so the final look happens at the deadline, not after it.
         await sleep(Math.min(interval, left), wait.signal);
       }
     },
   };
+
   return domainsClient;
 }

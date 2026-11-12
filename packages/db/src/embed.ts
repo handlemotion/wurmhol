@@ -64,12 +64,14 @@ export async function listEmbedApps(db: Db, orgId: string) {
 /** An application of `orgId` that is not deleted, or undefined. */
 export async function findEmbedApp(db: Db, orgId: string, appId: string) {
   const [app] = await db.select(appColumns).from(embedApps).where(liveApp(orgId, appId)).limit(1);
+
   return app;
 }
 
 export async function createEmbedApp(db: Db, orgId: string, settings: EmbedAppSettings) {
   const id = uuidv7();
   await db.insert(embedApps).values({ id, orgId, ...settings });
+
   return (await findEmbedApp(db, orgId, id))!;
 }
 
@@ -85,6 +87,7 @@ export async function updateEmbedApp(
     .set(settings)
     .where(liveApp(orgId, appId))
     .returning(appColumns);
+
   return app;
 }
 
@@ -95,11 +98,13 @@ export async function updateEmbedApp(
  */
 export async function deleteEmbedApp(db: Db, orgId: string, appId: string) {
   const now = new Date();
+
   const [deleted] = await db
     .update(embedApps)
     .set({ deletedAt: now })
     .where(liveApp(orgId, appId))
     .returning({ id: embedApps.id });
+
   if (!deleted) return false;
   await db
     .update(embedAppKeys)
@@ -111,6 +116,7 @@ export async function deleteEmbedApp(db: Db, orgId: string, appId: string) {
         isNull(embedAppKeys.revokedAt),
       ),
     );
+
   return true;
 }
 
@@ -154,6 +160,7 @@ export async function createEmbedAppKey(
   const { value, hash } = await newEmbedCredential("key");
   const id = uuidv7();
   await db.insert(embedAppKeys).values({ id, hash, ...input });
+
   return { id, key: value };
 }
 
@@ -171,6 +178,7 @@ export async function revokeEmbedAppKey(db: Db, orgId: string, appId: string, ke
       ),
     )
     .returning({ id: embedAppKeys.id });
+
   return revoked.length > 0;
 }
 
@@ -187,6 +195,7 @@ export type EmbedKeyUse =
 export async function useEmbedAppKey(db: Db, presented: string): Promise<EmbedKeyUse> {
   if (!presented.startsWith(EMBED_CREDENTIAL_PREFIXES.key)) return { ok: false, reason: "unknown" };
   const hash = await sha256Hex(presented);
+
   const [row] = await db
     .select({
       keyId: embedAppKeys.id,
@@ -201,7 +210,9 @@ export async function useEmbedAppKey(db: Db, presented: string): Promise<EmbedKe
       and(eq(embedAppKeys.hash, hash), isNull(embedAppKeys.revokedAt), isNull(embedApps.deletedAt)),
     )
     .limit(1);
+
   if (!row) return { ok: false, reason: "unknown" };
+
   if (row.expiresAt && row.expiresAt.getTime() <= Date.now())
     return { ok: false, reason: "expired" };
   await db
@@ -209,6 +220,7 @@ export async function useEmbedAppKey(db: Db, presented: string): Promise<EmbedKe
     .set({ lastUsedAt: new Date() })
     .where(eq(embedAppKeys.id, row.keyId));
   const { expiresAt: _, ...key } = row;
+
   return { ok: true, ...key };
 }
 
@@ -239,6 +251,7 @@ export async function findEmbedTenant(db: Db, scope: EmbedScope, externalId: str
       ),
     )
     .limit(1);
+
   return tenant;
 }
 
@@ -248,6 +261,11 @@ export interface EmbedTenantChange {
   monthlyRequests?: number | null;
   activeTunnels?: number | null;
 }
+
+/** The columns an `EmbedTenantChange` writes. */
+type EmbedTenantUpdate = Partial<
+  Pick<typeof embedTenants.$inferInsert, "disabledAt" | "monthlyRequests" | "activeTunnels">
+>;
 
 /** The tenant named `externalId`, made if new, with `change` applied. */
 export async function putEmbedTenant(
@@ -261,10 +279,11 @@ export async function putEmbedTenant(
     .values({ id: uuidv7(), ...scope, externalId })
     .onConflictDoNothing();
   const { disabled, ...limits } = change;
-  const set = {
-    ...(disabled === undefined ? {} : { disabledAt: disabled ? new Date() : null }),
-    ...limits,
-  };
+
+  const set: EmbedTenantUpdate = { ...limits };
+
+  if (disabled !== undefined) set.disabledAt = disabled ? new Date() : null;
+
   if (Object.keys(set).length) {
     await db
       .update(embedTenants)
@@ -277,6 +296,7 @@ export async function putEmbedTenant(
         ),
       );
   }
+
   return (await findEmbedTenant(db, scope, externalId))!;
 }
 
@@ -307,6 +327,7 @@ export async function findEmbedSubject(
       ),
     )
     .limit(1);
+
   return subject;
 }
 
@@ -326,13 +347,16 @@ export async function putEmbedSubject(
     .values({ id: uuidv7(), ...scope, tenantId, externalId, kind: input.kind })
     .onConflictDoNothing();
   const subject = (await findEmbedSubject(db, scope, tenantId, externalId))!;
+
   if (subject.kind !== input.kind) return { conflict: true as const };
+
   if (input.disabled !== undefined) {
     await db
       .update(embedSubjects)
       .set({ disabledAt: input.disabled ? new Date() : null })
       .where(eq(embedSubjects.id, subject.id));
   }
+
   return {
     conflict: false as const,
     subject: (await findEmbedSubject(db, scope, tenantId, externalId))!,
@@ -370,13 +394,16 @@ function selectTunnels(db: Db) {
 async function claimTunnelName(db: Db, orgId: string) {
   for (let attempt = 0; attempt < 5; attempt++) {
     const name = randomEmbedTunnelName();
+
     const claimed = await db
       .insert(pipeNames)
       .values({ name, orgId })
       .onConflictDoNothing()
       .returning({ name: pipeNames.name });
+
     if (claimed[0]) return name;
   }
+
   throw new Error("could not draw an unused tunnel name");
 }
 
@@ -388,6 +415,7 @@ export async function createEmbedConnector(
   const { value, hash } = await newEmbedCredential("connector");
   const id = uuidv7();
   await db.insert(embedConnectors).values({ id, hash, ...input });
+
   return { id, connector: value, expiresAt: input.expiresAt };
 }
 
@@ -413,11 +441,13 @@ export async function createEmbedTunnel(
   await db
     .insert(embedTunnelAccess)
     .values(subjects.map((subjectId) => ({ tunnelId: id, subjectId, orgId: scope.orgId })));
+
   const connector = await createEmbedConnector(db, {
     orgId: scope.orgId,
     tunnelId: id,
     expiresAt: input.connectorExpiresAt,
   });
+
   return { tunnel: (await findEmbedTunnel(db, scope, id))!, connector };
 }
 
@@ -433,28 +463,35 @@ export async function findEmbedTunnel(db: Db, scope: EmbedScope, tunnelId: strin
       ),
     )
     .limit(1);
+
   return tunnel;
 }
 
+/** Narrows an application's tunnels to one tenant's, or to those one of its subjects may be granted. */
+export interface EmbedTunnelFilter {
+  tenantId?: string;
+  subjectId?: string;
+}
+
 /** The application's live tunnels, of one tenant, or that one subject may be granted. */
-export async function listEmbedTunnels(
-  db: Db,
-  scope: EmbedScope,
-  filter: { tenantId?: string; subjectId?: string } = {},
-) {
+export async function listEmbedTunnels(db: Db, scope: EmbedScope, filter: EmbedTunnelFilter = {}) {
   const where = [
     eq(embedTunnels.orgId, scope.orgId),
     eq(embedTunnels.appId, scope.appId),
     isNull(embedTunnels.deletedAt),
   ];
+
   if (filter.tenantId) where.push(eq(embedTunnels.tenantId, filter.tenantId));
+
   if (filter.subjectId) {
     const reachable = db
       .select({ id: embedTunnelAccess.tunnelId })
       .from(embedTunnelAccess)
       .where(eq(embedTunnelAccess.subjectId, filter.subjectId));
+
     where.push(inArray(embedTunnels.id, reachable));
   }
+
   return selectTunnels(db)
     .where(and(...where))
     .orderBy(desc(embedTunnels.createdAt))
@@ -480,6 +517,7 @@ export async function embedTunnelIdsOf(
           : eq(embedTunnels.ownerSubjectId, of.ownerSubjectId),
       ),
     );
+
   return rows.map((row) => row.id);
 }
 
@@ -518,6 +556,7 @@ export async function removeEmbedTunnelAccess(
       ),
     )
     .returning({ subjectId: embedTunnelAccess.subjectId });
+
   return removed.length > 0;
 }
 
@@ -566,6 +605,7 @@ export async function embedTunnelIdsOfApp(db: Db, orgId: string, appId: string) 
         isNull(embedTunnels.deletedAt),
       ),
     );
+
   return rows.map((row) => row.id);
 }
 
@@ -592,12 +632,14 @@ export async function revokeEmbedConnectors(
       ),
     )
     .returning({ id: embedConnectors.id });
+
   return revoked.length;
 }
 
 /** The open sessions of tunnels, to end or report on. */
 export async function openSharesOfTunnels(db: Db, tunnelIds: string[]) {
   if (!tunnelIds.length) return [];
+
   return db
     .select({
       id: shares.id,
@@ -612,6 +654,7 @@ export async function openSharesOfTunnels(db: Db, tunnelIds: string[]) {
 /** Each tunnel's newest session, open or ended, for its health. */
 export async function latestSharesOfTunnels(db: Db, tunnelIds: string[]) {
   if (!tunnelIds.length) return new Map<string, LatestSession>();
+
   const rows = await db
     .select({
       id: shares.id,
@@ -624,8 +667,11 @@ export async function latestSharesOfTunnels(db: Db, tunnelIds: string[]) {
     .from(shares)
     .where(inArray(shares.tunnelId, tunnelIds))
     .orderBy(desc(shares.startedAt));
+
   const latest = new Map<string, LatestSession>();
+
   for (const row of rows) if (!latest.has(row.tunnelId!)) latest.set(row.tunnelId!, row);
+
   return latest;
 }
 
@@ -661,7 +707,9 @@ export async function useEmbedConnector(db: Db, presented: string): Promise<Embe
   if (!presented.startsWith(EMBED_CREDENTIAL_PREFIXES.connector)) {
     return { ok: false, reason: "unknown" };
   }
+
   const hash = await sha256Hex(presented);
+
   const [row] = await db
     .select({
       connectorId: embedConnectors.id,
@@ -689,13 +737,17 @@ export async function useEmbedConnector(db: Db, presented: string): Promise<Embe
       ),
     )
     .limit(1);
+
   if (!row) return { ok: false, reason: "unknown" };
+
   if (row.expiresAt.getTime() <= Date.now()) return { ok: false, reason: "expired" };
+
   if (row.tenantDisabledAt || row.ownerDisabledAt) return { ok: false, reason: "disabled" };
   await db
     .update(embedConnectors)
     .set({ lastUsedAt: new Date() })
     .where(eq(embedConnectors.id, row.connectorId));
+
   return {
     ok: true,
     connectorId: row.connectorId,
@@ -740,6 +792,7 @@ export async function issueEmbedGrant(
     event: "issued",
   });
   let launchCode: string | null = null;
+
   if (input.kind === "browser") {
     launchCode = randomSecret(32);
     await db.insert(embedLaunchCodes).values({
@@ -749,6 +802,7 @@ export async function issueEmbedGrant(
       expiresAt: new Date(Date.now() + LAUNCH_CODE_TTL_SECONDS * 1000),
     });
   }
+
   return { id, token: token?.value ?? null, launchCode, expiresAt: input.expiresAt };
 }
 
@@ -758,6 +812,7 @@ export async function takeEmbedLaunchCode(db: Db, code: string) {
     .delete(embedLaunchCodes)
     .where(eq(embedLaunchCodes.hash, await sha256Hex(code)))
     .returning({ grantId: embedLaunchCodes.grantId, expiresAt: embedLaunchCodes.expiresAt });
+
   return taken && taken.expiresAt.getTime() > Date.now() ? taken.grantId : null;
 }
 
@@ -770,6 +825,7 @@ export async function takeEmbedLaunchCode(db: Db, code: string) {
 export async function findLiveEmbedGrant(db: Db, by: { id: string } | { token: string }) {
   const match: SQL =
     "id" in by ? eq(embedGrants.id, by.id) : eq(embedGrants.hash, await sha256Hex(by.token));
+
   const [grant] = await db
     .select({
       id: embedGrants.id,
@@ -808,6 +864,7 @@ export async function findLiveEmbedGrant(db: Db, by: { id: string } | { token: s
       ),
     )
     .limit(1);
+
   return grant;
 }
 
@@ -825,6 +882,7 @@ export async function revokeEmbedGrants(
   keyId: string | null = null,
 ) {
   if ("tunnelIds" in which && !which.tunnelIds.length) return [];
+
   const scoped =
     "grantId" in which
       ? and(eq(embedGrants.id, which.grantId), eq(embedGrants.appId, which.appId))
@@ -834,6 +892,7 @@ export async function revokeEmbedGrants(
             eq(embedGrants.subjectId, which.subjectId),
             which.tunnelId ? eq(embedGrants.tunnelId, which.tunnelId) : undefined,
           );
+
   const revoked = await db
     .update(embedGrants)
     .set({ revokedAt: new Date() })
@@ -843,6 +902,7 @@ export async function revokeEmbedGrants(
       tunnelId: embedGrants.tunnelId,
       subjectId: embedGrants.subjectId,
     });
+
   if (revoked.length) {
     await db.insert(embedGrantEvents).values(
       revoked.map((grant) => ({
@@ -856,6 +916,7 @@ export async function revokeEmbedGrants(
       })),
     );
   }
+
   return revoked;
 }
 
@@ -885,6 +946,7 @@ export async function embedAppLaunchUrl(db: Db, appId: string) {
     .from(embedApps)
     .where(and(eq(embedApps.id, appId), isNull(embedApps.deletedAt)))
     .limit(1);
+
   return app?.launchUrl ?? null;
 }
 
@@ -903,5 +965,6 @@ export async function embedLimitsOf(db: Db, appId: string, tenantId: string) {
     .innerJoin(embedApps, eq(embedApps.id, embedTenants.appId))
     .where(and(eq(embedTenants.id, tenantId), eq(embedTenants.appId, appId)))
     .limit(1);
+
   return row;
 }

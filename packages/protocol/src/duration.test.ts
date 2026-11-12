@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { formatDuration, parseDuration } from "./duration.ts";
 
 describe("parseDuration", () => {
@@ -34,6 +34,7 @@ describe("formatDuration", () => {
     for (const seconds of [1, 59, 60, 3599, 3600, 5400, 14_400, 43_200, 90_061]) {
       expect(parseDuration(formatDuration(seconds))).toBe(seconds);
     }
+
     expect(formatDuration(43_200)).toBe("12h");
   });
 });

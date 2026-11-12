@@ -12,6 +12,7 @@ const keys = new Map<string, Promise<CryptoKey>>();
 
 function key(secret: string) {
   let found = keys.get(secret);
+
   if (!found) {
     found = crypto.subtle
       .digest("SHA-256", new TextEncoder().encode(`wurmhol-grant-cookie:${secret}`))
@@ -23,6 +24,7 @@ function key(secret: string) {
       );
     keys.set(secret, found);
   }
+
   return found;
 }
 
@@ -36,6 +38,7 @@ function base64url(bytes: ArrayBuffer) {
 function fromBase64url(text: string): Uint8Array<ArrayBuffer> | null {
   try {
     const binary = atob(text.replaceAll("-", "+").replaceAll("_", "/"));
+
     return Uint8Array.from(binary, (c) => c.charCodeAt(0));
   } catch {
     return null;
@@ -51,11 +54,13 @@ export async function signGrantCookie(
   value: { tunnelId: string; grantId: string; expiresAt: number },
 ) {
   const payload = `e.${value.tunnelId}.${value.grantId}.${value.expiresAt}`;
+
   const signature = await crypto.subtle.sign(
     "HMAC",
     await key(secret),
     new TextEncoder().encode(payload),
   );
+
   return `${payload}.${base64url(signature)}`;
 }
 
@@ -66,7 +71,10 @@ export async function verifyGrantCookie(
 ): Promise<{ tunnelId: string; grantId: string } | null> {
   if (!cookie) return null;
   const parts = cookie.split(".");
+
   if (parts.length !== 5) return null;
+
+  // SAFETY: the length check above leaves exactly five parts.
   const [kind, tunnelId, grantId, expires, signature] = parts as [
     string,
     string,
@@ -74,23 +82,29 @@ export async function verifyGrantCookie(
     string,
     string,
   ];
+
   if (kind !== "e" || !ID.test(tunnelId) || !ID.test(grantId) || !/^\d+$/.test(expires)) {
     return null;
   }
+
   if (Number(expires) * 1000 <= Date.now()) return null;
   const bytes = fromBase64url(signature);
+
   if (!bytes) return null;
+
   const ok = await crypto.subtle.verify(
     "HMAC",
     await key(secret),
     bytes,
     new TextEncoder().encode(`e.${tunnelId}.${grantId}.${expires}`),
   );
+
   return ok ? { tunnelId, grantId } : null;
 }
 
 /** The `Set-Cookie` value for a grant cookie that lasts until `expiresAt` (seconds). */
 export function grantCookieHeader(value: string, expiresAt: number) {
   const maxAge = Math.max(0, Math.min(MAX_TTL_SECONDS, expiresAt - Math.floor(Date.now() / 1000)));
+
   return `${SHARE_COOKIE}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`;
 }

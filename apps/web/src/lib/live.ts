@@ -16,8 +16,10 @@ export interface LiveWall {
 function apply(current: ShareCard[] | undefined, event: WallEvent): ShareCard[] {
   if (event.type === "snapshot") return event.shares;
   const list = current ?? [];
+
   if (event.type === "share.ended") return list.filter((s) => s.id !== event.id);
   const others = list.filter((s) => s.id !== event.share.id);
+
   return [event.share, ...others].toSorted((a, b) => b.startedAt - a.startedAt);
 }
 
@@ -30,21 +32,26 @@ function live<T>(path: string, onEvent: (event: T) => void, retry: { first: numb
   let stopped = false;
   let delay = retry.first;
   let timer: ReturnType<typeof setTimeout> | undefined;
+
   const connect = () => {
     const url = new URL(path, location.href);
     url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
     socket = new WebSocket(url);
     socket.onmessage = (message) => {
       delay = retry.first;
+      // SAFETY: the Worker's socket at `path`, deployed with this app, sends only `T` as JSON.
       onEvent(JSON.parse(String(message.data)) as T);
     };
+
     socket.onclose = () => {
       if (stopped) return;
       timer = setTimeout(connect, delay);
       delay = Math.min(delay * 2, retry.max);
     };
   };
+
   connect();
+
   return () => {
     stopped = true;
     clearTimeout(timer);
@@ -55,6 +62,7 @@ function live<T>(path: string, onEvent: (event: T) => void, retry: { first: numb
 export function connectWall(): LiveWall {
   let shares: ShareCard[] | undefined;
   let listener: ((shares: ShareCard[]) => void) | null = null;
+
   const close = live<WallEvent>(
     "/api/live",
     (event) => {
@@ -63,6 +71,7 @@ export function connectWall(): LiveWall {
     },
     { first: 500, max: 10_000 },
   );
+
   return {
     get shares() {
       return shares;
@@ -99,6 +108,7 @@ export function preconnectWall() {
 export function takeWall(): LiveWall {
   const wall = early ?? connectWall();
   early = null;
+
   return wall;
 }
 

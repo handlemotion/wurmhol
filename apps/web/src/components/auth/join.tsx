@@ -14,6 +14,7 @@ export function Join({ code }: { code: string }) {
     queryFn: () => api<{ orgName: string }>(`/api/invites/${encodeURIComponent(code)}`),
     retry: false,
   });
+
   const join = useMutation({
     mutationFn: () => api(`/api/invites/${encodeURIComponent(code)}/accept`, { method: "POST" }),
     onSuccess: () => location.assign("/"),

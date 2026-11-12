@@ -46,41 +46,23 @@ const ORG_ACTIONS = [
   { id: "create", label: "New org", Icon: IconPlus },
   { id: "settings", label: "Org settings", Icon: IconSettings },
 ] as const;
+
 const DELETE = { id: "delete", label: "Delete org", Icon: IconTrash } as const;
 
-/**
- * The header floats: sharp pills over the canvas, no bar behind them. The org on the left, the
- * org's dialogs in the middle, logging out on the right. On a phone the middle and right fold
- * into one menu. The same 16px above the pills as beside them, so the row sits balanced.
- */
-export function Header({
-  me,
-  onOpen,
-  view,
-  onView,
-  fade,
-}: {
-  me: Me;
-  onOpen: (dialog: WallDialog) => void;
-  view: WallView;
-  /** Apps turns into Pipes while the apps show, and back. */
-  onView: (view: WallView) => void;
-  /** Off on the empty wall: no pill can pan under the header, and the backdrop runs on to the top. */
-  fade: boolean;
-}) {
-  const switchOrg = useSwitchOrg();
-  const signOut = useSignOut();
+/** The same entries as buttons in the header's middle, and in the phone's menu. */
+function useWallLinks(
+  me: Me,
+  view: WallView,
+  onView: (view: WallView) => void,
+  onOpen: (dialog: WallDialog) => void,
+) {
   const billing = useOpenBilling();
-  const prefetchDialogs = usePrefetchDialogs();
   const customDomains = useAppConfig().data?.customDomains ?? false;
-  const active = me.orgs.find((org) => org.id === me.activeOrgId);
-  const [orgAction, setOrgAction] = useState<OrgAction | null>(null);
-  const owner = me.role === "owner";
   // Owners manage a plan they have in Stripe's portal. Without one, the wall offers the plans;
   // with billing off (self-hosted) there is nothing to open.
-  const canBill = owner && me.standing?.reason === "subscribed";
-  // The same entries as buttons in the middle, and in the phone's menu.
-  const links = [
+  const canBill = me.role === "owner" && me.standing?.reason === "subscribed";
+
+  return [
     // An owner of an org that may have apps moves between its pipes and its apps.
     ...(me.apps
       ? [
@@ -106,6 +88,36 @@ export function Header({
         ]
       : []),
   ];
+}
+
+/**
+ * The header floats: sharp pills over the canvas, no bar behind them. The org on the left, the
+ * org's dialogs in the middle, logging out on the right. On a phone the middle and right fold
+ * into one menu. The same 16px above the pills as beside them, so the row sits balanced.
+ */
+export function Header({
+  me,
+  onOpen,
+  view,
+  onView,
+  fade,
+}: {
+  me: Me;
+  onOpen: (dialog: WallDialog) => void;
+  view: WallView;
+  /** Apps turns into Pipes while the apps show, and back. */
+  onView: (view: WallView) => void;
+  /** Off on the empty wall: no pill can pan under the header, and the backdrop runs on to the top. */
+  fade: boolean;
+}) {
+  const switchOrg = useSwitchOrg();
+  const signOut = useSignOut();
+  const prefetchDialogs = usePrefetchDialogs();
+  const active = me.orgs.find((org) => org.id === me.activeOrgId);
+  const [orgAction, setOrgAction] = useState<OrgAction | null>(null);
+  const owner = me.role === "owner";
+  const links = useWallLinks(me, view, onView, onOpen);
+
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between gap-3 p-4">
       {/* No bar, but a fade: pills the camera pans up dissolve under the header's pills. */}
@@ -130,6 +142,7 @@ export function Header({
           placement="bottom start"
           onAction={(key) => {
             const action = [...ORG_ACTIONS, DELETE].find((a) => a.id === key);
+
             if (action) setOrgAction(action.id);
             else switchOrg.mutate(String(key));
           }}
@@ -158,12 +171,16 @@ export function Header({
           </MenuSection>
           <MenuSeparator />
           <MenuSection aria-label="Org actions">
-            {ORG_ACTIONS.filter((a) => active || a.id === "create").map(({ id, label, Icon }) => (
-              <MenuItem key={id} id={id}>
-                <Icon />
-                <MenuLabel>{label}</MenuLabel>
-              </MenuItem>
-            ))}
+            {ORG_ACTIONS.flatMap(({ id, label, Icon }) =>
+              active || id === "create"
+                ? [
+                    <MenuItem key={id} id={id}>
+                      <Icon />
+                      <MenuLabel>{label}</MenuLabel>
+                    </MenuItem>,
+                  ]
+                : [],
+            )}
           </MenuSection>
           {active && owner && <MenuSeparator />}
           {active && owner && (

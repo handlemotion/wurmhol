@@ -11,6 +11,7 @@ const WELL = [
   "flex h-8 w-full min-w-0 items-stretch overflow-hidden rounded-lg bg-well text-start text-sm outline-hidden",
   "transition-colors duration-150 ease-out hover:bg-well-hover focus-visible:ring-1 focus-visible:ring-ring",
 ];
+
 const LABEL =
   "flex min-w-(--copy-label-width,0) shrink-0 items-center border-e-[0.5px] border-hairline-line px-2 text-muted-foreground";
 
@@ -38,6 +39,7 @@ export function CopyField(props: {
   // can't leave two up. Leaving resets it to "Click to copy".
   const onOpenChange = (next: boolean) => {
     setOpen(next);
+
     if (!next) setResult(null);
   };
 

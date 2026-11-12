@@ -1,7 +1,8 @@
 // Org settings (spec section 3): rename, roles, handing ownership over, leaving and deleting,
 // through the real organization plugin. An org never loses its last owner, members can't do owner
 // things, nobody is left without an org, and a deleted org's pipes end.
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   api,
   browserFetch,
@@ -28,27 +29,35 @@ afterAll(async () => {
   await stack.stop();
 });
 
-interface MeBody {
-  activeOrgId: string;
-  role: string;
-  orgs: { id: string; name: string; role: string }[];
-}
-const whoami = async (person: Person) => (await api<MeBody>(stack, person, "/api/me")).body;
+const meBody = z.object({
+  activeOrgId: z.string(),
+  role: z.string().nullable(),
+  orgs: z.array(z.object({ id: z.string(), name: z.string(), role: z.string() })),
+});
+
+const errorBody = z.object({ error: z.string() });
+
+const inviteBody = z.object({ url: z.string() });
+
+const whoami = async (person: Person) => (await api(stack, person, "/api/me", {}, meBody)).body;
 
 /** `joiner` joins `owner`'s active org by invite link, and lands in it. */
 async function join(owner: Person, joiner: Person) {
-  const invite = await api<{ url: string }>(stack, owner, "/api/invites", { method: "POST" });
+  const invite = await api(stack, owner, "/api/invites", { method: "POST" }, inviteBody);
   const code = invite.body.url.split("/join/")[1]!;
   const accepted = await api(stack, joiner, `/api/invites/${code}/accept`, { method: "POST" });
   expect(accepted.status).toBe(200);
 }
 
 async function memberId(person: Person, of: Person) {
-  const { body } = await api<{ members: { id: string; email: string }[] }>(
+  const { body } = await api(
     stack,
     person,
     "/api/members",
+    {},
+    z.object({ members: z.array(z.object({ id: z.string(), email: z.string() })) }),
   );
+
   return body.members.find((m) => m.email === of.email)!.id;
 }
 
@@ -67,10 +76,15 @@ it("anyone starts a new org: they own it, land in it, and can leave the one they
   // A plain member may start one too, and a blank name is refused.
   const blank = await api(stack, bo, "/api/orgs", { method: "POST", body: { name: "  " } });
   expect(blank.status).toBe(400);
-  const created = await api<{ id: string }>(stack, bo, "/api/orgs", {
-    method: "POST",
-    body: { name: "Bo's side project" },
-  });
+
+  const created = await api(
+    stack,
+    bo,
+    "/api/orgs",
+    { method: "POST", body: { name: "Bo's side project" } },
+    z.object({ id: z.string() }),
+  );
+
   expect(created.status).toBe(200);
 
   const after = await whoami(bo);
@@ -96,10 +110,12 @@ it("owners rename the org and change roles; members can't; the last owner can't 
   expect((await api(stack, bo, "/api/org", { method: "PATCH", body: { name: "x" } })).status).toBe(
     403,
   );
+
   const boPromotes = await api(stack, bo, `/api/members/${boId}/role`, {
     method: "POST",
     body: { role: "owner" },
   });
+
   expect(boPromotes.status).toBe(403);
   expect((await api(stack, bo, "/api/org", { method: "DELETE" })).status).toBe(403);
 
@@ -109,6 +125,7 @@ it("owners rename the org and change roles; members can't; the last owner can't 
       method: "POST",
       body: { organizationId: orgId, memberId: boId, role: "owner", data: { name: "x" } },
     });
+
     expect({ action, status: direct.status }).toEqual({ action, status: 404 });
   }
 
@@ -121,6 +138,7 @@ it("owners rename the org and change roles; members can't; the last owner can't 
     method: "POST",
     body: { role: "admin" },
   });
+
   expect(admin.status).toBe(400);
 
   // The last owner can't make themself a member.
@@ -128,6 +146,7 @@ it("owners rename the org and change roles; members can't; the last owner can't 
     method: "POST",
     body: { role: "member" },
   });
+
   expect(stepDown.status).toBe(409);
 
   // With a second owner, either may step down; then Bo, an owner, can rename.
@@ -166,10 +185,12 @@ it("transferring ownership makes them the owner and you a member", async () => {
   expect(transferred.status).toBe(200);
   expect((await whoami(ada)).role).toBe("member");
   expect((await whoami(bo)).role).toBe("owner");
+
   // Ada can no longer do owner things.
   const back = await api(stack, ada, `/api/members/${await memberId(ada, ada)}/transfer`, {
     method: "POST",
   });
+
   expect(back.status).toBe(403);
 });
 
@@ -183,7 +204,7 @@ it("members leave; the last owner and a person's only org can't be left", async 
   await join(cy, ada);
   expect((await setActive(ada, orgId)).status).toBe(200);
 
-  const adaLeaves = await api<{ error: string }>(stack, ada, "/api/org/leave", { method: "POST" });
+  const adaLeaves = await api(stack, ada, "/api/org/leave", { method: "POST" }, errorBody);
   expect(adaLeaves.status).toBe(409);
   expect(adaLeaves.body.error).toMatch(/only owner/i);
 
@@ -195,7 +216,7 @@ it("members leave; the last owner and a person's only org can't be left", async 
   expect(after.activeOrgId).toBe(after.orgs[0]!.id);
 
   // Bo's personal org is now Bo's only one.
-  const onlyOrg = await api<{ error: string }>(stack, bo, "/api/org/leave", { method: "POST" });
+  const onlyOrg = await api(stack, bo, "/api/org/leave", { method: "POST" }, errorBody);
   expect(onlyOrg.status).toBe(409);
   expect(onlyOrg.body.error).toMatch(/only org/);
   expect((await whoami(bo)).orgs).toHaveLength(1);
@@ -230,6 +251,7 @@ it("deleting an org ends its open pipes and its tokens; a person's only org can'
   expect(again.code).toBe(1);
   expect(again.stderr).toContain("Create a new token");
   const db = stack.db();
+
   try {
     expect(db.prepare("select count(*) as n from tokens where org_id = ?").get(adaOrg)).toEqual({
       n: 0,

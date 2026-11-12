@@ -4,7 +4,7 @@
 // binary has its own suite (sdk-bun.e2e.test.ts).
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { WebSocketServer } from "ws";
 import { FixError, openPipe, type TransportChoice } from "wurmhol";
 import {
@@ -12,6 +12,7 @@ import {
   browserSocket,
   connectProxy,
   createToken,
+  listeningPort,
   localServer,
   type Person,
   signIn,
@@ -50,29 +51,35 @@ describe.each<TransportChoice>(["node", "builtin"])("transport %s", (transport) 
           .end(Buffer.alloc(700_000, 7));
       });
     });
+
     const sockets = new WebSocketServer({ server: http });
     sockets.on("connection", (socket) => {
       socket.on("message", (data, isBinary) => {
         if (!isBinary && data.toString() === "split") {
           socket.send("fir", { fin: false });
           socket.send("st", { fin: true });
+
           return;
         }
+
         socket.send(data, { binary: isBinary });
       });
     });
     await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
-    const port = (http.address() as { port: number }).port;
+    const port = listeningPort(http);
 
     const pipe = await openPipe({ port, token, server: stack.url, transport });
+
     try {
       const cookie = await viewerCookie(stack, ada, pipe.url);
       const upload = randomBytes(300_000);
+
       const response = await browserFetch(`${pipe.url}/upload`, {
         method: "POST",
         cookie,
         body: upload,
       });
+
       expect(response.headers.get("x-upload-sha")).toBe(sha(upload));
       expect(Buffer.from(await response.arrayBuffer())).toEqual(Buffer.alloc(700_000, 7));
 
@@ -86,6 +93,7 @@ describe.each<TransportChoice>(["node", "builtin"])("transport %s", (transport) 
       // 125, 126 and 65536 bytes are where the length field changes size; 300 KB is the
       // two-byte-then-eight-byte case in both directions.
       const sizes = [0, 5, 125, 126, 65_535, 65_536, 300_000];
+
       for (const size of sizes) viewer.send(Buffer.alloc(size, 0x61), { binary: true });
       viewer.send("t".repeat(70_000));
       viewer.send("split");
@@ -110,15 +118,18 @@ describe.each<TransportChoice>(["node", "builtin"])("transport %s", (transport) 
     const http = createServer();
     new WebSocketServer({ server: http }).on("connection", (socket) => socket.send("greeting"));
     await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
-    const port = (http.address() as { port: number }).port;
+    const port = listeningPort(http);
     const pipe = await openPipe({ port, token, server: stack.url, transport });
+
     try {
       const cookie = await viewerCookie(stack, ada, pipe.url);
       const viewer = browserSocket(pipe.url, [], { cookie });
+
       const greeting = await new Promise<string>((resolve, reject) => {
         viewer.once("message", (data: Buffer) => resolve(data.toString()));
         viewer.once("error", reject);
       });
+
       expect(greeting).toBe("greeting");
       viewer.close();
     } finally {
@@ -129,25 +140,21 @@ describe.each<TransportChoice>(["node", "builtin"])("transport %s", (transport) 
   });
 
   it("says the relay's own fix when it refuses, and does not crash when nothing answers", async () => {
-    const refused = await openPipe({
-      port: 3000,
-      token: "wh_nope",
-      server: stack.url,
-      transport,
-    }).catch((error: unknown) => error);
-    expect(refused).toBeInstanceOf(FixError);
-    expect(refused).toMatchObject({ code: "refused", status: 401 });
-    expect((refused as FixError).message.length).toBeGreaterThan(10);
+    const refused = openPipe({ port: 3000, token: "wh_nope", server: stack.url, transport });
+
+    await expect(refused).rejects.toBeInstanceOf(FixError);
+    await expect(refused).rejects.toMatchObject({
+      code: "refused",
+      status: 401,
+      // More than ten characters: the relay's own fix, not a bare code.
+      message: expect.stringMatching(/.{11}/su),
+    });
 
     // A port nothing listens on: a typed failure, never an unhandled error event.
-    const down = await openPipe({
-      port: 3000,
-      token,
-      server: "http://127.0.0.1:9",
-      transport,
-    }).catch((error: unknown) => error);
-    expect(down).toBeInstanceOf(FixError);
-    expect(down).toMatchObject({ code: "unreachable" });
+    const down = openPipe({ port: 3000, token, server: "http://127.0.0.1:9", transport });
+
+    await expect(down).rejects.toBeInstanceOf(FixError);
+    await expect(down).rejects.toMatchObject({ code: "unreachable" });
   });
 
   it("reaches the relay through a CONNECT proxy and keeps its URL across a cut connection", async () => {
@@ -156,6 +163,7 @@ describe.each<TransportChoice>(["node", "builtin"])("transport %s", (transport) 
     const saved = { HTTP_PROXY: process.env.HTTP_PROXY, NO_PROXY: process.env.NO_PROXY };
     process.env.HTTP_PROXY = proxy.url;
     process.env.NO_PROXY = "";
+
     try {
       const pipe = await openPipe({ port: local.port, token, server: stack.url, transport });
       expect(proxy.connects).toBeGreaterThan(0);
@@ -178,6 +186,7 @@ describe.each<TransportChoice>(["node", "builtin"])("transport %s", (transport) 
         if (value === undefined) delete process.env[name];
         else process.env[name] = value;
       }
+
       await proxy.close();
       await local.close();
     }

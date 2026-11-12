@@ -23,6 +23,7 @@ interface Scope {
  */
 export async function shareOfOrg(db: Db, orgId: string, id: string) {
   const share = SHARE_ID.test(id) ? await findShare(db, id) : null;
+
   return share?.orgId === orgId && !share.tunnelId ? share : null;
 }
 
@@ -56,13 +57,16 @@ export async function endShare(
 export async function endTokens(c: Scope, orgId: string, tokenIds: string[]) {
   const org = orgStub(c.env, orgId);
   const ended: string[] = [];
+
   for (const tokenId of tokenIds) {
     for (const share of await openSharesOfToken(c.var.db, tokenId)) {
       await endShare(c, { id: share.id, orgId }, "revoked", "token revoked");
       ended.push(share.id);
     }
+
     await org.dropToken(tokenId);
   }
+
   return ended;
 }
 
@@ -79,13 +83,16 @@ export async function endTunnelSessions(
   via: "embed stop" | "embed delete" | "connector revoked" | "takedown",
 ) {
   const open = await openSharesOfTunnels(c.var.db, tunnelIds);
+
   for (const share of open) await endShare(c, share, reason, via);
+
   return open.map((share) => share.id);
 }
 
 /** Ends every open embedded session of an org: it is being deleted or blocked. */
 export async function endEmbeddedOfOrg(c: Scope, orgId: string, via: "org deleted" | "takedown") {
   const ended: string[] = [];
+
   for (const session of await orgStub(c.env, orgId).listEmbedded()) {
     await endShare(
       c,
@@ -95,6 +102,7 @@ export async function endEmbeddedOfOrg(c: Scope, orgId: string, via: "org delete
     );
     ended.push(session.id);
   }
+
   return ended;
 }
 
@@ -105,9 +113,11 @@ export async function endEmbeddedOfOrg(c: Scope, orgId: string, via: "org delete
  */
 export async function pushGrantRevocations(c: Scope, revoked: { id: string; tunnelId: string }[]) {
   const byTunnel = new Map<string, string[]>();
+
   for (const grant of revoked) {
     byTunnel.set(grant.tunnelId, [...(byTunnel.get(grant.tunnelId) ?? []), grant.id]);
   }
+
   for (const share of await openSharesOfTunnels(c.var.db, [...byTunnel.keys()])) {
     await shareStub(c.env, share.id).revokeGrants(byTunnel.get(share.tunnelId!) ?? []);
   }

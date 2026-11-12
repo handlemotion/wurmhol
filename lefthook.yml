@@ -1,3 +1,0 @@
-pre-commit:
-  jobs:
-    - run: pnpm exec lint-staged

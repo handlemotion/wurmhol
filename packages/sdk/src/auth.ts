@@ -4,14 +4,14 @@
 // `wurmhol host --code` skips the approval: Create pipe hands it a code already approved by the
 // signed-in member (ADR 0020), redeemed once on the same token endpoint. `wurmhol <port>` with no
 // token starts a code with its port and leaves the waiting to its daemon (ADR 0026).
-import { type Answer, send } from "./http.ts";
+import { type Answer, answerJson, type RequestJson, send } from "./http.ts";
 import { explainRefusal, FixError } from "./errors.ts";
 
 /** POSTs JSON to `path` on `server`, through the environment's proxy. */
 function postJson(
   server: string,
   path: string,
-  body: unknown,
+  body: RequestJson,
   version: string,
   product?: string,
   signal?: AbortSignal,
@@ -24,14 +24,6 @@ function postJson(
     method: "POST",
     json: body,
   });
-}
-
-function parse<T>(answer: Answer): T | null {
-  try {
-    return JSON.parse(answer.body) as T;
-  } catch {
-    return null;
-  }
 }
 
 export interface DeviceCode {
@@ -84,10 +76,12 @@ export async function startLogin(options: {
 }): Promise<DeviceCode> {
   const { server, version, name, port, product } = options;
   const started = await postJson(server, "/device/code", { name, port }, version, product);
-  const code = started.status === 200 ? parse<DeviceCode>(started) : null;
+  const code = started.status === 200 ? answerJson<DeviceCode>(started) : null;
+
   if (!code?.device_code) {
     throw explainRefusal(started.status, started.body, { server, viaProxy: started.viaProxy });
   }
+
   return code;
 }
 
@@ -95,6 +89,7 @@ export async function startLogin(options: {
 export async function login(options: LoginOptions): Promise<Granted> {
   const code = await startLogin(options);
   options.prompt(code);
+
   return awaitLogin({
     server: options.server,
     version: options.version,
@@ -117,8 +112,10 @@ export async function awaitLogin(options: {
   const { server, version, code, signal, product } = options;
   let interval = Math.max(code.interval, 1) * 1000;
   const deadline = Date.now() + code.expires_in * 1000;
+
   while (Date.now() < deadline) {
     await sleep(interval, signal);
+
     const polled = await postJson(
       server,
       "/device/token",
@@ -127,24 +124,32 @@ export async function awaitLogin(options: {
       product,
       signal,
     );
+
     if (polled.status === 200) {
-      const granted = parse<Granted>(polled);
+      const granted = answerJson<Granted>(polled);
+
       if (granted?.token) return granted;
     }
-    const refused = parse<{ error?: string; fix?: string }>(polled);
+
+    const refused = answerJson<{ error?: string; fix?: string }>(polled);
+
     if (refused?.error === "authorization_pending") continue;
+
     // RFC 8628 section 3.5: poll five seconds slower from now on.
     if (refused?.error === "slow_down") {
       interval += 5000;
       continue;
     }
+
     if (polled.status === 429) {
       interval += 5000;
       continue;
     }
+
     if (refused?.fix) throw new FixError(refused.fix, { final: true, code: "auth" });
     throw explainRefusal(polled.status, polled.body, { server, viaProxy: polled.viaProxy });
   }
+
   throw new FixError("The code expired before anyone approved it. Run wurmhol login again.", {
     code: "auth",
   });
@@ -167,6 +172,7 @@ const STALE_CODE =
 /** Redeems a setup code: the granted token, or a FixError that says what to do. */
 export async function redeem(options: RedeemOptions): Promise<Granted> {
   const { server, version } = options;
+
   const answer = await postJson(
     server,
     "/device/token",
@@ -174,14 +180,19 @@ export async function redeem(options: RedeemOptions): Promise<Granted> {
     version,
     options.product,
   );
+
   if (answer.status === 200) {
-    const granted = parse<Granted>(answer);
+    const granted = answerJson<Granted>(answer);
+
     if (granted?.token) return granted;
   }
-  const refused = parse<{ error?: string; fix?: string }>(answer);
+
+  const refused = answerJson<{ error?: string; fix?: string }>(answer);
+
   if (refused?.error === "invalid_grant" || refused?.error === "expired_token") {
     throw new FixError(STALE_CODE, { final: true, code: "auth" });
   }
+
   if (refused?.fix) throw new FixError(refused.fix, { final: true, code: "auth" });
   throw explainRefusal(answer.status, answer.body, { server, viaProxy: answer.viaProxy });
 }

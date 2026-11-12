@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it } from "vite-plus/test";
 import {
   EMBED_CREDENTIAL_PREFIXES,
   embedCredentialKind,
@@ -24,6 +24,7 @@ it("tells each credential kind apart, and none is a classic token", () => {
   expect(embedCredentialKind(`whk_${secret}`)).toBe("key");
   expect(embedCredentialKind(`whc_${secret}`)).toBe("connector");
   expect(embedCredentialKind(grant)).toBe("grant");
+
   for (const prefix of Object.values(EMBED_CREDENTIAL_PREFIXES)) {
     expect(prefix.startsWith("wh_")).toBe(false);
   }
@@ -55,6 +56,7 @@ it("checks a key's permissions", () => {
 it("bounds lifetimes", () => {
   expect(embedTtlSeconds(undefined, GRANT_TTL)).toBe(3600);
   expect(embedTtlSeconds(86_400, GRANT_TTL)).toBe(86_400);
+
   for (const bad of [86_401, 59, 1.5, -1, "3600"])
     expect(embedTtlSeconds(bad, GRANT_TTL)).toBeNull();
 });
@@ -68,6 +70,7 @@ it("keeps the grant header from the dev server", () => {
     ],
     "https://e.example",
   );
+
   expect(headers.some(([name]) => name.toLowerCase() === GRANT_HEADER)).toBe(false);
 });
 

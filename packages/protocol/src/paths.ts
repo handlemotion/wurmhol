@@ -11,14 +11,18 @@ const BASE = "https://same-origin.invalid";
 export function sameOriginPath(value: string | null | undefined): string {
   if (!value || !value.startsWith("/")) return "/";
   let url: URL;
+
   try {
     url = new URL(value, BASE);
   } catch {
     return "/";
   }
+
   if (url.origin !== BASE) return "/";
+
   // Dot segments can resolve to a path that starts with `//` (`/.//evil.example`), which a
   // browser reads as another site when it follows it.
   if (url.pathname.startsWith("//")) return "/";
+
   return `${url.pathname}${url.search}${url.hash}`.slice(0, 2000);
 }

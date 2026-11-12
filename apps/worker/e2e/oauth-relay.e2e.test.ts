@@ -3,7 +3,8 @@
 // provider (it redirects only to the URI registered with it), and a real dev server starts the
 // flow the way OAuth libraries do: a state in a cookie, a redirect to the provider.
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   browserFetch,
   cli,
@@ -11,6 +12,7 @@ import {
   cookiesOf,
   createToken,
   localServer,
+  parseJson,
   type Person,
   sha256,
   signIn,
@@ -39,10 +41,13 @@ beforeAll(async () => {
   provider = await localServer((req, res) => {
     const url = new URL(req.url!, "http://provider");
     const redirect = url.searchParams.get("redirect_uri");
+
     if (url.pathname !== "/authorize" || redirect !== registered) {
       res.writeHead(400).end("redirect_uri is not registered");
+
       return;
     }
+
     const back = new URL(redirect);
     back.searchParams.set("code", randomUUID());
     back.searchParams.set("state", url.searchParams.get("state")!);
@@ -55,6 +60,7 @@ beforeAll(async () => {
   app = await localServer((req, res) => {
     const url = new URL(req.url!, "http://app");
     const host = req.headers["x-forwarded-host"];
+
     if (url.pathname === "/login") {
       const state = url.searchParams.get("state") ?? randomUUID();
       const to = `${authorize}?client_id=app&response_type=code&state=${state}&redirect_uri=${encodeURIComponent(registered)}`;
@@ -66,17 +72,24 @@ beforeAll(async () => {
           "content-type": json ? "application/json" : "text/plain",
         })
         .end(json ? JSON.stringify({ url: to, redirect: true }) : "");
+
       return;
     }
+
     if (url.pathname === CALLBACK) {
       const cookie = /app_state=([^;]+)/.exec(req.headers.cookie ?? "")?.[1];
+
       if (!cookie || cookie !== url.searchParams.get("state")) {
         res.writeHead(400).end(`${host}: state mismatch`);
+
         return;
       }
+
       res.end(`${host} signed in with ${url.searchParams.get("code")}`);
+
       return;
     }
+
     res.end(`${host}`);
   });
   ada = await signIn(stack);
@@ -91,8 +104,10 @@ afterAll(async () => {
 
 async function openNamed(env: Record<string, string>, name: string) {
   const result = await cli([String(app.port), "--name", name, "--json"], env);
+
   if (result.code !== 0) throw new Error(`wurmhol --name failed: ${result.stderr}`);
-  return (JSON.parse(result.stdout) as { url: string }).url;
+
+  return parseJson(z.object({ url: z.string() }), result.stdout).url;
 }
 
 /** The viewer clicks "Sign in" in the app behind `pipe`: back comes the provider's URL. */
@@ -101,9 +116,12 @@ async function startSignIn(pipe: string, shareCookie: string, query = "") {
     cookie: shareCookie,
     headers: navigate,
   });
+
   const authorize = login.headers.get("location");
   const appCookie = cookiesOf(login).find((c) => c.startsWith("app_state="));
+
   if (!authorize || !appCookie) throw new Error(`no sign-in redirect: ${login.status}`);
+
   return { authorize, appCookie, state: new URL(authorize).searchParams.get("state")! };
 }
 
@@ -111,16 +129,21 @@ async function startSignIn(pipe: string, shareCookie: string, query = "") {
 async function approve(authorize: string) {
   const response = await browserFetch(authorize);
   const callback = response.headers.get("location");
+
   if (response.status !== 302 || !callback?.startsWith(relay)) {
     throw new Error(`provider refused: ${response.status} ${await response.text()}`);
   }
+
   return callback;
 }
 
 function relayedStates() {
   const db = stack.db();
+
   try {
-    return db.prepare("select * from oauth_states").all() as Record<string, unknown>[];
+    return z
+      .array(z.looseObject({ hash: z.string() }))
+      .parse(db.prepare("select * from oauth_states").all());
   } finally {
     db.close();
   }
@@ -152,6 +175,7 @@ it("two pipes of one app both sign in through the one registered relay URI", asy
   // Out of order: each callback finds its own pipe by its state, not by which came last.
   const callbacks = [await approve(second.authorize), await approve(first.authorize)];
   const landed: string[] = [];
+
   for (const [callback, pipe, cookie] of [
     [callbacks[0]!, two, `${twoCookie}; ${second.appCookie}`],
     [callbacks[1]!, one, `${oneCookie}; ${first.appCookie}`],
@@ -165,6 +189,7 @@ it("two pipes of one app both sign in through the one registered relay URI", asy
     expect(page.status).toBe(200);
     landed.push(await page.text());
   }
+
   const code = (callback: string) => new URL(callback).searchParams.get("code");
   expect(landed).toEqual([
     `${new URL(two).host} signed in with ${code(callbacks[0]!)}`,
@@ -199,9 +224,11 @@ it("a state goes back only to the pipe that sent it", async () => {
   // different host: an open redirect that carries the code away.
   const tricked = await startSignIn(mine, mineCookie);
   const callback = new URL(await approve(tricked.authorize));
+
   const escaped = await browserFetch(`${relay}//evil.localhost/x${callback.search}`, {
     headers: navigate,
   });
+
   expect(new URL(escaped.headers.get("location")!).origin).toBe(mine);
 
   // Catches: a callback for an ended pipe delivered to the next pipe that took its name.

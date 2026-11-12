@@ -9,6 +9,17 @@
 // PONG_TEXT, so the Durable Object can answer it while hibernated (WebSocket auto-response
 // matches text messages only) and the CLI's heartbeat never wakes it.
 
+import {
+  isBoolean,
+  isFiniteNumber,
+  isJsonObject,
+  isString,
+  isStringArray,
+  type JsonObject,
+  type JsonValue,
+  parseJson,
+} from "./json.ts";
+
 /** Wire values of each frame type. Append only: values are the protocol. */
 export const FRAME_TYPES = {
   request: 1,
@@ -26,23 +37,29 @@ export const FRAME_TYPES = {
 export type FrameType = keyof typeof FRAME_TYPES;
 
 const TYPE_BY_WIRE = new Map<number, FrameType>(
+  // SAFETY: FRAME_TYPES is a const literal, so its own keys are exactly the FrameType names.
   Object.entries(FRAME_TYPES).map(([name, wire]) => [wire, name as FrameType]),
 );
 
 /** Heartbeat, sent by the CLI as a text message every HEARTBEAT_MS. */
 export const PING_TEXT = "wurmhol:ping";
+
 /** The Durable Object's automatic answer to PING_TEXT. */
 export const PONG_TEXT = "wurmhol:pong";
 
 /** The CLI's heartbeat interval. */
 export const HEARTBEAT_MS = 20_000;
+
 /** How long a share keeps its id while its CLI is away, waiting for it to reconnect. */
 export const RECONNECT_GRACE_MS = 60_000;
+
 /** Largest body chunk in one `data` or `ws-message` frame. */
 export const MAX_CHUNK_BYTES = 64 * 1024;
+
 /** Largest `ws-message` the relay carries whole (browser WebSocket messages are not chunked). */
 export const MAX_WS_MESSAGE_BYTES = 1024 * 1024;
 const HEADER_BYTES = 5;
+
 /** Largest stream id: the header holds it in 32 bits. */
 export const MAX_STREAM_ID = 0xffff_ffff;
 
@@ -76,6 +93,11 @@ export interface WsOpenPayload {
   protocol?: string;
 }
 
+export interface WsMessagePayload {
+  binary: boolean;
+  data: Uint8Array;
+}
+
 export interface WsClosePayload {
   code: number;
   reason: string;
@@ -89,6 +111,7 @@ export function sendableCloseCode(code: number) {
   const valid =
     (code >= 1000 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006) ||
     (code >= 3000 && code <= 4999);
+
   return valid ? code : 1000;
 }
 
@@ -103,7 +126,7 @@ export type Frame =
   | { stream: number; type: "data"; payload: Uint8Array }
   | { stream: number; type: "end"; payload: EndPayload }
   | { stream: number; type: "ws-open"; payload: WsOpenPayload }
-  | { stream: number; type: "ws-message"; payload: { binary: boolean; data: Uint8Array } }
+  | { stream: number; type: "ws-message"; payload: WsMessagePayload }
   | { stream: number; type: "ws-close"; payload: WsClosePayload }
   | { stream: number; type: "ping"; payload: null }
   | { stream: number; type: "window"; payload: WindowPayload };
@@ -119,9 +142,11 @@ function header(type: FrameType, stream: number, payloadBytes: number) {
   if (!Number.isInteger(stream) || stream < 0 || stream > MAX_STREAM_ID) {
     throw new ProtocolError(`stream id out of range: ${stream}`);
   }
+
   const bytes = new Uint8Array(HEADER_BYTES + payloadBytes);
   bytes[0] = FRAME_TYPES[type];
   new DataView(bytes.buffer).setUint32(1, stream);
+
   return bytes;
 }
 
@@ -134,24 +159,32 @@ export function encodeFrame(frame: Frame): Uint8Array {
       if (frame.payload.byteLength > MAX_CHUNK_BYTES) {
         throw new ProtocolError(`data frame over ${MAX_CHUNK_BYTES} bytes; chunk the body`);
       }
+
       const bytes = header("data", frame.stream, frame.payload.byteLength);
       bytes.set(frame.payload, HEADER_BYTES);
+
       return bytes;
     }
+
     case "ws-message": {
       const { binary, data } = frame.payload;
+
       if (data.byteLength > MAX_WS_MESSAGE_BYTES) {
         throw new ProtocolError(`websocket message over ${MAX_WS_MESSAGE_BYTES} bytes`);
       }
+
       const bytes = header("ws-message", frame.stream, 1 + data.byteLength);
       bytes[HEADER_BYTES] = binary ? 1 : 0;
       bytes.set(data, HEADER_BYTES + 1);
+
       return bytes;
     }
+
     default: {
       const json = encoder.encode(JSON.stringify(frame.payload));
       const bytes = header(frame.type, frame.stream, json.byteLength);
       bytes.set(json, HEADER_BYTES);
+
       return bytes;
     }
   }
@@ -159,38 +192,132 @@ export function encodeFrame(frame: Frame): Uint8Array {
 
 function asBytes(message: ArrayBuffer | ArrayBufferView): Uint8Array {
   if (message instanceof Uint8Array) return message;
+
   if (ArrayBuffer.isView(message)) {
     return new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
   }
+
   return new Uint8Array(message);
 }
 
-function parseJson(payload: Uint8Array): unknown {
+function jsonPayload(payload: Uint8Array, type: FrameType): JsonObject {
+  let value: JsonValue;
+
   try {
-    return JSON.parse(decoder.decode(payload));
+    value = parseJson(decoder.decode(payload));
   } catch {
     throw new ProtocolError("frame payload is not valid UTF-8 JSON");
   }
+
+  if (!isJsonObject(value)) throw new ProtocolError(`${type} payload must be an object`);
+
+  return value;
 }
 
 function isHeaderList(value: unknown): value is HeaderList {
   return (
     Array.isArray(value) &&
-    value.every(
-      (pair) =>
-        Array.isArray(pair) &&
-        pair.length === 2 &&
-        typeof pair[0] === "string" &&
-        typeof pair[1] === "string",
-    )
+    value.every((pair) => Array.isArray(pair) && pair.length === 2 && isStringArray(pair))
   );
 }
 
-function object(value: unknown, type: FrameType): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new ProtocolError(`${type} payload must be an object`);
+function decodeWsMessage(payload: Uint8Array): WsMessagePayload {
+  if (payload.byteLength < 1) throw new ProtocolError("ws-message without its kind byte");
+
+  if (payload.byteLength - 1 > MAX_WS_MESSAGE_BYTES) {
+    throw new ProtocolError("websocket message too large");
   }
-  return value as Record<string, unknown>;
+
+  const kind = payload[0];
+
+  if (kind !== 0 && kind !== 1) throw new ProtocolError("ws-message kind must be 0 or 1");
+
+  return { binary: kind === 1, data: payload.subarray(1) };
+}
+
+function decodeRequest(p: JsonObject): RequestHead {
+  if (!isString(p.method) || !/^[A-Z]+$/.test(p.method)) {
+    throw new ProtocolError("request needs a method");
+  }
+
+  if (!isString(p.path) || !p.path.startsWith("/")) {
+    throw new ProtocolError("request path must start with /");
+  }
+
+  if (!isHeaderList(p.headers)) throw new ProtocolError("request headers must be pairs");
+
+  return { method: p.method, path: p.path, headers: p.headers };
+}
+
+function decodeResponse(p: JsonObject): ResponseHead {
+  if (!isFiniteNumber(p.status) || !Number.isInteger(p.status)) {
+    throw new ProtocolError("response needs an integer status");
+  }
+
+  if (p.status < 100 || p.status > 599) throw new ProtocolError("response status out of range");
+
+  if (!isHeaderList(p.headers)) throw new ProtocolError("response headers must be pairs");
+
+  return { status: p.status, headers: p.headers };
+}
+
+function decodeEnd(p: JsonObject): EndPayload {
+  if (p.error === undefined) return {};
+
+  if (!isString(p.error)) throw new ProtocolError("end error must be a string");
+
+  return { error: p.error };
+}
+
+function decodeWsOpen(p: JsonObject): WsOpenPayload {
+  const open: WsOpenPayload = {};
+
+  if (p.path !== undefined) {
+    if (!isString(p.path) || !p.path.startsWith("/")) {
+      throw new ProtocolError("ws-open path must start with /");
+    }
+
+    open.path = p.path;
+  }
+
+  if (p.headers !== undefined) {
+    if (!isHeaderList(p.headers)) throw new ProtocolError("ws-open headers must be pairs");
+    open.headers = p.headers;
+  }
+
+  if (p.protocols !== undefined) {
+    if (!isStringArray(p.protocols)) throw new ProtocolError("ws-open protocols must be strings");
+
+    open.protocols = p.protocols;
+  }
+
+  if (p.accepted !== undefined) {
+    if (!isBoolean(p.accepted)) throw new ProtocolError("ws-open accepted is a flag");
+    open.accepted = p.accepted;
+  }
+
+  if (p.protocol !== undefined) {
+    if (!isString(p.protocol)) throw new ProtocolError("ws-open protocol is a string");
+    open.protocol = p.protocol;
+  }
+
+  return open;
+}
+
+function decodeWsClose(p: JsonObject): WsClosePayload {
+  if (!isFiniteNumber(p.code) || !Number.isInteger(p.code) || !isString(p.reason)) {
+    throw new ProtocolError("ws-close needs a code and a reason");
+  }
+
+  return { code: p.code, reason: p.reason };
+}
+
+function decodeWindow(p: JsonObject): WindowPayload {
+  if (!isFiniteNumber(p.bytes) || !Number.isInteger(p.bytes) || p.bytes <= 0) {
+    throw new ProtocolError("window needs a positive whole number of bytes");
+  }
+
+  return { bytes: p.bytes };
 }
 
 /**
@@ -199,15 +326,19 @@ function object(value: unknown, type: FrameType): Record<string, unknown> {
  * hostile, and the connection should close.
  */
 export function decodeFrame(message: string | ArrayBuffer | ArrayBufferView): Frame {
-  if (typeof message === "string") {
+  if (isString(message)) {
     if (message === PING_TEXT || message === PONG_TEXT) {
       return { stream: 0, type: "ping", payload: null };
     }
+
     throw new ProtocolError("unexpected text message");
   }
+
   const bytes = asBytes(message);
+
   if (bytes.byteLength < HEADER_BYTES) throw new ProtocolError("frame shorter than its header");
   const type = TYPE_BY_WIRE.get(bytes[0]!);
+
   if (!type) throw new ProtocolError(`unknown frame type ${bytes[0]}`);
   const stream = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(1);
   const payload = bytes.subarray(HEADER_BYTES);
@@ -217,86 +348,22 @@ export function decodeFrame(message: string | ArrayBuffer | ArrayBufferView): Fr
       return { stream, type, payload: null };
     case "data":
       if (payload.byteLength > MAX_CHUNK_BYTES) throw new ProtocolError("data frame too large");
+
       return { stream, type, payload };
-    case "ws-message": {
-      if (payload.byteLength < 1) throw new ProtocolError("ws-message without its kind byte");
-      if (payload.byteLength - 1 > MAX_WS_MESSAGE_BYTES) {
-        throw new ProtocolError("websocket message too large");
-      }
-      const kind = payload[0];
-      if (kind !== 0 && kind !== 1) throw new ProtocolError("ws-message kind must be 0 or 1");
-      return { stream, type, payload: { binary: kind === 1, data: payload.subarray(1) } };
-    }
-    case "request": {
-      const p = object(parseJson(payload), type);
-      if (typeof p.method !== "string" || !/^[A-Z]+$/.test(p.method)) {
-        throw new ProtocolError("request needs a method");
-      }
-      if (typeof p.path !== "string" || !p.path.startsWith("/")) {
-        throw new ProtocolError("request path must start with /");
-      }
-      if (!isHeaderList(p.headers)) throw new ProtocolError("request headers must be pairs");
-      return { stream, type, payload: { method: p.method, path: p.path, headers: p.headers } };
-    }
-    case "response": {
-      const p = object(parseJson(payload), type);
-      if (typeof p.status !== "number" || !Number.isInteger(p.status)) {
-        throw new ProtocolError("response needs an integer status");
-      }
-      if (p.status < 100 || p.status > 599) throw new ProtocolError("response status out of range");
-      if (!isHeaderList(p.headers)) throw new ProtocolError("response headers must be pairs");
-      return { stream, type, payload: { status: p.status, headers: p.headers } };
-    }
-    case "end": {
-      const p = object(parseJson(payload), type);
-      if (p.error !== undefined && typeof p.error !== "string") {
-        throw new ProtocolError("end error must be a string");
-      }
-      return { stream, type, payload: p.error === undefined ? {} : { error: p.error } };
-    }
-    case "ws-open": {
-      const p = object(parseJson(payload), type);
-      const open: WsOpenPayload = {};
-      if (p.path !== undefined) {
-        if (typeof p.path !== "string" || !p.path.startsWith("/")) {
-          throw new ProtocolError("ws-open path must start with /");
-        }
-        open.path = p.path;
-      }
-      if (p.headers !== undefined) {
-        if (!isHeaderList(p.headers)) throw new ProtocolError("ws-open headers must be pairs");
-        open.headers = p.headers;
-      }
-      if (p.protocols !== undefined) {
-        if (!Array.isArray(p.protocols) || !p.protocols.every((v) => typeof v === "string")) {
-          throw new ProtocolError("ws-open protocols must be strings");
-        }
-        open.protocols = p.protocols;
-      }
-      if (p.accepted !== undefined) {
-        if (typeof p.accepted !== "boolean") throw new ProtocolError("ws-open accepted is a flag");
-        open.accepted = p.accepted;
-      }
-      if (p.protocol !== undefined) {
-        if (typeof p.protocol !== "string") throw new ProtocolError("ws-open protocol is a string");
-        open.protocol = p.protocol;
-      }
-      return { stream, type, payload: open };
-    }
-    case "ws-close": {
-      const p = object(parseJson(payload), type);
-      if (!Number.isInteger(p.code) || typeof p.reason !== "string") {
-        throw new ProtocolError("ws-close needs a code and a reason");
-      }
-      return { stream, type, payload: { code: p.code as number, reason: p.reason } };
-    }
-    case "window": {
-      const p = object(parseJson(payload), type);
-      if (typeof p.bytes !== "number" || !Number.isInteger(p.bytes) || p.bytes <= 0) {
-        throw new ProtocolError("window needs a positive whole number of bytes");
-      }
-      return { stream, type, payload: { bytes: p.bytes } };
-    }
+    case "ws-message":
+      return { stream, type, payload: decodeWsMessage(payload) };
+    case "request":
+      return { stream, type, payload: decodeRequest(jsonPayload(payload, type)) };
+    case "response":
+      return { stream, type, payload: decodeResponse(jsonPayload(payload, type)) };
+    case "end":
+      return { stream, type, payload: decodeEnd(jsonPayload(payload, type)) };
+    case "ws-open":
+      return { stream, type, payload: decodeWsOpen(jsonPayload(payload, type)) };
+    case "ws-close":
+      return { stream, type, payload: decodeWsClose(jsonPayload(payload, type)) };
+    case "window":
+      return { stream, type, payload: decodeWindow(jsonPayload(payload, type)) };
   }
 }
 
@@ -306,6 +373,7 @@ export function decodeFrame(message: string | ArrayBuffer | ArrayBufferView): Fr
  */
 export function* chunk(body: Uint8Array, max = MAX_CHUNK_BYTES): Generator<Uint8Array> {
   if (max <= 0 || max > MAX_CHUNK_BYTES) throw new ProtocolError("chunk size out of range");
+
   for (let offset = 0; offset < body.byteLength; offset += max) {
     yield body.subarray(offset, Math.min(offset + max, body.byteLength));
   }

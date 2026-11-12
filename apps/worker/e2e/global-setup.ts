@@ -19,6 +19,7 @@ export default function setup() {
     cwd: repo,
     stdio: ["ignore", "ignore", "inherit"],
   });
+
   const config = readFileSync(join(workerRoot, "wrangler.jsonc"), "utf8")
     .replace(/^\s*"build":.*$/m, "")
     // Relative paths resolve from the config's own directory: one level deeper.
@@ -29,6 +30,7 @@ export default function setup() {
       '"./node_modules/wrangler/config-schema.json"',
       '"../node_modules/wrangler/config-schema.json"',
     );
+
   execFileSync("mkdir", ["-p", join(workerRoot, ".wrangler")]);
   writeFileSync(e2eConfig, config);
 }

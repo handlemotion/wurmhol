@@ -1,5 +1,6 @@
 // The Worker's API (apps/worker/src/routes/api.ts), as the web app reads it.
 import type { Role, TokenScope, TokenSource } from "@wurmhol/protocol";
+import { z } from "zod/mini";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -9,6 +10,9 @@ export class ApiError extends Error {
   }
 }
 
+/** The Worker's refusals all carry a plain-words `error`. */
+const refusalBody = z.object({ error: z.string() });
+
 export async function api<T>(path: string, init: { method?: string; body?: unknown } = {}) {
   const response = await fetch(path, {
     method: init.method ?? "GET",
@@ -16,18 +20,26 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
     credentials: "same-origin",
   });
+
   const text = await response.text();
-  const body = text ? (JSON.parse(text) as unknown) : null;
+  const body: unknown = text ? JSON.parse(text) : null;
+
   if (!response.ok) {
-    const message = (body as { error?: string } | null)?.error ?? `HTTP ${response.status}`;
-    throw new ApiError(response.status, message);
+    const refusal = refusalBody.safeParse(body);
+    throw new ApiError(
+      response.status,
+      refusal.success ? refusal.data.error : `HTTP ${response.status}`,
+    );
   }
+
+  // SAFETY: `path` is one of the Worker's routes, built and deployed with this app; each caller
+  // names the answer type that route sends.
   return body as T;
 }
 
 /** The Worker answered 401: no one is signed in. */
-export function isSignedOut(error: unknown) {
-  return error instanceof ApiError && error.status === 401;
+export function isSignedOut(cause: unknown) {
+  return cause instanceof ApiError && cause.status === 401;
 }
 
 /** Sends the browser to sign in, and back to this page after. */

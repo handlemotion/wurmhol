@@ -14,25 +14,37 @@ import { RESERVED_PREFIX } from "../viewer.ts";
 export const open = new Hono<AppEnv>().get("/", async (c) => {
   const shareId = c.req.query("share") ?? "";
   const next = sameOriginPath(c.req.query("next"));
+
   if (!SHARE_ID.test(shareId)) return errorPage(404, "This pipe has ended.");
   const share = await findShare(c.var.db, shareId);
+
   // An embedded tunnel's session is no org pipe: membership never opens it (ADR 0032).
   if (!share || share.endedAt || share.tunnelId) return errorPage(410, "This pipe has ended.");
 
   // The custom host the viewer came from survives the trip through the login page; it is checked
   // only at the end (`viewerOrigin`), so a crafted one is dropped there, never followed.
   const host = customHostname(c.req.query("host") ?? "");
-  const here = `/open?${new URLSearchParams({ share: shareId, next, ...(host ? { host } : {}) })}`;
+  const hereParams = new URLSearchParams({ share: shareId, next });
+
+  if (host) hereParams.set("host", host);
+  const here = `/open?${hereParams}`;
+
   const login = (reason?: string) => {
     const params = new URLSearchParams({ next: here });
+
     if (reason) params.set("reason", reason);
+
     return c.redirect(`/login?${params}`, 302);
   };
+
   const session = await resolveSession(c);
+
   if (!session) return login();
+
   // Any of the user's orgs may own it, not only the active one.
   if (!(await findMember(c.var.db, session.user.id, share.orgId))) return login("not-member");
   const stub = shareStub(c.env, shareId);
+
   // Its starter named who may open it (`--only`), and this member is not one of them.
   if (!(await stub.mayView(session.user.id))) return login("not-listed");
 
@@ -44,5 +56,6 @@ export const open = new Hono<AppEnv>().get("/", async (c) => {
   target.searchParams.set("next", next);
   c.header("cache-control", "no-store");
   c.header("referrer-policy", "no-referrer");
+
   return c.redirect(target.toString(), 302);
 });

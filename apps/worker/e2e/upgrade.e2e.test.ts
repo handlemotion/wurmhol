@@ -1,7 +1,8 @@
 // A Worker deploy keeps every Durable Object's storage: wall cards written by the previous
 // Worker reach walls served by the new one, which must still get cards in the current shape.
 import { deserialize, serialize } from "node:v8";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   browserSocket,
   cliEnv,
@@ -17,20 +18,28 @@ import {
   waitFor,
 } from "./support.ts";
 
+/** A wall card as an Org object stores it: any structured-clone fields, kept as they are. */
+const storedCard = z.looseObject({});
+
+type StoredCard = z.infer<typeof storedCard>;
+
 /** Rewrites every stored wall card in `file` (an Org object's SQLite) through `change`. */
-function rewriteCards(file: string, change: (card: Record<string, unknown>) => void) {
+function rewriteCards(file: string, change: (card: StoredCard) => void) {
   const db = openSqlite(file);
+
   try {
-    const rows = db.prepare("select key, value from _cf_KV where key like 'share:%'").all() as {
-      key: string;
-      value: Uint8Array;
-    }[];
+    const rows = z
+      .array(z.object({ key: z.string(), value: z.instanceof(Uint8Array) }))
+      .parse(db.prepare("select key, value from _cf_KV where key like 'share:%'").all());
+
     const update = db.prepare("update _cf_KV set value = ? where key = ?");
+
     for (const row of rows) {
-      const card = deserialize(row.value) as Record<string, unknown>;
+      const card = storedCard.parse(deserialize(row.value));
       change(card);
       update.run(serialize(card), row.key);
     }
+
     return rows.length;
   } finally {
     db.close();
@@ -66,14 +75,18 @@ describe("wall cards stored by an older Worker", () => {
     expect(rewritten).toBe(1);
 
     const events: { type: string; shares?: { id: string; views?: unknown }[] }[] = [];
+
     const wall = browserSocket(`${stack.url}/api/live`, [], {
       cookie: ada.cookie,
       origin: stack.url,
     });
+
     wall.on("message", (data) => events.push(JSON.parse(data.toString())));
+
     const snapshot = await waitFor(() => events.find((e) => e.type === "snapshot"), {
       what: "the snapshot",
     });
+
     wall.close();
     await local.close();
 

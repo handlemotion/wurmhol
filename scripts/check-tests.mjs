@@ -19,11 +19,13 @@ const problems = [];
 
 for (const file of files) {
   let source;
+
   try {
     source = readFileSync(file, "utf8");
   } catch {
     continue; // deleted in the working tree
   }
+
   const e2e = /\.e2e\.test\./.test(file);
 
   if (!e2e && !UNIT_TEST_ROOTS.some((root) => file.startsWith(root))) {
@@ -31,12 +33,14 @@ for (const file of files) {
       `${file}: unit tests are allowed only in ${UNIT_TEST_ROOTS.join(", ")}; prove this behavior in a *.e2e.test.ts instead`,
     );
   }
+
   if (
     e2e &&
     /\bvi\.(mock|doMock|stubGlobal)\(|mockImplementation\(|mockResolvedValue\(/.test(source)
   ) {
     problems.push(`${file}: e2e tests run against real dependencies and must not mock`);
   }
+
   if (/\b(it|test|describe)\.(only|skip|todo)\b|\b(fit|xit|xdescribe)\(/.test(source)) {
     problems.push(`${file}: no .only, .skip, or .todo`);
   }

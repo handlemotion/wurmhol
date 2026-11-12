@@ -3,6 +3,7 @@ import { nodeTransport } from "./node.ts";
 import type { Transport } from "./types.ts";
 
 export type { ConnectOptions, Handshake, Transport, WsConnection } from "./types.ts";
+
 export { HandshakeRefused, WS_OPEN } from "./types.ts";
 
 /** Which WebSocket implementation to use; `"auto"` picks by runtime (ADR 0030). */
@@ -12,9 +13,10 @@ export type Runtime = "node" | "bun" | "deno";
 
 /** The JavaScript runtime this code runs on. */
 export function runtime(): Runtime {
-  const scope = globalThis as { Bun?: unknown; Deno?: unknown };
-  if (scope.Bun !== undefined) return "bun";
-  if (scope.Deno !== undefined) return "deno";
+  if ("Bun" in globalThis) return "bun";
+
+  if ("Deno" in globalThis) return "deno";
+
   return "node";
 }
 
@@ -25,6 +27,8 @@ export function runtime(): Runtime {
  */
 export function selectTransport(choice: TransportChoice = "auto"): Transport {
   if (choice === "node") return nodeTransport;
+
   if (choice === "builtin") return builtinTransport;
+
   return runtime() === "node" ? nodeTransport : builtinTransport;
 }

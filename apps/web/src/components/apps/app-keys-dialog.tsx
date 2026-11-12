@@ -47,11 +47,13 @@ export function AppKeysDialog({
   const [name, setName] = useState("");
   const [expiresIn, setExpiresIn] = useState<string>("never");
   const [permissions, setPermissions] = useState<AppPermission[]>(PERMISSIONS.map((p) => p.id));
+
   const reset = () => {
     setName("");
     setExpiresIn("never");
     setPermissions(PERMISSIONS.map((p) => p.id));
   };
+
   const toggle = (id: AppPermission, on: boolean) =>
     setPermissions((current) => (on ? [...current, id] : current.filter((p) => p !== id)));
 
@@ -63,6 +65,7 @@ export function AppKeysDialog({
           create.reset();
           reset();
         }
+
         onOpenChange(open);
       }}
       size="lg"
@@ -119,6 +122,7 @@ export function AppKeysDialog({
             selectedKeys={[expiresIn]}
             onSelectionChange={(selected) => {
               const [key] = selected;
+
               if (key !== undefined) setExpiresIn(String(key));
             }}
             className="w-full sm:w-auto"
@@ -178,9 +182,7 @@ export function AppKeysDialog({
 function can(key: AppKey) {
   return key.permissions.length === PERMISSIONS.length
     ? "Everything"
-    : PERMISSIONS.filter((p) => key.permissions.includes(p.id))
-        .map((p) => p.label)
-        .join(", ");
+    : PERMISSIONS.flatMap((p) => (key.permissions.includes(p.id) ? [p.label] : [])).join(", ");
 }
 
 /** One key: its name, a quiet line of what it may do, expiry and use, and Revoke. */
@@ -196,6 +198,7 @@ function Row({
   onRevoke: () => void;
 }) {
   const used = appKey.lastUsedAt ? `Used ${ago(appKey.lastUsedAt, now)}` : "Never used";
+
   return (
     <li className="flex items-center justify-between gap-3 py-2.5">
       <div className="flex min-w-0 flex-col">

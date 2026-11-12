@@ -22,8 +22,10 @@ export async function detectSource(
     git(cwd, ["rev-parse", "--verify", "--quiet", "HEAD"]),
     git(cwd, ["remote", "get-url", "origin"]),
   ]);
+
   const repo = remote ? repoFromRemote(remote) : null;
   const agent = agentFromEnv(env);
+
   const source: Partial<PipeSource> = {
     repoHost: repo?.repoHost ?? null,
     repo: repo?.repo ?? null,
@@ -32,5 +34,6 @@ export async function detectSource(
     agent: agent?.agent ?? null,
     agentUrl: agent?.agentUrl ?? null,
   };
+
   return source;
 }

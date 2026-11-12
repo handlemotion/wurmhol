@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "doppler run -p wurmhol -c dev_worker --mount .dev.vars --format env -- wrangler dev",
     "cf-typegen": "wrangler types",
-    "test:e2e": "vitest run --config vitest.e2e.mts",
+    "test:e2e": "vp test run --config vitest.e2e.mts",
     "deploy:cloudflare": "node scripts/deploy-cloudflare.mjs"
   },
   "dependencies": {
@@ -30,7 +30,8 @@
     "playwright": "1.65.0",
     "stripe": "^23.1.0",
     "undici": "^8.12.4",
-    "vite": "^8.3.7",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
     "wrangler": "^4.160.0",
     "ws": "^8.22.2",
     "wurmhol": "workspace:*"

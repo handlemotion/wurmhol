@@ -8,7 +8,7 @@ import {
 import { app } from "./app.ts";
 import { isEmbedTunnelName, SHARE_ID } from "@wurmhol/protocol";
 import { hostRole, loadConfig } from "./env.ts";
-import { createLogger } from "./log.ts";
+import { createLogger, loggedError } from "./log.ts";
 import { handleRelay } from "./oauth-relay.ts";
 import { handleEmbeddedHost } from "./embedded-host.ts";
 import { errorPage } from "./pages.ts";
@@ -16,8 +16,11 @@ import { domainDeps, refreshDomains } from "./domains/service.ts";
 import { handleShareHost } from "./viewer.ts";
 
 export type { AppType } from "./app.ts";
+
 export { Org } from "./org-do.ts";
+
 export { RateLimiter } from "./rate-limiter.ts";
+
 export { Share } from "./share-do.ts";
 
 /**
@@ -46,16 +49,21 @@ export default {
   async fetch(request, env, ctx) {
     const config = loadConfig(env);
     const host = hostRole(config, request.headers.get("host"));
+
     if (host.role === "alias") {
       const url = new URL(request.url);
       const target = new URL(`${url.pathname}${url.search}`, config.auth.baseURL);
+
       return Response.redirect(target.toString(), 301);
     }
+
     if (host.role === "connect") {
       const { pathname } = new URL(request.url);
+
       if (CLI_PATHS.has(pathname) || /^\/v1\/(pipes|embed|domains)(\/|$)/.test(pathname)) {
         return app.fetch(request, env, ctx);
       }
+
       return Response.json(
         {
           error: "not found",
@@ -64,37 +72,55 @@ export default {
         { status: 404 },
       );
     }
+
     if (host.role === "app") return app.fetch(request, env, ctx);
+
     if (host.role === "oauth") return handleRelay(request, env, config);
+
     if (host.role === "custom") {
       // A customer's hostname (ADR 0033): routed only when the org proved it owns it and
       // Cloudflare serves it, to its pipe name's open pipe. Anything else is not found.
       try {
         const db = createDb(env.DB);
         const domain = await findActiveDomain(db, host.hostname);
+
         if (!domain || (await isOrgBlocked(db, domain.orgId))) {
           return errorPage(404, "This address is not connected to a pipe.");
         }
+
         const open = await findOpenShareByName(db, domain.pipeName);
+
         return await handleShareHost(request, env, open?.id ?? "", host.hostname);
       } catch (error) {
-        createLogger({ component: "viewer" }).error("viewer.error", { error, host: host.hostname });
+        createLogger({ component: "viewer" }).error("viewer.error", {
+          error: loggedError(error),
+          host: host.hostname,
+        });
+
         return new Response("internal error", { status: 500 });
       }
     }
+
     let shareId = host.label;
+
     try {
       // A named pipe (ADR 0009): its host serves whichever of the name's pipes is open.
       if (shareId && !SHARE_ID.test(shareId)) {
         shareId = (await findOpenShareByName(createDb(env.DB), shareId))?.id ?? "";
       }
+
       // An embedded tunnel's host (ADR 0032): grants, never a member's sign-in.
       if (isEmbedTunnelName(host.label ?? "")) {
         return await handleEmbeddedHost(request, env, shareId);
       }
+
       return await handleShareHost(request, env, shareId);
     } catch (error) {
-      createLogger({ component: "viewer" }).error("viewer.error", { error, shareId });
+      createLogger({ component: "viewer" }).error("viewer.error", {
+        error: loggedError(error),
+        shareId,
+      });
+
       return new Response("internal error", { status: 500 });
     }
   },
@@ -103,16 +129,19 @@ export default {
   async scheduled(controller, env) {
     const config = loadConfig(env);
     const now = new Date(controller.scheduledTime);
+
     const pruned = await pruneExpired(createDb(env.DB), {
       now,
       retentionDays: config.RETENTION_DAYS,
     });
+
     createLogger({ component: "retention" }).info("retention.pruned", {
       asOf: now.toISOString(),
       ...pruned,
     });
     // Custom domains (ADR 0033): expire the unfinished, and notice a CNAME that went away.
     const domains = domainDeps(config, createDb(env.DB), env);
+
     if (domains) await refreshDomains(domains);
   },
 } satisfies ExportedHandler<Env>;

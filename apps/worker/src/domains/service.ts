@@ -23,19 +23,25 @@ import {
   PIPE_NAME_RULE,
   pipeName,
 } from "@wurmhol/protocol";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { type Config, customDomainOrigin, isServedHost, reservedPipeNames } from "../env.ts";
-import { createLogger } from "../log.ts";
+import { createLogger, loggedError } from "../log.ts";
 import { refreshPipeUrl } from "../share-url.ts";
 import { orgPlan } from "../plan.ts";
 import { DnsError, lookupTxt } from "./dns.ts";
-import { cloudflareProvider, type HostnameProvider, ProviderError } from "./provider.ts";
+import {
+  cloudflareProvider,
+  type HostnameProvider,
+  ProviderError,
+  type ProviderHostname,
+} from "./provider.ts";
 
 /** A refusal with the status, the machine code and the one line that fixes it (ADR 0033). */
 export class DomainRefusal extends Error {
-  readonly status: number;
+  readonly status: ContentfulStatusCode;
   readonly code: string;
   readonly fix: string;
-  constructor(status: number, code: string, error: string, fix: string) {
+  constructor(status: ContentfulStatusCode, code: string, error: string, fix: string) {
     super(error);
     this.status = status;
     this.code = code;
@@ -62,7 +68,9 @@ export interface DomainDeps {
  */
 export function domainDeps(config: Config, db: Db, env?: Env): DomainDeps | null {
   const custom = config.customDomains;
+
   if (!custom) return null;
+
   return {
     db,
     config,
@@ -84,31 +92,33 @@ async function noteUrlChange(deps: DomainDeps, row: DomainRow) {
     await deps.urlChanged?.(row);
   } catch (error) {
     createLogger({ component: "domains" }).warn("domain.url_refresh_failed", {
-      error,
+      error: loggedError(error),
       orgId: row.orgId,
     });
   }
 }
 
 /** Wraps a provider or DNS failure as the refusal a caller sees. */
-function unavailable(error: unknown): never {
-  if (error instanceof DnsError) {
+function unavailable(cause: unknown): never {
+  if (cause instanceof DnsError) {
     throw new DomainRefusal(
       503,
       "dns_unavailable",
-      error.message,
+      cause.message,
       "Try again in a minute: nothing was changed.",
     );
   }
-  if (error instanceof ProviderError) {
+
+  if (cause instanceof ProviderError) {
     throw new DomainRefusal(
       502,
       "provider_error",
-      error.message,
+      cause.message,
       "Try again in a minute. If it keeps failing, tell the operator.",
     );
   }
-  throw error;
+
+  throw cause;
 }
 
 const ERROR_TEXT: Record<DomainErrorCode, { message: string; fix: (hostname: string) => string }> =
@@ -131,6 +141,7 @@ const ERROR_TEXT: Record<DomainErrorCode, { message: string; fix: (hostname: str
 /** A domain as the API returns it. */
 export function domainView(config: Config, row: DomainRow): Domain {
   const target = config.customDomains?.target ?? "";
+
   const records: DomainRecord[] = [
     {
       type: "TXT",
@@ -147,7 +158,9 @@ export function domainView(config: Config, row: DomainRow): Domain {
       done: row.providerStatus === "active",
     },
   ];
+
   const code = row.errorCode;
+
   return {
     hostname: row.hostname,
     pipe: row.pipeName,
@@ -171,6 +184,7 @@ export function domainView(config: Config, row: DomainRow): Domain {
 
 function randomChallenge() {
   const bytes = crypto.getRandomValues(new Uint8Array(24));
+
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
@@ -183,6 +197,7 @@ export async function list(deps: DomainDeps, orgId: string) {
 export async function get(deps: DomainDeps, orgId: string, hostname: string) {
   const host = customHostname(hostname);
   const row = host ? await findDomain(deps.db, host) : null;
+
   if (!row || row.orgId !== orgId) {
     throw new DomainRefusal(
       404,
@@ -191,6 +206,7 @@ export async function get(deps: DomainDeps, orgId: string, hostname: string) {
       "List the org's domains with GET /v1/domains.",
     );
   }
+
   return row;
 }
 
@@ -206,6 +222,7 @@ export async function add(
 ) {
   const { db, config, provider } = deps;
   const hostname = customHostname(input.hostname);
+
   if (!hostname) {
     throw new DomainRefusal(
       400,
@@ -214,7 +231,9 @@ export async function add(
       `Use ${CUSTOM_HOSTNAME_RULE}.`,
     );
   }
+
   const name = pipeName(input.pipe);
+
   if (!name) {
     throw new DomainRefusal(
       400,
@@ -223,6 +242,7 @@ export async function add(
       `Pick a pipe name of ${PIPE_NAME_RULE}.`,
     );
   }
+
   if (isServedHost(config, hostname)) {
     throw new DomainRefusal(
       409,
@@ -231,6 +251,7 @@ export async function add(
       "Pick a hostname on a domain you own.",
     );
   }
+
   if (reservedPipeNames(config).includes(name)) {
     throw new DomainRefusal(
       409,
@@ -241,6 +262,7 @@ export async function add(
   }
 
   const plan = await orgPlan(db, config, orgId);
+
   if (!plan) {
     throw new DomainRefusal(
       402,
@@ -259,6 +281,7 @@ export async function add(
     expiresAt: new Date(Date.now() + config.customDomains!.pendingSeconds * 1000),
     limit: plan.customDomains,
   });
+
   if (!added.ok) {
     if (added.reason === "domain_limit") {
       throw new DomainRefusal(
@@ -272,6 +295,7 @@ export async function add(
           : "Remove a domain you no longer use.",
       );
     }
+
     throw added.reason === "pipe_taken"
       ? new DomainRefusal(
           409,
@@ -286,28 +310,124 @@ export async function add(
           "Pick another hostname, or remove it from the org that has it.",
         );
   }
+
   if (!added.created) return added.domain;
 
   const claim = added.domain;
   let made;
+
   try {
     made = await provider.create(hostname);
   } catch (error) {
     // Nothing to keep: the org can retry without a half-made domain, or a name, in the way.
     await deleteDomain(db, claim);
+
     if (added.nameClaimed) await releasePipeName(db, orgId, name);
+
     return unavailable(error);
   }
+
   const updated = await updateDomain(db, claim, {
     providerId: made.id,
     providerStatus: made.status,
     providerSslStatus: made.ssl,
     checkedAt: new Date(),
   });
+
   if (updated) return updated;
   // Removed while Cloudflare made it: the hostname made for it has no row to remove it later.
   await provider.delete(made.id).catch(() => {});
+
   return claim;
+}
+
+/** Where the provider left a domain this check: its hostname, its id, and the state they mean. */
+interface ProviderOutcome {
+  snapshot: ProviderHostname | null;
+  providerId: string | null;
+  facts: ReturnType<typeof nextDomainState>;
+}
+
+/**
+ * Asks the provider about the domain's hostname, makes it again when `nextDomainState` says so,
+ * and frees it when the domain failed for good.
+ */
+async function consultProvider(
+  provider: HostnameProvider,
+  row: DomainRow,
+  verifiedAt: Date | null,
+  now: Date,
+  nudge: boolean,
+): Promise<ProviderOutcome> {
+  let providerId = row.providerId;
+  let snapshot: ProviderHostname | null = null;
+
+  if (providerId) {
+    snapshot =
+      nudge && verifiedAt && row.state !== "active"
+        ? await provider.recheck(providerId, row.hostname)
+        : await provider.get(providerId);
+  }
+
+  const expired = row.expiresAt !== null && row.expiresAt <= now;
+  let facts = nextDomainState({ ownership: verifiedAt !== null, hostname: snapshot, expired });
+
+  if (facts.recreate && verifiedAt && facts.state !== "failed") {
+    snapshot = await provider.create(row.hostname);
+    providerId = snapshot.id;
+    facts = nextDomainState({ ownership: true, hostname: snapshot, expired });
+  }
+
+  // A domain that will not come back (expired, blocked, or refused a certificate) frees its
+  // Cloudflare hostname now: the daily job never looks at a failed one again.
+  if (facts.state === "failed" && providerId) {
+    await provider.delete(providerId);
+    providerId = null;
+  }
+
+  return { snapshot, providerId, facts };
+}
+
+/** When the domain's pending clock runs out: active is not on one, and falling out of it starts one again. */
+function nextExpiry(row: DomainRow, state: DomainRow["state"], now: Date, pendingSeconds: number) {
+  if (state === "active") return null;
+
+  if (row.state === "active") return new Date(now.getTime() + pendingSeconds * 1000);
+
+  return row.expiresAt;
+}
+
+/**
+ * What a check that started from `row`, moved it to `state` and wrote `updated` tells others, and
+ * leaves behind.
+ */
+async function settleCheck(
+  deps: DomainDeps,
+  row: DomainRow,
+  state: DomainRow["state"],
+  updated: DomainRow | null,
+  providerId: string | null,
+) {
+  const becameActive = state === "active";
+  const lostActive = row.state === "active" && state !== "active";
+
+  if (updated && (becameActive || lostActive) && row.state !== updated.state) {
+    await noteUrlChange(deps, updated);
+  }
+
+  if (updated && updated.state !== row.state) {
+    createLogger({ component: "domains" }).info("domain.state", {
+      orgId: row.orgId,
+      from: row.state,
+      to: updated.state,
+      error: updated.errorCode,
+    });
+  }
+
+  if (!updated && providerId && providerId !== row.providerId) {
+    // A hostname this check made for a claim that is gone: nothing else would remove it.
+    await deps.provider.delete(providerId).catch(() => {});
+  }
 }
 
 /**
@@ -319,44 +439,22 @@ export async function check(deps: DomainDeps, row: DomainRow, options: { nudge: 
   const { db, config, provider } = deps;
   const now = new Date();
   let verifiedAt = row.verifiedAt;
+
   if (!verifiedAt) {
     const values = await deps.txt(ownershipRecordName(row.hostname)).catch(unavailable);
+
     if (values.includes(ownershipRecordValue(row.challenge))) verifiedAt = now;
   }
 
-  let providerId = row.providerId;
-  let snapshot = null;
   try {
-    if (providerId) {
-      snapshot =
-        options.nudge && verifiedAt && row.state !== "active"
-          ? await provider.recheck(providerId, row.hostname)
-          : await provider.get(providerId);
-    }
-    let facts = nextDomainState({
-      ownership: verifiedAt !== null,
-      hostname: snapshot,
-      expired: row.expiresAt !== null && row.expiresAt <= now,
-    });
-    if (facts.recreate && verifiedAt && facts.state !== "failed") {
-      snapshot = await provider.create(row.hostname);
-      providerId = snapshot.id;
-      facts = nextDomainState({
-        ownership: true,
-        hostname: snapshot,
-        expired: row.expiresAt !== null && row.expiresAt <= now,
-      });
-    }
+    const { snapshot, providerId, facts } = await consultProvider(
+      provider,
+      row,
+      verifiedAt,
+      now,
+      options.nudge,
+    );
 
-    // A domain that will not come back (expired, blocked, or refused a certificate) frees its
-    // Cloudflare hostname now: the daily job never looks at a failed one again.
-    if (facts.state === "failed" && providerId) {
-      await provider.delete(providerId);
-      providerId = null;
-    }
-
-    const becameActive = facts.state === "active";
-    const lostActive = row.state === "active" && facts.state !== "active";
     // Written only to the claim this check started from: one removed meanwhile, or removed and
     // added again by anyone, is not touched, and the result is dropped.
     const updated = await updateDomain(db, row, {
@@ -367,30 +465,13 @@ export async function check(deps: DomainDeps, row: DomainRow, options: { nudge: 
       providerId,
       providerStatus: snapshot?.status ?? null,
       providerSslStatus: snapshot?.ssl ?? null,
-      activatedAt: becameActive ? (row.activatedAt ?? now) : row.activatedAt,
-      // Active is not on a clock; falling out of it starts one again.
-      expiresAt: becameActive
-        ? null
-        : lostActive
-          ? new Date(now.getTime() + config.customDomains!.pendingSeconds * 1000)
-          : row.expiresAt,
+      activatedAt: facts.state === "active" ? (row.activatedAt ?? now) : row.activatedAt,
+      expiresAt: nextExpiry(row, facts.state, now, config.customDomains!.pendingSeconds),
       checkedAt: now,
     });
-    if (updated && (becameActive || lostActive) && row.state !== updated.state) {
-      await noteUrlChange(deps, updated);
-    }
-    if (updated && updated.state !== row.state) {
-      createLogger({ component: "domains" }).info("domain.state", {
-        orgId: row.orgId,
-        from: row.state,
-        to: updated.state,
-        error: updated.errorCode,
-      });
-    }
-    if (!updated && providerId && providerId !== row.providerId) {
-      // A hostname this check made for a claim that is gone: nothing else would remove it.
-      await provider.delete(providerId).catch(() => {});
-    }
+
+    await settleCheck(deps, row, facts.state, updated, providerId);
+
     return updated ?? row;
   } catch (error) {
     return unavailable(error);
@@ -406,7 +487,9 @@ export async function remove(deps: DomainDeps, row: DomainRow) {
       unavailable(error);
     }
   }
+
   await deleteDomain(deps.db, row);
+
   if (row.state === "active") await noteUrlChange(deps, row);
 }
 
@@ -419,12 +502,18 @@ export async function remove(deps: DomainDeps, row: DomainRow) {
 export async function releaseOrgDomains(deps: DomainDeps, orgId: string) {
   for (const row of await listDomains(deps.db, orgId)) {
     if (!row.providerId) continue;
+
     try {
       await deps.provider.delete(row.providerId);
     } catch (error) {
-      createLogger({ component: "domains" }).error("domain.release_failed", { error, orgId });
+      createLogger({ component: "domains" }).error("domain.release_failed", {
+        error: loggedError(error),
+        orgId,
+      });
+
       return unavailable(error);
     }
+
     await updateDomain(deps.db, row, { providerId: null });
   }
 }
@@ -433,6 +522,7 @@ export async function releaseOrgDomains(deps: DomainDeps, orgId: string) {
 export async function refreshDomains(deps: DomainDeps, limit = 100) {
   const log = createLogger({ component: "domains" });
   let checked = 0;
+
   for (const row of await domainsToCheck(deps.db, limit)) {
     try {
       await check(deps, row, { nudge: false });
@@ -440,9 +530,10 @@ export async function refreshDomains(deps: DomainDeps, limit = 100) {
     } catch (error) {
       // One unreachable resolver or a Cloudflare error must not stop the rest, nor keep its
       // place at the front of the queue: it goes to the back like a domain that was checked.
-      log.warn("domain.check_failed", { error, orgId: row.orgId });
+      log.warn("domain.check_failed", { error: loggedError(error), orgId: row.orgId });
       await updateDomain(deps.db, row, { checkedAt: new Date() }).catch(() => {});
     }
   }
+
   log.info("domain.refreshed", { checked });
 }

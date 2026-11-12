@@ -13,6 +13,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { createStripeClient, METER_EVENT_NAME } from "@wurmhol/auth";
 import { loadConfig } from "./env.ts";
+import { z } from "zod";
 import { createLogger } from "./log.ts";
 import {
   type Machine,
@@ -100,6 +101,7 @@ interface MeterOutbox {
 /** How soon pending requests go to Stripe, and the longest wait between retries. */
 const METER_FLUSH_MS = 60_000;
 const METER_RETRY_MAX_MS = 60 * 60_000;
+
 /**
  * Stripe holds an identifier unique for at least 24 hours. An event still failing after this
  * long is dropped and logged: billing a request twice is worse than missing it.
@@ -110,6 +112,13 @@ const METER_GIVE_UP_MS = 20 * 60 * 60_000;
 interface MachineAttachment extends Machine {
   userId: string;
   tokenId: string;
+}
+
+/** The attachment of a socket tagged `machine`. */
+function machineOf(socket: WebSocket): MachineAttachment {
+  // SAFETY: only `fetch` and `webSocketMessage` attach to a `machine` socket, and both store a
+  // `MachineAttachment`; callers pass sockets of that tag only.
+  return socket.deserializeAttachment() as MachineAttachment;
 }
 
 /** The headers `/host` and `/api/machines/live` hand the Org object; never a client's own. */
@@ -134,12 +143,19 @@ export function orgStub(env: Env, orgId: string) {
 /** The upgrade request to forward to the Org object, carrying only the socket fields set here. */
 export function toOrg(raw: Request, socket: OrgSocket): Request {
   const headers = new Headers(raw.headers);
+
   for (const name of Object.values(ORG_SOCKET_HEADERS)) headers.delete(name);
+
   if (socket.kind !== "wall") {
-    for (const [key, value] of Object.entries(socket)) {
-      headers.set(ORG_SOCKET_HEADERS[key as keyof typeof ORG_SOCKET_HEADERS], value);
-    }
+    headers.set(ORG_SOCKET_HEADERS.kind, socket.kind);
+    headers.set(ORG_SOCKET_HEADERS.userId, socket.userId);
   }
+
+  if (socket.kind === "machine") {
+    headers.set(ORG_SOCKET_HEADERS.tokenId, socket.tokenId);
+    headers.set(ORG_SOCKET_HEADERS.name, socket.name);
+  }
+
   return new Request(raw, { headers });
 }
 
@@ -161,13 +177,24 @@ function month(at = Date.now()) {
  */
 function windowOf(limits: Pick<UsageLimits, "period"> | null, at = Date.now()) {
   const period = limits?.period;
+
   if (!period) return month(at);
+
   return `period:${at >= period.end ? period.end : period.start}`;
 }
 
+const stripeError = z.object({ code: z.string() });
+
+/** The code of a Stripe API error, or null for any other failure. */
+function stripeErrorCode(cause: unknown) {
+  const parsed = stripeError.safeParse(cause);
+
+  return parsed.success ? parsed.data.code : null;
+}
+
 /** Whether Stripe already has this event: its identifier was used. */
-function isDuplicate(error: unknown) {
-  return /duplicate/i.test(String((error as { code?: string })?.code ?? ""));
+function isDuplicate(cause: unknown) {
+  return /duplicate/i.test(stripeErrorCode(cause) ?? "");
 }
 
 export class Org extends DurableObject<Env> {
@@ -183,9 +210,11 @@ export class Org extends DurableObject<Env> {
 
   #broadcast(event: WallEvent) {
     const message = JSON.stringify(event);
+
     // Walls are the untagged sockets; machines and their owners' cards carry tags.
     for (const socket of this.ctx.getWebSockets()) {
       if (this.ctx.getTags(socket).length) continue;
+
       try {
         socket.send(message);
       } catch {
@@ -201,6 +230,7 @@ export class Org extends DurableObject<Env> {
   /** This window's usage. `month` is the window's key (a calendar month, or a billing period). */
   #usage(limits: Pick<UsageLimits, "period"> | null = this.#limits()): Usage {
     const stored = this.ctx.storage.kv.get<{ month: string } & Partial<Usage>>("usage");
+
     return stored && stored.month === windowOf(limits)
       ? { bytes: stored.bytes ?? 0, requests: stored.requests ?? 0 }
       : { bytes: 0, requests: 0 };
@@ -226,17 +256,22 @@ export class Org extends DurableObject<Env> {
   reserve(card: ShareCard, limits: StoredLimits): Reservation {
     this.setLimits(limits);
     const usage = this.#usage(limits);
+
     if (usage.bytes >= limits.monthlyBytes) {
       return { ok: false, reason: "monthly_limit", limit: limits.monthlyBytes };
     }
+
     if (usage.requests >= limits.monthlyRequests) {
       return { ok: false, reason: "request_limit", limit: limits.monthlyRequests };
     }
+
     if (this.#cards().length >= limits.active) {
       return { ok: false, reason: "active_limit", limit: limits.active };
     }
+
     this.ctx.storage.kv.put(`share:${card.id}`, card);
     this.#broadcast({ type: "share.started", share: card });
+
     return { ok: true };
   }
 
@@ -256,27 +291,37 @@ export class Org extends DurableObject<Env> {
     this.setAppLimits(session.appId, app);
     this.setTenantLimits(session.tenantId, tenant);
     const usage = this.#usage(limits);
+
     if (usage.bytes >= limits.monthlyBytes) {
       return { ok: false, reason: "monthly_limit", limit: limits.monthlyBytes };
     }
+
     if (usage.requests >= limits.monthlyRequests) {
       return { ok: false, reason: "request_limit", limit: limits.monthlyRequests };
     }
+
     const over = this.#embedOver(session);
+
     if (over) return { ok: false, reason: "request_limit", limit: over.limit, scope: over.scope };
     const open = this.listEmbedded();
+
     if (open.length >= limits.active) {
       return { ok: false, reason: "active_limit", limit: limits.active };
     }
+
     const own = this.#tenantLimits(session.appId, session.tenantId);
     const appActive = this.#appLimits(session.appId)?.activeTunnels ?? null;
+
     if (appActive !== null && open.filter((s) => s.appId === session.appId).length >= appActive) {
       return { ok: false, reason: "active_limit", limit: appActive, scope: "app" };
     }
+
     if (open.filter((s) => s.tenantId === session.tenantId).length >= own.activeTunnels) {
       return { ok: false, reason: "active_limit", limit: own.activeTunnels, scope: "tenant" };
     }
+
     this.ctx.storage.kv.put(`embed:${session.id}`, session);
+
     return { ok: true };
   }
 
@@ -298,6 +343,7 @@ export class Org extends DurableObject<Env> {
   #tenantLimits(appId: string, tenantId: string) {
     const app = this.#appLimits(appId);
     const own = this.ctx.storage.kv.get<TenantLimits>(`limits:tenant:${tenantId}`);
+
     return {
       activeTunnels: own?.activeTunnels ?? app?.tenantActiveTunnels ?? TENANT_ACTIVE_DEFAULT,
       monthlyRequests: own?.monthlyRequests ?? app?.tenantMonthlyRequests ?? null,
@@ -307,6 +353,7 @@ export class Org extends DurableObject<Env> {
   /** An application's or tenant's usage in the org's current window. */
   #scoped(kind: "app" | "tenant", id: string): Usage {
     const stored = this.ctx.storage.kv.get<{ month: string } & Usage>(`usage:${kind}:${id}`);
+
     return stored && stored.month === windowOf(this.#limits())
       ? { bytes: stored.bytes, requests: stored.requests }
       : { bytes: 0, requests: 0 };
@@ -315,13 +362,17 @@ export class Org extends DurableObject<Env> {
   /** Whose monthly request limit a session's application or tenant has reached, if any. */
   #embedOver(session: Pick<EmbeddedSession, "appId" | "tenantId">) {
     const app = this.#appLimits(session.appId)?.monthlyRequests ?? null;
+
     if (app !== null && this.#scoped("app", session.appId).requests >= app) {
       return { scope: "app" as const, limit: app };
     }
+
     const tenant = this.#tenantLimits(session.appId, session.tenantId).monthlyRequests;
+
     if (tenant !== null && this.#scoped("tenant", session.tenantId).requests >= tenant) {
       return { scope: "tenant" as const, limit: tenant };
     }
+
     return null;
   }
 
@@ -332,6 +383,7 @@ export class Org extends DurableObject<Env> {
   embedUsage(appId: string, tenantIds: string[] = []) {
     const open = this.listEmbedded();
     const app = this.#appLimits(appId);
+
     return {
       month: windowOf(this.#limits()),
       app: {
@@ -365,6 +417,7 @@ export class Org extends DurableObject<Env> {
   /** Changes a card (title, favicon, last request, live or away). A removed card stays removed. */
   update(id: string, patch: Partial<Omit<ShareCard, "id">>) {
     const card = this.ctx.storage.kv.get<ShareCard>(`share:${id}`);
+
     if (!card) return;
     const next = newShareCard({ ...card, ...patch });
     this.ctx.storage.kv.put(`share:${id}`, next);
@@ -376,6 +429,7 @@ export class Org extends DurableObject<Env> {
     // Its last batch came before this (the Share object sends them in order, then ends).
     this.ctx.storage.kv.delete(`applied:${id}`);
     this.ctx.storage.kv.delete(`embed:${id}`);
+
     if (!this.ctx.storage.kv.delete(`share:${id}`)) return;
     this.#broadcast({ type: "share.ended", id });
   }
@@ -393,14 +447,18 @@ export class Org extends DurableObject<Env> {
   ) {
     const limits = this.#limits() ?? fallback;
     const usage = this.#usage(limits);
+
     const over = (total: Usage) =>
       this.#over(total, limits) || (embed ? this.#embedOver(embed) !== null : false);
+
     if (batch.seq <= (this.ctx.storage.kv.get<number>(`applied:${shareId}`) ?? 0)) {
       return { ...usage, over: over(usage) };
     }
+
     const total = { bytes: usage.bytes + batch.bytes, requests: usage.requests + batch.requests };
     const window = windowOf(limits);
     this.ctx.storage.kv.put("usage", { month: window, ...total });
+
     if (embed) {
       // Attributed to its application and tenant as well, in the same window (ADR 0032). The
       // org's count above is what Stripe bills; these only attribute it and hold its limits.
@@ -416,8 +474,11 @@ export class Org extends DurableObject<Env> {
         });
       }
     }
+
     this.ctx.storage.kv.put(`applied:${shareId}`, batch.seq);
+
     if (limits.meter && batch.requests > 0) await this.#meter(limits, batch.requests);
+
     return { ...total, over: over(total) };
   }
 
@@ -434,6 +495,7 @@ export class Org extends DurableObject<Env> {
     const entry = pending[key] ?? { customer, value: 0, at: now };
     pending[key] = { customer, value: entry.value + requests, at: now };
     this.ctx.storage.kv.put("meter:pending", pending);
+
     if ((await this.ctx.storage.getAlarm()) === null) {
       await this.ctx.storage.setAlarm(now + METER_FLUSH_MS);
     }
@@ -446,18 +508,24 @@ export class Org extends DurableObject<Env> {
    */
   override async alarm() {
     const key = loadConfig(this.env).auth.billing?.secretKey;
+
     if (!key) {
       // Billing went off: nothing to send to.
       this.ctx.storage.kv.delete("meter:pending");
       this.ctx.storage.kv.delete("meter:outbox");
+
       return;
     }
+
     const stripe = createStripeClient(key);
+
     for (;;) {
       let outbox = this.ctx.storage.kv.get<MeterOutbox>("meter:outbox");
+
       if (!outbox) {
         const pending = this.ctx.storage.kv.get<MeterPending>("meter:pending") ?? {};
         const [next] = Object.keys(pending);
+
         if (next === undefined) return;
         const seq = (this.ctx.storage.kv.get<number>("meter:seq") ?? 0) + 1;
         outbox = {
@@ -472,6 +540,7 @@ export class Org extends DurableObject<Env> {
         this.ctx.storage.kv.put("meter:outbox", outbox);
         this.ctx.storage.kv.put("meter:pending", pending);
       }
+
       try {
         await stripe.billing.meterEvents.create({
           event_name: METER_EVENT_NAME,
@@ -482,22 +551,27 @@ export class Org extends DurableObject<Env> {
       } catch (error) {
         if (!isDuplicate(error)) {
           const attempts = outbox.attempts + 1;
+
           const fields = {
             identifier: outbox.identifier,
             value: outbox.value,
             attempts,
-            code: (error as { code?: string })?.code ?? null,
+            code: stripeErrorCode(error),
           };
+
           if (Date.now() - outbox.firstSentAt < METER_GIVE_UP_MS) {
             this.ctx.storage.kv.put("meter:outbox", { ...outbox, attempts });
             this.#log.warn("meter.send_failed", fields);
             const wait = Math.min(METER_FLUSH_MS * 2 ** attempts, METER_RETRY_MAX_MS);
             await this.ctx.storage.setAlarm(Date.now() + wait);
+
             return;
           }
+
           this.#log.error("meter.dropped", fields);
         }
       }
+
       this.ctx.storage.kv.delete("meter:outbox");
     }
   }
@@ -511,8 +585,8 @@ export class Org extends DurableObject<Env> {
       .getWebSockets(`user:${userId}`)
       .filter((socket) => !except.has(socket) && this.ctx.getTags(socket).includes("machine"))
       .map((socket) => {
-        const { id, name, ports, connectedAt } =
-          socket.deserializeAttachment() as MachineAttachment;
+        const { id, name, ports, connectedAt } = machineOf(socket);
+
         return { id, name, ports, connectedAt };
       })
       .toSorted((a, b) => a.connectedAt - b.connectedAt);
@@ -524,6 +598,7 @@ export class Org extends DurableObject<Env> {
       type: "machines",
       machines: this.#machines(userId, except),
     } satisfies MachinesEvent);
+
     for (const socket of this.ctx.getWebSockets(`watch:${userId}`)) {
       try {
         socket.send(message);
@@ -540,14 +615,18 @@ export class Org extends DurableObject<Env> {
   async openPort(userId: string, machineId: string, port: number): Promise<OpenPortResult> {
     const socket = this.ctx
       .getWebSockets(`machine:${machineId}`)
-      .find((s) => (s.deserializeAttachment() as MachineAttachment).userId === userId);
+      .find((s) => machineOf(s).userId === userId);
+
     if (!socket) return { ok: false, status: 404, error: "That computer is not connected." };
-    const machine = socket.deserializeAttachment() as MachineAttachment;
+    const machine = machineOf(socket);
+
     // Only a port the machine itself reported: the wall cannot reach one it did not offer.
     if (!machine.ports.some((p) => p.port === port)) {
       return { ok: false, status: 409, error: `Nothing is serving port ${port} there now.` };
     }
+
     const id = crypto.randomUUID();
+
     const answer = new Promise<OpenPortResult>((resolve) => {
       this.#pending.set(id, resolve);
       setTimeout(
@@ -555,14 +634,18 @@ export class Org extends DurableObject<Env> {
         OPEN_TIMEOUT_MS,
       );
     });
+
     try {
       socket.send(JSON.stringify({ type: "open", id, port } satisfies RelayMessage));
     } catch {
       this.#pending.delete(id);
+
       return { ok: false, status: 404, error: "That computer is not connected." };
     }
+
     const result = await answer;
     this.#pending.delete(id);
+
     return result;
   }
 
@@ -580,17 +663,22 @@ export class Org extends DurableObject<Env> {
   #drop(match: (machine: MachineAttachment) => boolean, reason: string) {
     const dropped = new Set<WebSocket>();
     const owners = new Set<string>();
+
     for (const socket of this.ctx.getWebSockets("machine")) {
-      const machine = socket.deserializeAttachment() as MachineAttachment;
+      const machine = machineOf(socket);
+
       if (!match(machine)) continue;
+
       try {
         socket.close(4001, reason);
       } catch {
         // Already closed.
       }
+
       dropped.add(socket);
       owners.add(machine.userId);
     }
+
     for (const userId of owners) this.#pushMachines(userId, dropped);
   }
 
@@ -603,9 +691,11 @@ export class Org extends DurableObject<Env> {
     if (request.headers.get("upgrade") !== "websocket") {
       return new Response("expected a websocket upgrade", { status: 426 });
     }
+
     const kind = request.headers.get(ORG_SOCKET_HEADERS.kind);
     const userId = request.headers.get(ORG_SOCKET_HEADERS.userId);
     const { 0: client, 1: server } = new WebSocketPair();
+
     if (kind === "machine" && userId) {
       const machine: MachineAttachment = {
         id: crypto.randomUUID(),
@@ -615,6 +705,7 @@ export class Org extends DurableObject<Env> {
         userId,
         tokenId: request.headers.get(ORG_SOCKET_HEADERS.tokenId) ?? "",
       };
+
       this.ctx.acceptWebSocket(server, ["machine", `user:${userId}`, `machine:${machine.id}`]);
       server.serializeAttachment(machine);
       this.#pushMachines(userId);
@@ -630,26 +721,33 @@ export class Org extends DurableObject<Env> {
       this.ctx.acceptWebSocket(server);
       server.send(JSON.stringify({ type: "snapshot", shares: this.#cards() } satisfies WallEvent));
     }
+
     return new Response(null, { status: 101, webSocket: client });
   }
 
   /** Walls and cards only listen; a machine reports its ports and answers opens. */
   override webSocketMessage(socket: WebSocket, data: string | ArrayBuffer) {
-    if (!this.ctx.getTags(socket).includes("machine") || typeof data !== "string") return;
+    if (!this.ctx.getTags(socket).includes("machine") || data instanceof ArrayBuffer) return;
     let message;
+
     try {
       message = parseHostMessage(JSON.parse(data));
     } catch {
       return;
     }
+
     if (!message) return;
+
     if (message.type === "ports") {
-      const machine = socket.deserializeAttachment() as MachineAttachment;
+      const machine = machineOf(socket);
       socket.serializeAttachment({ ...machine, ports: message.ports });
       this.#pushMachines(machine.userId);
+
       return;
     }
+
     const resolve = this.#pending.get(message.id);
+
     if (!resolve) return;
     resolve(
       message.type === "opened"
@@ -664,8 +762,9 @@ export class Org extends DurableObject<Env> {
     } catch {
       // Already closed.
     }
+
     if (this.ctx.getTags(socket).includes("machine")) {
-      const { userId } = socket.deserializeAttachment() as MachineAttachment;
+      const { userId } = machineOf(socket);
       this.#pushMachines(userId, new Set([socket]));
     }
   }

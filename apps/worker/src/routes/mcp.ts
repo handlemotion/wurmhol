@@ -15,6 +15,7 @@ import { checkToken } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
 import { SHARE_ID, type ShareCard } from "@wurmhol/protocol";
 import { endShare } from "../ending.ts";
+import { loggedError } from "../log.ts";
 import { orgStub } from "../org-do.ts";
 import { checkRateLimit } from "../rate-limiter.ts";
 
@@ -49,6 +50,7 @@ function challenge(resource: string, error?: { code: string; description: string
     `scope="${MCP_SCOPES.join(" ")}"`,
     ...(error ? [`error="${error.code}"`, `error_description="${error.description}"`] : []),
   ];
+
   return Response.json(
     {
       jsonrpc: "2.0",
@@ -74,19 +76,24 @@ async function authenticate(
   resource: string,
 ): Promise<Caller | Response> {
   const presented = /^Bearer (\S+)$/i.exec(request.headers.get("authorization") ?? "")?.[1];
+
   if (!presented) return challenge(resource);
+
   if (presented.startsWith(TOKEN_PREFIX)) {
     const token = await checkToken(vars.db, vars.config, presented, { org: true });
+
     if (!token.ok) {
       return token.status === 403
         ? forbidden(token.fix)
         : challenge(resource, { code: "invalid_token", description: token.fix });
     }
+
     const [org] = await vars.db
       .select({ name: schema.organizations.name })
       .from(schema.organizations)
       .where(eq(schema.organizations.id, token.orgId))
       .limit(1);
+
     return {
       key: `token:${token.id}`,
       clientId: `token:${token.id}`,
@@ -94,14 +101,18 @@ async function authenticate(
       orgs: [{ id: token.orgId, name: org?.name ?? token.orgId }],
     };
   }
+
   const grant = await verifyMcpAccessToken(vars.auth, presented, resource);
+
   if (!grant) {
     return challenge(resource, {
       code: "invalid_token",
       description: "The access token is invalid or expired.",
     });
   }
+
   const orgs = await listOrgsForUser(vars.db, grant.userId);
+
   return {
     key: `user:${grant.userId}`,
     clientId: grant.clientId,
@@ -138,15 +149,20 @@ function buildServer(env: Env, vars: Vars, caller: Caller, waitSeconds: number) 
   /** A pipe by id or name, in one of the caller's orgs; null when there is none they reach. */
   const findPipe = async (pipe: string) => {
     const target = pipe.trim().toLowerCase();
+
     const id = SHARE_ID.test(target)
       ? target
       : ((await findOpenShareByName(vars.db, target))?.id ?? null);
+
     const share = id ? await findShare(vars.db, id) : null;
     const org = share ? inReach(share.orgId) : undefined;
+
     if (!share || !org) return null;
     const card = (await cards(org.id)).find((c) => c.id === share.id);
+
     return card ? { card, org } : null;
   };
+
   const notFound = (pipe: string) =>
     toolError(`No open pipe "${pipe}" in your orgs. list_pipes shows the open ones.`);
 
@@ -160,9 +176,11 @@ function buildServer(env: Env, vars: Vars, caller: Caller, waitSeconds: number) 
     },
     async () => {
       if (waitSeconds) return tooMany();
+
       const orgs = await Promise.all(
         caller.orgs.map(async (org) => ({ ...org, openPipes: (await cards(org.id)).length })),
       );
+
       return result({ orgs });
     },
   );
@@ -182,11 +200,14 @@ function buildServer(env: Env, vars: Vars, caller: Caller, waitSeconds: number) 
     async ({ org }) => {
       if (waitSeconds) return tooMany();
       const orgs = org ? caller.orgs.filter((o) => o.id === org) : caller.orgs;
+
       if (org && orgs.length === 0)
         return toolError(`You are not in org "${org}". list_orgs shows yours.`);
+
       const pipes = (
         await Promise.all(orgs.map(async (o) => (await cards(o.id)).map((c) => pipeOf(c, o))))
       ).flat();
+
       return result({ pipes });
     },
   );
@@ -203,6 +224,7 @@ function buildServer(env: Env, vars: Vars, caller: Caller, waitSeconds: number) 
     async ({ pipe }) => {
       if (waitSeconds) return tooMany();
       const found = await findPipe(pipe);
+
       return found ? result({ pipe: pipeOf(found.card, found.org) }) : notFound(pipe);
     },
   );
@@ -220,6 +242,7 @@ function buildServer(env: Env, vars: Vars, caller: Caller, waitSeconds: number) 
     async ({ pipe }) => {
       if (waitSeconds) return tooMany();
       const found = await findPipe(pipe);
+
       if (!found) return notFound(pipe);
       await endShare(
         { env, var: vars },
@@ -227,6 +250,7 @@ function buildServer(env: Env, vars: Vars, caller: Caller, waitSeconds: number) 
         "terminated",
         "mcp",
       );
+
       return result({ stopped: { id: found.card.id, url: found.card.url } });
     },
   );
@@ -241,12 +265,15 @@ export async function serveMcp(
 ): Promise<Response> {
   const request = c.req.raw;
   const caller = await authenticate(request, c.var, resource);
+
   if (caller instanceof Response) return caller;
   const wait = await checkRateLimit(c.env, c.var.config, "mcp", caller.key);
+
   const handler = createMcpHandler(() => buildServer(c.env, c.var, caller, wait), {
     responseMode: "json",
-    onerror: (error) => c.var.log.warn("mcp.error", { error }),
+    onerror: (error) => c.var.log.warn("mcp.error", { error: loggedError(error) }),
   });
+
   const response = await handler.fetch(request, {
     authInfo: {
       token: "",
@@ -256,8 +283,10 @@ export async function serveMcp(
       resourceMetadataUrl: resourceMetadataUrl(resource),
     },
   });
+
   if (!wait) return response;
   const headers = new Headers(response.headers);
   headers.set("retry-after", String(wait));
+
   return new Response(response.body, { status: response.status, headers });
 }

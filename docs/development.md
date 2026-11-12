@@ -10,9 +10,17 @@ working on the monorepo requires Node 26.
 pnpm install --frozen-lockfile
 ```
 
-This installs the workspace and the existing Lefthook pre-commit hook. The hook runs
-`lint-staged` (`oxfmt`, `oxlint --fix`, and test policy); staged files can change during a
-commit, so re-read them before editing again.
+This installs the workspace and the Vite+ pre-commit hook (`.vite-hooks/pre-commit`). The hook
+runs `vp staged` (the `staged` block in [`vite.config.ts`](../vite.config.ts): `vp fmt`,
+`vp lint --fix`, and test policy); staged files can change during a commit, so re-read them
+before editing again.
+
+[Vite+](https://viteplus.dev) (`vp`) is the toolchain: Oxfmt, Oxlint, Vitest, and tsdown (as
+`vp pack`) behind one CLI, configured in `vite.config.ts` files. Lint runs Oxlint's rules, the
+vendored [anti-slop](../tools/oxlint/anti-slop/UPSTREAM.md) rules, and `complexity`. pnpm stays
+the package manager and Turborepo the task runner. `vp` cannot run from a git worktree nested
+inside the main checkout (such as `.claude/worktrees/*`); it resolves its tools from the outer
+checkout.
 
 ### Cloud machines
 
@@ -67,16 +75,17 @@ curl -fsS http://127.0.0.1:8787/cdn-cgi/local/scheduled
 
 ## Checks and tests
 
-| Command                                                        | Purpose                                                      |
-| -------------------------------------------------------------- | ------------------------------------------------------------ |
-| `pnpm check`                                                   | Format check, oxlint, test/workflow/Wrangler config policies |
-| `pnpm fix`                                                     | Apply format and lint fixes                                  |
-| `pnpm check-types`                                             | TypeScript project checks                                    |
-| `pnpm test`                                                    | Affected unit suites through Turborepo                       |
-| `pnpm test:all`                                                | All unit suites                                              |
-| `pnpm test:e2e`                                                | All real-stack e2e suites                                    |
-| `pnpm --filter @wurmhol/worker test:e2e e2e/relay.e2e.test.ts` | One e2e file                                                 |
-| `pnpm --filter @wurmhol/site build`                            | Astro checks and static site build                           |
+| Command                                                        | Purpose                                                    |
+| -------------------------------------------------------------- | ---------------------------------------------------------- |
+| `pnpm check`                                                   | Format check, lint, test/workflow/Wrangler config policies |
+| `pnpm fix`                                                     | Apply format and lint fixes                                |
+| `pnpm check-types`                                             | TypeScript project checks                                  |
+| `pnpm test`                                                    | Affected unit suites through Turborepo                     |
+| `pnpm test:all`                                                | All unit suites                                            |
+| `pnpm test:e2e`                                                | All real-stack e2e suites                                  |
+| `pnpm verify`                                                  | Real share through the real CLI against the local stack    |
+| `pnpm --filter @wurmhol/worker test:e2e e2e/relay.e2e.test.ts` | One e2e file                                               |
+| `pnpm --filter @wurmhol/site build`                            | Astro checks and static site build                         |
 
 The SDK suites (`e2e/sdk*.e2e.test.ts`) also run the built-in WebSocket transport on Node and compile `packages/sdk/examples/embed.ts` with `bun build --compile` (the `bun` devDependency, so no global Bun is needed). E2E setup builds the web app and CLI, then starts real workerd, local D1, Durable Objects,
 and local HTTP servers; no stack needs to be started first. Behavior crossing auth, HTTP,
@@ -95,7 +104,8 @@ or Drizzle query construction do not earn their cost. Do not add tests that cann
 plausible bug they catch.
 
 For runtime changes, green suites are the floor: start the local stack, share a real server
-with the real CLI, and exercise it with HTTP calls. Include what ran and what was observed in
+with the real CLI, and exercise it with HTTP calls. `pnpm verify` does that baseline; the
+[verify skill](../.claude/skills/verify/SKILL.md) lists what else to run for each kind of change. Include what ran and what was observed in
 the hand-off. Documentation-only changes need documentation validation, not unrelated e2e runs.
 
 ## Package map

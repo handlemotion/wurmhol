@@ -42,8 +42,10 @@ export function viewerRequestHeaders(
   shareUrl: string,
 ): HeaderList {
   const list: HeaderList = [];
+
   for (const [name, value] of headers) {
     const lower = name.toLowerCase();
+
     if (
       lower.startsWith("cf-") ||
       lower.startsWith("x-wurmhol-") ||
@@ -52,19 +54,24 @@ export function viewerRequestHeaders(
     ) {
       continue;
     }
+
     if (lower === "cookie") {
       const kept = withoutCookie(value, SHARE_COOKIE);
+
       if (kept) list.push([name, kept]);
       continue;
     }
+
     list.push([name, value]);
   }
+
   return [...list, ...forwardedHeaders(shareUrl)];
 }
 
 /** The share's public host and scheme, as a proxy in front of the dev server would pass them. */
 export function forwardedHeaders(shareUrl: string): HeaderList {
   const url = new URL(shareUrl);
+
   return [
     ["x-forwarded-host", url.host],
     ["x-forwarded-proto", url.protocol.replace(":", "")],
@@ -93,13 +100,16 @@ export function localSocketHeaders(headers: HeaderList, port: number): HeaderLis
 /** Headers that may cross the tunnel, minus hop-by-hop ones and any `Connection` names. */
 export function forwardable(headers: HeaderList): HeaderList {
   const named = new Set<string>();
+
   for (const [name, value] of headers) {
     if (name.toLowerCase() === "connection") {
       for (const token of value.split(",")) named.add(token.trim().toLowerCase());
     }
   }
+
   return headers.filter(([name]) => {
     const lower = name.toLowerCase();
+
     return !HOP_BY_HOP.has(lower) && !named.has(lower);
   });
 }
@@ -116,8 +126,10 @@ export function withoutCookie(cookieHeader: string, name: string): string | null
       if (!pair) return false;
       const eq = pair.indexOf("=");
       const key = (eq === -1 ? pair : pair.slice(0, eq)).trim();
+
       return key !== name;
     });
+
   return kept.length ? kept.join("; ") : null;
 }
 
@@ -131,21 +143,29 @@ export function pipeSetCookie(setCookie: string): string | null {
   const [pair = "", ...attributes] = setCookie.split(";");
   const eq = pair.indexOf("=");
   const name = (eq === -1 ? pair : pair.slice(0, eq)).trim();
+
   if (name.toLowerCase() === SHARE_COOKIE.toLowerCase()) return null;
+
   const kept = attributes.filter((attribute) => {
     const key = attribute.split("=", 1)[0]!.trim().toLowerCase();
+
     return key !== "domain";
   });
+
   return [pair, ...kept].join(";");
 }
 
 /** The value of cookie `name` in a `Cookie` header, or null. The first one wins, as browsers send. */
 export function readCookie(cookieHeader: string | null | undefined, name: string): string | null {
   if (!cookieHeader) return null;
+
   for (const pair of cookieHeader.split(";")) {
     const eq = pair.indexOf("=");
+
     if (eq === -1) continue;
+
     if (pair.slice(0, eq).trim() === name) return pair.slice(eq + 1).trim();
   }
+
   return null;
 }

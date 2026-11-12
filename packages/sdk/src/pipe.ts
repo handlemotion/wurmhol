@@ -9,6 +9,7 @@ import {
   parseDuration,
   PIPE_NAME_RULE,
   pipeName,
+  isString,
   sameOriginPath,
   SOURCE_FIELDS,
   SOURCE_FIXES,
@@ -16,16 +17,17 @@ import {
 } from "@wurmhol/protocol";
 import pkg from "../package.json" with { type: "json" };
 import { FixError } from "./errors.ts";
-import { type RequestEvent, Tunnel } from "./tunnel.ts";
+import { type LogFields, type RequestEvent, Tunnel } from "./tunnel.ts";
 import { selectTransport, type TransportChoice } from "./transport/index.ts";
 
 /** The CLI dials api.wurmhol.com; people sign in and make tokens at the console (ADR 0006). */
 export const DEFAULT_SERVER = "https://api.wurmhol.com";
 export const DEFAULT_CONSOLE = "https://dirt.wurmhol.com";
+
 /** Where the default server's pipes live: `<id>.wurmhol.dev` (ADR 0007). */
 export const DEFAULT_PIPE_DOMAIN = "wurmhol.dev";
 
-export type { RequestEvent };
+export type { LogFields, RequestEvent };
 
 /**
  * Where a pipe comes from, as the wall shows it. Every field is optional. Spelled out, like
@@ -52,19 +54,31 @@ export interface PipeSource {
 /** A caller's source, checked field by field; null when it sets nothing. */
 function checkSource(raw: Partial<PipeSource> | undefined): PipeSource | null {
   if (!raw) return null;
-  const source = Object.fromEntries(SOURCE_FIELDS.map((f) => [f, null])) as Record<
-    keyof PipeSource,
-    string | null
-  >;
+
+  const source: PipeSource = {
+    repoHost: null,
+    repo: null,
+    branch: null,
+    commit: null,
+    link: null,
+    note: null,
+    agent: null,
+    agentUrl: null,
+  };
+
   let any = false;
+
   for (const field of SOURCE_FIELDS) {
     const value = raw[field];
+
     if (value === null || value === undefined) continue;
     const checked = sourceField(field, value);
+
     if (checked === null) throw new FixError(SOURCE_FIXES[field], { code: "invalid_option" });
     source[field] = checked;
     any = true;
   }
+
   return any ? source : null;
 }
 
@@ -151,12 +165,12 @@ export interface OpenPipeOptions {
    * `reason`), `reconnected`, `reconnect.failed` (`message`), `heartbeat.missed`, `socket.error`,
    * `protocol.error` and `ended` (`reason`). Never request contents. A throw here is ignored.
    */
-  log?: (event: string, fields: Record<string, unknown>) => void;
+  log?: (event: string, fields: LogFields) => void;
 }
 
 /** The CLI's daemon logs to a file named after the share, so it also needs the share id. */
 export interface Internals {
-  log?: (shareId: string | null, event: string, fields: Record<string, unknown>) => void;
+  log?: (shareId: string | null, event: string, fields: LogFields) => void;
 }
 
 /** `open`: serving. `reconnecting`: the relay connection dropped; the pipe is redialing. */
@@ -215,16 +229,19 @@ class OpenPipe implements Pipe {
 
   on<E extends keyof PipeEvents>(event: E, listener: PipeEvents[E]) {
     this.#events.on(event, listener);
+
     return this;
   }
 
   once<E extends keyof PipeEvents>(event: E, listener: PipeEvents[E]) {
     this.#events.once(event, listener);
+
     return this;
   }
 
   off<E extends keyof PipeEvents>(event: E, listener: PipeEvents[E]) {
     this.#events.off(event, listener);
+
     return this;
   }
 
@@ -244,11 +261,13 @@ class OpenPipe implements Pipe {
  */
 export function pagePath(path: string): string {
   const resolved = sameOriginPath(path);
+
   if (path.length > 2000 || (resolved === "/" && path.trim() !== "/")) {
     throw new FixError(`Not a path on the pipe: ${path.slice(0, 80)}. Use one like /checkout.`, {
       code: "invalid_option",
     });
   }
+
   return resolved;
 }
 
@@ -266,37 +285,67 @@ export function originOf(server: string) {
   }
 }
 
-/**
- * Opens a pipe to `port` and resolves once the relay has given it its URL, or rejects with a
- * `FixError` whose message is the one-line fix the CLI prints.
- */
-export async function openPipe(options: OpenPipeOptions, internals: Internals = {}): Promise<Pipe> {
-  const server = originOf(options.server ?? DEFAULT_SERVER);
+/** The caller's token, trimmed; throws the fix when there is none. */
+function checkToken(options: OpenPipeOptions, server: string): string {
   const token = options.token?.trim();
+
   if (!token) {
     const console = options.server ? server : DEFAULT_CONSOLE;
     throw new FixError(`Set WURMHOL_TOKEN to a token from ${console} (menu → Tokens).`, {
       code: "no_token",
     });
   }
-  const ttl = typeof options.ttl === "string" ? parseDuration(options.ttl) : options.ttl;
-  if (ttl !== undefined && (ttl === null || !Number.isSafeInteger(ttl) || ttl < 1)) {
-    throw new FixError(`Not a lifetime: ${options.ttl}. Use one like 90m or 8h.`, {
+
+  return token;
+}
+
+/** `ttl` in seconds, from a number or a duration like `90m`; throws the fix when it is neither. */
+function checkLifetime(ttl: OpenPipeOptions["ttl"]): number | undefined {
+  const seconds = isString(ttl) ? parseDuration(ttl) : ttl;
+
+  if (
+    seconds !== undefined &&
+    (seconds === null || !Number.isSafeInteger(seconds) || seconds < 1)
+  ) {
+    throw new FixError(`Not a lifetime: ${ttl}. Use one like 90m or 8h.`, {
       code: "invalid_option",
     });
   }
-  const name = options.name === undefined ? undefined : pipeName(options.name);
+
+  return seconds;
+}
+
+/** The pipe name, normalised; throws the fix when it is not one. */
+function checkName(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  const name = pipeName(raw);
+
   if (name === null) {
-    throw new FixError(`Not a pipe name: ${options.name}. Use ${PIPE_NAME_RULE}.`, {
+    throw new FixError(`Not a pipe name: ${raw}. Use ${PIPE_NAME_RULE}.`, {
       code: "invalid_option",
     });
   }
+
+  return name;
+}
+
+/**
+ * Opens a pipe to `port` and resolves once the relay has given it its URL, or rejects with a
+ * `FixError` whose message is the one-line fix the CLI prints.
+ */
+export async function openPipe(options: OpenPipeOptions, internals: Internals = {}): Promise<Pipe> {
+  const server = originOf(options.server ?? DEFAULT_SERVER);
+  const token = checkToken(options, server);
+  const ttl = checkLifetime(options.ttl);
+  const name = checkName(options.name);
   const source = checkSource(options.source);
+
   if (options.accessKey !== undefined && !isAccessKey(options.accessKey)) {
     throw new FixError(`Not an access key. Use ${ACCESS_KEY_RULE}, sent as ${ACCESS_KEY_HEADER}.`, {
       code: "invalid_option",
     });
   }
+
   // A connector (ADR 0032) opens its own embedded tunnel at its own URL, to its grants only.
   if (
     embedCredentialKind(token) === "connector" &&
@@ -307,26 +356,31 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
       { code: "invalid_option" },
     );
   }
+
   if (options.domain !== undefined) {
     throw new FixError(
       "A custom domain follows the pipe's name: attach it with `domains().add({ hostname, pipe: name })` (or `wurmhol domain add`), then open the pipe with that `name` and without `domain`.",
       { code: "unsupported" },
     );
   }
+
   const { signal } = options;
   signal?.throwIfAborted();
 
   let pipe: OpenPipe | null = null;
   let markClosed!: (reason: CloseReason) => void;
   const closed = new Promise<CloseReason>((resolve) => (markClosed = resolve));
-  const log = (event: string, fields: Record<string, unknown> = {}) => {
+
+  const log = (event: string, fields: LogFields = {}) => {
     internals.log?.(tunnel.share?.id ?? null, event, fields);
+
     try {
       options.log?.(event, fields);
     } catch {
       // The caller's logging must never take the pipe down.
     }
   };
+
   const tunnel: Tunnel = new Tunnel({
     server,
     token,
@@ -353,28 +407,34 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
           pipe.emit("reconnected");
         }
       }
+
       log(event, fields);
     },
     onRequest: (event) => pipe?.emit("request", event),
     onEnd: (reason) => {
       log("ended", { reason });
       signal?.removeEventListener("abort", onAbort);
+
       if (pipe) pipe.state = "closed";
       markClosed(reason);
       pipe?.emit("close", reason);
     },
   });
+
   const onAbort = () => void tunnel.stop();
 
   const started = tunnel.start();
   let info;
+
   if (signal) {
     let stopWaiting!: () => void;
+
     const aborted = new Promise<never>((_, reject) => {
       const listener = () => reject(signal.reason);
       signal.addEventListener("abort", listener, { once: true });
       stopWaiting = () => signal.removeEventListener("abort", listener);
     });
+
     try {
       info = await Promise.race([started, aborted]);
     } catch (error) {
@@ -387,10 +447,13 @@ export async function openPipe(options: OpenPipeOptions, internals: Internals = 
     } finally {
       stopWaiting();
     }
+
     signal.addEventListener("abort", onAbort, { once: true });
   } else {
     info = await started;
   }
+
   pipe = new OpenPipe({ ...info, port: options.port }, tunnel, closed);
+
   return pipe;
 }

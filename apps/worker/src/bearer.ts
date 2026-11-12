@@ -35,13 +35,16 @@ export async function checkToken(
   options: { org?: boolean } = {},
 ): Promise<BearerToken | TokenRefusal> {
   const tokensPage = `${config.auth.baseURL} (menu → Tokens)`;
+
   const refusal = (status: 401 | 403, error: string, fix: string): TokenRefusal => ({
     ok: false,
     status,
     error,
     fix,
   });
+
   const token = await useToken(db, presented);
+
   if (!token.ok) {
     return token.reason === "expired"
       ? refusal(
@@ -55,6 +58,7 @@ export async function checkToken(
           `Create a new token at ${tokensPage} and set WURMHOL_TOKEN.`,
         );
   }
+
   // A token acts for whoever made it, so only while they are in its org. Leaving revokes their
   // tokens (ADR 0021); this holds in the moment between the two, and for any token missed.
   if (token.createdBy && !(await findMember(db, token.createdBy, token.orgId))) {
@@ -64,6 +68,7 @@ export async function checkToken(
       `Whoever made this token is no longer in its org. Create a new token at ${tokensPage} and set WURMHOL_TOKEN.`,
     );
   }
+
   if (await isOrgBlocked(db, token.orgId)) {
     return refusal(
       401,
@@ -71,6 +76,7 @@ export async function checkToken(
       `This org is blocked from opening pipes. Contact the operator of ${config.auth.baseURL}.`,
     );
   }
+
   if (options.org && token.scope !== "org") {
     return refusal(
       403,
@@ -78,6 +84,7 @@ export async function checkToken(
       `This token can only open pipes. Create one that can list and close every pipe in the org at ${tokensPage}.`,
     );
   }
+
   return token;
 }
 
@@ -95,6 +102,7 @@ export async function bearerToken(
 ): Promise<BearerToken | Response> {
   const { config, db } = c.var;
   const presented = /^Bearer (\S+)$/.exec(c.req.header("authorization") ?? "")?.[1];
+
   if (!presented) {
     return refuse(
       401,
@@ -102,13 +110,17 @@ export async function bearerToken(
       `Set WURMHOL_TOKEN to a token from ${config.auth.baseURL} (menu → Tokens).`,
     );
   }
+
   const token = await checkToken(db, config, presented, options);
+
   if (!token.ok) return refuse(token.status, token.error, token.fix);
   const wait = await checkRateLimit(c.env, config, "connect", token.id);
+
   if (wait) {
     return refuse(429, "too many requests", `Wait ${wait} s and try again.`, {
       retryAfter: wait,
     });
   }
+
   return token;
 }
