@@ -28,15 +28,15 @@
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.3",
-    "@oxlint/plugins": "1.91.0",
+    "@oxlint/plugins": "1.93.0",
     "@types/node": "^26.6.6",
     "jsonc-parser": "^3.3.1",
-    "oxfmt": "0.76.0",
-    "turbo": "^2.11.10",
+    "oxfmt": "0.78.0",
+    "turbo": "^2.11.11",
     "typescript": "7.0.2",
     "undici": "^8.12.4",
     "vite-plus": "catalog:",
-    "wrangler": "^4.160.0",
+    "wrangler": "^4.160.1",
     "ws": "^8.22.2"
   },
   "engines": {
