@@ -11,6 +11,7 @@ export async function findDeviceUserCode(db: Db, deviceCode: string) {
     .from(deviceCodes)
     .where(eq(deviceCodes.deviceCode, deviceCode))
     .limit(1);
+
   return row?.userCode ?? null;
 }
 
@@ -41,6 +42,7 @@ export async function findLoginPipe(
     )
     .orderBy(desc(shares.startedAt))
     .limit(1);
+
   return row ?? null;
 }
 
@@ -63,5 +65,6 @@ export async function setPendingDeviceScope(
       ),
     )
     .returning({ id: deviceCodes.id });
+
   return updated.length > 0;
 }

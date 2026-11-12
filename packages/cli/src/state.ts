@@ -3,6 +3,16 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+  isBoolean,
+  isFiniteNumber,
+  isJsonObject,
+  isString,
+  isStringArray,
+  type JsonValue,
+  parseJson,
+} from "@wurmhol/protocol";
+import { errorCode } from "@wurmhol/sdk/internal";
 
 export interface ShareState {
   id: string;
@@ -46,6 +56,7 @@ function sharesDir() {
 export function logFile(name: string) {
   const dir = join(home(), "logs");
   mkdirSync(dir, { recursive: true });
+
   return join(dir, `${name}.log`);
 }
 
@@ -61,36 +72,80 @@ export function removeState(id: string) {
 export function alive(pid: number) {
   try {
     process.kill(pid, 0);
+
     return true;
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
+    return errorCode(error) === "EPERM";
   }
+}
+
+function nullableString(value: JsonValue | undefined): value is string | null {
+  return value === null || isString(value);
+}
+
+/** A share file's request, or undefined when it has none or it is not one. */
+function parseRequest(raw: JsonValue | undefined): ShareRequest | undefined {
+  if (!isJsonObject(raw)) return undefined;
+  const { name, only, link, note } = raw;
+
+  if (!nullableString(name) || !isStringArray(only)) return undefined;
+
+  return nullableString(link) && nullableString(note) ? { name, only, link, note } : undefined;
+}
+
+/** A share file as its daemon wrote it (`writeState`), or null when it is not one. */
+function parseState(text: string): ShareState | null {
+  const raw = parseJson(text);
+
+  if (!isJsonObject(raw)) return null;
+  const { id, url, port, pid, startedAt, endsAt } = raw;
+
+  if (!isString(id) || !isString(url) || !isString(startedAt) || !isString(endsAt)) return null;
+
+  if (!isFiniteNumber(port) || !isFiniteNumber(pid)) return null;
+  const state: ShareState = { id, url, port, pid, startedAt, endsAt };
+  const request = parseRequest(raw.request);
+
+  if (request) state.request = request;
+
+  if (isBoolean(raw.approval)) state.approval = raw.approval;
+
+  if (isString(raw.follows)) state.follows = raw.follows;
+
+  return state;
 }
 
 /** Every share whose daemon is still running; files of dead ones are cleaned up. */
 export function listStates(): ShareState[] {
   let files: string[];
+
   try {
     files = readdirSync(sharesDir());
   } catch {
     return [];
   }
+
   const states: ShareState[] = [];
+
   for (const file of files.filter((f) => f.endsWith(".json"))) {
     try {
-      const state = JSON.parse(readFileSync(join(sharesDir(), file), "utf8")) as ShareState;
-      if (alive(state.pid)) states.push(state);
+      const state = parseState(readFileSync(join(sharesDir(), file), "utf8"));
+
+      if (!state) rmSync(join(sharesDir(), file), { force: true });
+      else if (alive(state.pid)) states.push(state);
       else removeState(state.id);
     } catch {
       rmSync(join(sharesDir(), file), { force: true });
     }
   }
+
   return states.toSorted((a, b) => a.startedAt.localeCompare(b.startedAt));
 }
 
 /** Whether `state` is the pipe `target` names: its port, its id, or a named pipe's name. */
 export function matches(state: ShareState, target: string) {
   const wanted = target.trim().toLowerCase();
+
   return (
     state.id === target ||
     (/^\d+$/.test(wanted) && state.port === Number(wanted)) ||

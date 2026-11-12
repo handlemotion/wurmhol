@@ -1,5 +1,5 @@
 // The config the Worker hands the web app: a self-hosted install's DOCS_URL reaches the page.
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
 import { browserFetch, type Stack, startStack } from "./support.ts";
 
 let stack: Stack;

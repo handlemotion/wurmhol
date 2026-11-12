@@ -45,10 +45,16 @@ import {
   redeem,
   startLogin,
 } from "@wurmhol/sdk";
-import { DEFAULT_CONSOLE, DEFAULT_SERVER, pagePath, pageUrl } from "@wurmhol/sdk/internal";
+import {
+  DEFAULT_CONSOLE,
+  DEFAULT_SERVER,
+  errorCode,
+  pagePath,
+  pageUrl,
+} from "@wurmhol/sdk/internal";
 import { host as runHost } from "./host.ts";
 import { init } from "./init.ts";
-import { followLog, isRequest, type LogRecord, readLog, toRequest } from "./logs.ts";
+import { followLog, type LogRecord, readLog, requestOf } from "./logs.ts";
 import { checkService, installService, stableEntry, uninstallService } from "./service.ts";
 import { alive, listStates, logFile, matches, removeState, type ShareState } from "./state.ts";
 
@@ -118,20 +124,23 @@ directory it was opened in, and the agent session, when the environment names on
 `;
 
 /** Exits with one line: a FixError's fix, or what went wrong. */
-function fail(error: unknown): never {
-  const message = error instanceof FixError ? error.message : String(error);
+function fail(cause: unknown): never {
+  const message = cause instanceof FixError ? cause.message : String(cause);
   process.stderr.write(`wurmhol: ${message}\n`);
   process.exit(1);
 }
 
 function parsePort(value: string | undefined) {
   const port = Number(value);
+
   if (!value || !/^\d+$/.test(value) || !isPort(port)) return null;
+
   return port;
 }
 
 function token() {
   const found = findToken();
+
   if (found) return found;
   fail(`Run wurmhol login, or set WURMHOL_TOKEN to a token from ${consoleUrl()} (menu → Tokens).`);
 }
@@ -150,6 +159,7 @@ function saveLogin(granted: { token: string; org: { name: string | null }; name:
 
 async function login() {
   process.stdout.write(`${allowlistLine()}\n`);
+
   try {
     const granted = await deviceLogin({
       server: server(),
@@ -158,7 +168,9 @@ async function login() {
       prompt: (code) =>
         process.stdout.write(`Open ${code.verification_uri} and enter ${code.user_code}\n`),
     });
+
     saveLogin(granted);
+
     if (envToken()) {
       process.stdout.write("WURMHOL_TOKEN is set and wins over the saved token.\n");
     }
@@ -179,9 +191,44 @@ function logout() {
 function reusable(options: ShareOptions): ShareState | undefined {
   if (options.ttl !== undefined) return undefined;
   const wanted = JSON.stringify(shareRequest(options));
+
   return listStates().find(
     (s) => s.port === options.port && s.request && JSON.stringify(s.request) === wanted,
   );
+}
+
+/** A pipe as `--json` prints it. `approval` is only there when set. */
+interface PrintedPipe {
+  url: string;
+  port: number;
+  id: string;
+  endsAt: string;
+  pageUrl?: string;
+  approval?: true;
+}
+
+function printedPipe(
+  pipe: Pick<PrintedPipe, "url" | "port" | "id" | "endsAt">,
+  page: string | undefined,
+  approval: boolean | undefined,
+): PrintedPipe {
+  const printed: PrintedPipe = { ...pipe };
+
+  if (page) printed.pageUrl = page;
+
+  if (approval) printed.approval = true;
+
+  return printed;
+}
+
+/** A pipe as `wurmhol ls --json` lists it. `approval` is only there when set. */
+interface ListedPipe {
+  id: string;
+  url: string;
+  port: number;
+  startedAt: string;
+  endsAt: string;
+  approval?: true;
 }
 
 /**
@@ -202,17 +249,13 @@ function printPipe(
 ) {
   const { url, port, id, endsAt, approval, follows } = pipe;
   const page = path === undefined || approval ? undefined : pageUrl(url, path);
+
   const out = json
-    ? JSON.stringify({
-        url,
-        port,
-        id,
-        endsAt,
-        ...(page ? { pageUrl: page } : {}),
-        ...(approval ? { approval: true } : {}),
-      })
+    ? JSON.stringify(printedPipe({ url, port, id, endsAt }, page, approval))
     : (page ?? url);
+
   process.stdout.write(`${out}\n`);
+
   if (follows) {
     process.stderr.write(
       "Not logged in yet, and another share is already waiting on this link: this pipe opens once someone in your org approves it.\n",
@@ -228,21 +271,27 @@ async function share(options: ShareOptions, json: boolean, path: string | undefi
   const { port } = options;
   // Agents re-run commands: the same command again prints the same pipe, not a second one.
   const open = reusable(options);
+
   if (open) {
     printPipe(open, path, json);
+
     if (!json && !open.approval) {
       process.stderr.write(
         `Already open. For a new URL: wurmhol stop ${port}, then run this again.\n`,
       );
     }
+
     return;
   }
+
   // No token: the link it prints logs this computer in and then opens the pipe (ADR 0026). One
   // login per computer: while another share waits on its link, this one waits on the same link.
   let pending: LoginMessage | undefined;
   let follows: string | undefined;
+
   if (!findToken()) {
     const leader = listStates().find((s) => s.approval && !s.follows);
+
     if (leader) {
       follows = leader.id;
       pending = {
@@ -257,13 +306,16 @@ async function share(options: ShareOptions, json: boolean, path: string | undefi
           version: pkg.version,
           port,
         });
+
         pending = { type: "login", code };
       } catch (error) {
         fail(error);
       }
     }
   }
+
   const message = await startDaemon(entry, options, undefined, pending);
+
   if (message.type === "error") fail(message.message);
   printPipe({ ...message, port, approval: message.type === "approval", follows }, path, json);
 }
@@ -277,6 +329,7 @@ async function share(options: ShareOptions, json: boolean, path: string | undefi
 async function serveHost(code: string | undefined) {
   const say = (line: string) => process.stdout.write(`${line}\n`);
   let granted: string | null = null;
+
   if (code) {
     try {
       const redeemed = await redeem({
@@ -285,6 +338,7 @@ async function serveHost(code: string | undefined) {
         name: hostname(),
         version: pkg.version,
       });
+
       saveLogin(redeemed);
       granted = redeemed.token;
     } catch (error) {
@@ -293,6 +347,7 @@ async function serveHost(code: string | undefined) {
   } else if (!findToken()) {
     await login();
   }
+
   try {
     await runHost({
       server: server(),
@@ -303,9 +358,12 @@ async function serveHost(code: string | undefined) {
       say,
       open: async (port) => {
         const open = listStates().find((s) => s.port === port);
+
         if (open) return open.url;
         const message = await startDaemon(entry, { port }, homedir());
+
         if (message.type === "error") throw new FixError(message.message);
+
         return message.url;
       },
     });
@@ -322,12 +380,16 @@ async function installHost() {
   try {
     const stable = stableEntry(entry);
     checkService();
+
     if (!savedLogin()) await login();
     const env: Record<string, string> = {};
+
     for (const name of ["WURMHOL_HOME", "WURMHOL_URL"] as const) {
       const value = process.env[name];
+
       if (value) env[name] = value;
     }
+
     const log = logFile("host");
     const file = installService({ node: process.execPath, entry: stable, env, log });
     process.stdout.write(
@@ -349,32 +411,38 @@ function uninstallHost() {
 
 function ls(json: boolean) {
   const states = listStates();
+
   if (json) {
     process.stdout.write(
       `${JSON.stringify(
-        states.map(({ id, url, port, startedAt, endsAt, approval }) => ({
-          id,
-          url,
-          port,
-          startedAt,
-          endsAt,
-          ...(approval ? { approval: true } : {}),
-        })),
+        states.map(({ id, url, port, startedAt, endsAt, approval }) => {
+          const listed: ListedPipe = { id, url, port, startedAt, endsAt };
+
+          if (approval) listed.approval = true;
+
+          return listed;
+        }),
       )}\n`,
     );
+
     return;
   }
+
   if (!states.length) {
     process.stdout.write("No open pipes. Start one with: npx wurmhol <port>\n");
+
     return;
   }
+
   for (const s of states) {
     const left = Math.max(0, Math.round((Date.parse(s.endsAt) - Date.now()) / 60_000)) * 60;
+
     const ends = s.approval
       ? "waiting for approval"
       : left
         ? `ends in ${formatDuration(left)}`
         : "ends in under a minute";
+
     process.stdout.write(`${s.port}\t${s.url}\t${s.id}\t${ends}\n`);
   }
 }
@@ -382,11 +450,14 @@ function ls(json: boolean) {
 async function stop(target: string | undefined, all: boolean) {
   const states = listStates();
   const chosen = all ? states : states.filter((s) => target !== undefined && matches(s, target));
+
   if (!all && !target) fail("Say which share: wurmhol stop <port|id|name>, or --all.");
+
   if (!chosen.length) {
     if (all) return;
     fail(`No open pipe for ${target}. See: wurmhol ls`);
   }
+
   for (const s of chosen) {
     try {
       process.kill(s.pid, "SIGTERM");
@@ -394,28 +465,37 @@ async function stop(target: string | undefined, all: boolean) {
       removeState(s.id);
     }
   }
+
   // Return once their processes are gone, so a following `ls` (or a new share) agrees.
   const deadline = Date.now() + 5000;
+
   while (Date.now() < deadline && chosen.some((s) => alive(s.pid))) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
+
   for (const s of chosen) removeState(s.id);
+
   for (const s of chosen) process.stdout.write(`stopped ${s.url}\n`);
 }
 
 /** `wurmhol doctor`: every check, one line each; exits 1 when any fails. */
 async function doctor(portText: string | undefined, json: boolean) {
   let port: number | undefined;
+
   if (portText !== undefined) {
     port = parsePort(portText) ?? fail(`Not a port: ${portText}. Use --port 5173.`);
   }
+
   const checks = await runDoctor({ port, version: pkg.version });
+
   if (json) {
     process.stdout.write(`${JSON.stringify({ checks })}\n`);
   } else {
     process.stdout.write(`${allowlistLine()}\n`);
+
     for (const check of checks) process.stdout.write(`${formatCheck(check)}\n`);
   }
+
   if (checks.some((check) => !check.ok)) process.exitCode = 1;
 }
 
@@ -425,8 +505,11 @@ const LOG_LINES = 50;
 /** One domain, as `wurmhol domain` prints it: the state, and the DNS records still to publish. */
 function formatDomain(domain: Domain) {
   const lines = [`${domain.hostname}  ${domain.pipe}  ${domain.state}`];
+
   if (domain.state === "active" && domain.url) lines.push(`  ${domain.url}`);
+
   if (domain.error) lines.push(`  ${domain.error.message} ${domain.error.fix}`);
+
   if (domain.state !== "active" && domain.state !== "failed") {
     for (const record of domain.dns) {
       const done = record.done ? "ok     " : "publish";
@@ -434,6 +517,7 @@ function formatDomain(domain: Domain) {
       lines.push(`  ${done}  ${record.type.padEnd(5)} ${record.name}  ${record.value}  (${why})`);
     }
   }
+
   return lines.join("\n");
 }
 
@@ -447,34 +531,46 @@ async function domain(
   options: { name: string | undefined; json: boolean; wait: boolean },
 ) {
   const client = domainsClient({ token: token(), server: server() });
+
   const print = (value: Domain) =>
     process.stdout.write(options.json ? `${JSON.stringify(value)}\n` : `${formatDomain(value)}\n`);
+
   const need = () =>
     hostname ?? fail(`Say which hostname: wurmhol domain ${action} preview.example.com.`);
+
   try {
     if (action === "ls") {
       const all = await client.list();
+
       if (options.json) return void process.stdout.write(`${JSON.stringify({ domains: all })}\n`);
+
       return void process.stdout.write(
         all.length ? `${all.map(formatDomain).join("\n")}\n` : "No custom domains.\n",
       );
     }
+
     if (action === "add") {
       const pipe = options.name ?? fail("Say which pipe name: --name acme-app.");
       const added = await client.add({ hostname: need(), pipe });
+
       if (!options.wait) {
         print(added);
+
         if (!options.json) {
           process.stdout.write(
             `Publish the records above at ${added.hostname}'s DNS host, then: wurmhol domain verify ${added.hostname} --wait\n`,
           );
         }
+
         return;
       }
+
       if (!options.json) process.stdout.write(`${formatDomain(added)}\n`);
     }
+
     if (action === "verify" || action === "add") {
       const host = need();
+
       const done = options.wait
         ? await client.waitActive(host, {
             onUpdate: (d) => {
@@ -483,34 +579,46 @@ async function domain(
             },
           })
         : await client.verify(host);
+
       return print(done);
     }
+
     if (action === "rm") {
       await client.remove(need());
+
       return void process.stdout.write(options.json ? '{"ok":true}\n' : `removed ${hostname}\n`);
     }
   } catch (error) {
     fail(error);
   }
+
   fail(`Unknown domain command: ${action ?? "(none)"}. Use add, verify, ls or rm.`);
 }
 
 /** The log `target` names: an open pipe's (the newest one on a port), or an ended pipe's id. */
 function logOf(target: string): string | null {
   const open = listStates().filter((s) => matches(s, target));
+
   if (open.length) return open.at(-1)!.id;
+
   // A daemon that never got a pipe, such as a share's login whose pipe was refused, logs under
   // its port and has exited by the time anyone asks.
   if (isPort(Number(target)) && readLog(`port-${target}`)) return `port-${target}`;
+
   return /^[a-z0-9]{1,40}$/.test(target) && readLog(target) ? target : null;
 }
 
 function formatRecord(record: LogRecord) {
-  if (isRequest(record)) {
-    const { time, method, path, status, durationMs } = toRequest(record);
+  const request = requestOf(record);
+
+  if (request) {
+    const { time, method, path, status, durationMs } = request;
+
     return `${time}  ${method} ${path}  ${status}  ${durationMs} ms`;
   }
+
   const { time, event, port: _port, ...fields } = record;
+
   return `${time}  ${event}${Object.keys(fields).length ? ` ${JSON.stringify(fields)}` : ""}`;
 }
 
@@ -518,26 +626,34 @@ function formatRecord(record: LogRecord) {
 function logs(target: string | undefined, json: boolean, follow: boolean) {
   if (!target) fail("Say which pipe: wurmhol logs <port|id|name>.");
   const name = logOf(target);
+
   if (!name) fail(`No log for ${target}. See: wurmhol ls`);
+
   const print = (record: LogRecord) =>
     process.stdout.write(`${json ? JSON.stringify(record) : formatRecord(record)}\n`);
+
   for (const record of (readLog(name) ?? []).slice(-LOG_LINES)) print(record);
+
   if (follow) followLog(name, print, new AbortController().signal);
 }
 
 const SEE_FLAGS = "Run `npx wurmhol@latest --help` to see the flags.";
 
 /** parseArgs' own errors, as one line that names the flag; anything else is a bug and rethrows. */
-function explainArgsError(error: unknown, args: string[]): string {
-  const { code, message } = error as { code?: string; message?: string };
+function explainArgsError(cause: unknown, args: string[]): string {
+  const code = errorCode(cause);
+  const message = cause instanceof Error ? cause.message : undefined;
   // `-h=1` reads as the short flags -h, -= and -1, so parseArgs blames '-='. Name the real flag.
   const shortWithValue = args.find((arg) => /^-[^-]=/.test(arg));
+
   if (code === "ERR_PARSE_ARGS_UNKNOWN_OPTION" && message?.includes("'-='") && shortWithValue) {
     return `${shortWithValue.slice(0, 2)} takes no value. ${SEE_FLAGS}`;
   }
+
   // parseArgs quotes the offending token: '--bogus', '-x', or '-h, --help' for a known flag.
   const quoted = /'([^']*)'/.exec(message ?? "")?.[1] ?? "";
   const flag = quoted.match(/-{1,2}[\w-]+/g)?.at(-1) ?? quoted;
+
   switch (code) {
     case "ERR_PARSE_ARGS_UNKNOWN_OPTION":
       return `Unknown flag ${flag}. ${SEE_FLAGS}`;
@@ -548,7 +664,7 @@ function explainArgsError(error: unknown, args: string[]): string {
     case "ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL":
       return `Unexpected argument ${quoted}. ${SEE_FLAGS}`;
     default:
-      throw error;
+      throw cause;
   }
 }
 
@@ -582,51 +698,87 @@ function parseCommandLine(args = process.argv.slice(2)) {
   }
 }
 
-async function main() {
-  const { values, positionals } = parseCommandLine();
-  const [command, argument] = positionals;
-  if (values.version) return void process.stdout.write(`${pkg.version}\n`);
-  if (values.help || !command) return void process.stdout.write(HELP);
-  if (command === DAEMON_COMMAND) {
-    return runDaemon(argument ?? fail("no share options"), {
-      server: server(),
-      token: findToken(),
-    });
+type CommandLine = ReturnType<typeof parseCommandLine>;
+
+/** Runs `command` when it names one; false when it names none, and so should be a port. */
+async function runCommand(command: string, { values, positionals }: CommandLine) {
+  const argument = positionals[1];
+
+  switch (command) {
+    case DAEMON_COMMAND:
+      await runDaemon(argument ?? fail("no share options"), {
+        server: server(),
+        token: findToken(),
+      });
+      break;
+    case "ls":
+      await ls(values.json);
+      break;
+    case "stop":
+      await stop(argument, values.all);
+      break;
+    case "logs":
+      await logs(argument, values.json, values.follow);
+      break;
+    case "init":
+      await init(values.skill);
+      break;
+    case "domain":
+      await domain(argument, positionals[2], {
+        name: values.name,
+        json: values.json,
+        wait: values.wait,
+      });
+      break;
+    case "login":
+      await login();
+      break;
+    case "doctor":
+      await doctor(values.port, values.json);
+      break;
+    case "host":
+      if (values.install) await installHost();
+      else if (values.uninstall) await uninstallHost();
+      else await serveHost(values.code?.trim() || undefined);
+      break;
+    case "logout":
+      await logout();
+      break;
+    case "mcp":
+      await (await import("./mcp.ts")).serve();
+      break;
+    default:
+      return false;
   }
-  if (command === "ls") return ls(values.json);
-  if (command === "stop") return stop(argument, values.all);
-  if (command === "logs") return logs(argument, values.json, values.follow);
-  if (command === "init") return init(values.skill);
-  if (command === "domain") {
-    return domain(argument, positionals[2], {
-      name: values.name,
-      json: values.json,
-      wait: values.wait,
-    });
-  }
-  if (command === "login") return login();
-  if (command === "doctor") return doctor(values.port, values.json);
-  if (command === "host" && values.install) return installHost();
-  if (command === "host" && values.uninstall) return uninstallHost();
-  if (command === "host") return serveHost(values.code?.trim() || undefined);
-  if (command === "logout") return logout();
-  if (command === "mcp") return (await import("./mcp.ts")).serve();
+
+  return true;
+}
+
+/** `wurmhol <port>`: the flags, checked, then the pipe. */
+function shareFromFlags(command: string, values: CommandLine["values"]) {
   const port = parsePort(command);
+
   if (port === null) fail(`Not a port or a command: ${command}. See: wurmhol --help`);
   let ttl: number | undefined;
+
   if (values.ttl !== undefined) {
     ttl =
       parseDuration(values.ttl) ??
       fail(`Not a lifetime: ${values.ttl}. Use --ttl 90m or --ttl 8h.`);
   }
+
   if (values.name !== undefined && !pipeName(values.name)) {
     fail(`Not a pipe name: ${values.name}. Use ${PIPE_NAME_RULE}.`);
   }
+
   for (const field of ["link", "note"] as const) {
     const value = values[field];
+
     if (value !== undefined && sourceField(field, value) === null) fail(SOURCE_FIXES[field]);
   }
+
   let path: string | undefined;
+
   if (values.path !== undefined) {
     try {
       path = pagePath(values.path);
@@ -634,8 +786,23 @@ async function main() {
       fail(error);
     }
   }
+
   const { only, name, link, note } = values;
+
   return share({ port, ttl, only, name, link, note }, values.json, path);
+}
+
+async function main() {
+  const line = parseCommandLine();
+  const [command] = line.positionals;
+
+  if (line.values.version) return void process.stdout.write(`${pkg.version}\n`);
+
+  if (line.values.help || !command) return void process.stdout.write(HELP);
+
+  if (await runCommand(command, line)) return;
+
+  return shareFromFlags(command, line.values);
 }
 
 try {

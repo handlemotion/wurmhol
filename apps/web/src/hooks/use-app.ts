@@ -32,8 +32,12 @@ export function useMe() {
  */
 function inline<T>(id: string): T | undefined {
   const text = document.getElementById(id)?.textContent;
+
   if (!text) return undefined;
+
   try {
+    // SAFETY: the Worker writes each script from the same value its API route answers with
+    // (`appConfig`, `signInMethods`), and callers name that route's type.
     return JSON.parse(text) as T;
   } catch {
     return undefined;
@@ -42,6 +46,7 @@ function inline<T>(id: string): T | undefined {
 
 export function useAppConfig() {
   const config = inline<AppConfig>("app-config");
+
   return useQuery({
     queryKey: keys.config,
     queryFn: () => api<AppConfig>("/api/app-config"),
@@ -52,6 +57,7 @@ export function useAppConfig() {
 
 export function useSignInMethods() {
   const methods = inline<SignInMethods>("sign-in-methods");
+
   return useQuery({
     queryKey: keys.methods,
     queryFn: () => api<SignInMethods>("/api/sign-in-methods"),
@@ -71,8 +77,10 @@ export function useWall(orgId: string | null) {
     const wall = takeWall();
     setShares(wall.shares);
     wall.listen(setShares);
+
     return () => wall.close();
   }, [orgId]);
+
   return shares;
 }
 
@@ -84,8 +92,10 @@ export function useMachines(enabled: boolean) {
   const [machines, setMachines] = useState<Machine[] | undefined>(undefined);
   useEffect(() => {
     if (!enabled) return;
+
     return connectMachines(setMachines);
   }, [enabled]);
+
   return machines;
 }
 
@@ -133,6 +143,7 @@ export function useTokens(enabled: boolean) {
 
 export function useCreateToken() {
   const client = useQueryClient();
+
   return useMutation({
     mutationFn: (body: { name: string; scope: TokenScope; expiresInDays: TokenExpiry }) =>
       api<{ id: string; token: string; host: string; url: string | null }>("/api/tokens", {
@@ -145,6 +156,7 @@ export function useCreateToken() {
 
 export function useRevokeToken() {
   const client = useQueryClient();
+
   return useMutation({
     mutationFn: (id: string) => api(`/api/tokens/${id}`, { method: "DELETE" }),
     onSuccess: () => client.invalidateQueries({ queryKey: keys.tokens }),
@@ -166,6 +178,7 @@ export function useMembers(enabled: boolean) {
  */
 export function usePrefetchDialogs() {
   const client = useQueryClient();
+
   return () => {
     void client.prefetchQuery(membersQuery);
     void client.prefetchQuery(tokensQuery);
@@ -174,6 +187,7 @@ export function usePrefetchDialogs() {
 
 export function useRemoveMember() {
   const client = useQueryClient();
+
   return useMutation({
     mutationFn: (id: string) => api(`/api/members/${id}`, { method: "DELETE" }),
     onSuccess: () => client.invalidateQueries({ queryKey: keys.members }),
@@ -181,8 +195,9 @@ export function useRemoveMember() {
 }
 
 /** Changes that move what the whole page shows (org name, role, which org): refetch it all. */
-function useOrgChange<T>(mutationFn: (input: T) => Promise<unknown>) {
+function useOrgChange<T, Result>(mutationFn: (input: T) => Promise<Result>) {
   const client = useQueryClient();
+
   return useMutation({ mutationFn, onSuccess: () => client.invalidateQueries() });
 }
 
@@ -223,6 +238,7 @@ export function useCreateInvite() {
 
 export function useSwitchOrg() {
   const client = useQueryClient();
+
   return useMutation({
     mutationFn: async (organizationId: string) => {
       const { setActiveOrg } = await import("@/lib/auth");
@@ -247,8 +263,10 @@ export function useNow(ms = 15_000) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), ms);
+
     return () => clearInterval(timer);
   }, [ms]);
+
   return now;
 }
 
@@ -260,6 +278,7 @@ export function useOpenBilling() {
         method: "POST",
         body: plan ? { plan } : {},
       });
+
       location.assign(url);
     },
   });
@@ -284,6 +303,7 @@ export function useBilling(enabled: boolean) {
 /** Sets Business's monthly spend cap, in cents. */
 export function useSetSpendCap() {
   const client = useQueryClient();
+
   return useMutation({
     mutationFn: (cents: number) =>
       api<{ cents: number }>("/api/billing/spend-cap", { method: "PUT", body: { cents } }),
@@ -302,18 +322,22 @@ const DOMAIN_CHECKS_PER_REFRESH = 3;
 export function useDomains(enabled: boolean) {
   const client = useQueryClient();
   const [turn] = useState(() => ({ next: 0 }));
+
   return useQuery({
     queryKey: keys.domains,
     queryFn: async () => {
       const waiting = (
         client.getQueryData<{ domains: Domain[] }>(keys.domains)?.domains ?? []
       ).filter((d) => d.state === "pending" || d.state === "verifying");
+
       if (waiting.length) {
         const start = turn.next % waiting.length;
+
         const picked = [...waiting.slice(start), ...waiting.slice(0, start)].slice(
           0,
           DOMAIN_CHECKS_PER_REFRESH,
         );
+
         turn.next = start + picked.length;
         // A check that fails (DNS down, rate limited) only means the list shows the last state.
         await Promise.allSettled(
@@ -322,6 +346,7 @@ export function useDomains(enabled: boolean) {
           ),
         );
       }
+
       return api<{ domains: Domain[] }>("/api/domains");
     },
     enabled,
@@ -334,6 +359,7 @@ export function useDomains(enabled: boolean) {
 
 export function useAddDomain() {
   const client = useQueryClient();
+
   return useMutation({
     mutationFn: (body: { hostname: string; pipe: string }) =>
       api<{ domain: Domain }>("/api/domains", { method: "POST", body }),
@@ -344,6 +370,7 @@ export function useAddDomain() {
 /** Looks at a domain now, instead of waiting for the next refresh. */
 export function useVerifyDomain() {
   const client = useQueryClient();
+
   return useMutation({
     mutationFn: (hostname: string) =>
       api<{ domain: Domain }>(`/api/domains/${hostname}/verify`, { method: "POST" }),
@@ -353,6 +380,7 @@ export function useVerifyDomain() {
 
 export function useRemoveDomain() {
   const client = useQueryClient();
+
   return useMutation({
     mutationFn: (hostname: string) => api(`/api/domains/${hostname}`, { method: "DELETE" }),
     onSuccess: () => client.invalidateQueries({ queryKey: keys.domains }),

@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname } from "node:path";
+import { isJsonObject, isString, parseJson } from "@wurmhol/protocol";
 
 /** The token a device login granted, with the server it belongs to. */
 export interface StoredToken {
@@ -33,6 +34,7 @@ export interface TokenStore {
 
 export function memoryTokenStore(initial?: StoredToken): TokenStore {
   let held = initial ?? null;
+
   return {
     load: (server) => (held && held.server === server ? held : null),
     save: (token) => void (held = token),
@@ -43,19 +45,23 @@ export function memoryTokenStore(initial?: StoredToken): TokenStore {
 /** The token in the file at `path`, or null when there is none or it is not one. */
 export function readTokenFile(path: string): StoredToken | null {
   let text: string;
+
   try {
     text = readFileSync(path, "utf8");
   } catch {
     return null;
   }
+
   try {
-    const parsed = JSON.parse(text) as Partial<StoredToken>;
-    if (typeof parsed.server !== "string" || typeof parsed.token !== "string") return null;
+    const parsed = parseJson(text);
+
+    if (!isJsonObject(parsed) || !isString(parsed.server) || !isString(parsed.token)) return null;
+
     return {
       server: parsed.server,
       token: parsed.token,
-      org: parsed.org ?? null,
-      name: parsed.name ?? "",
+      org: isString(parsed.org) ? parsed.org : null,
+      name: isString(parsed.name) ? parsed.name : "",
     };
   } catch {
     return null;
@@ -70,12 +76,14 @@ export function writeTokenFile(path: string, token: StoredToken) {
   // tightened too: no window where the token sits in a wider file.
   const temporary = `${path}.${process.pid}.tmp`;
   const fd = openSync(temporary, "w", 0o600);
+
   try {
     fchmodSync(fd, 0o600);
     writeFileSync(fd, `${JSON.stringify(token, null, 2)}\n`);
   } finally {
     closeSync(fd);
   }
+
   renameSync(temporary, path);
 }
 
@@ -83,6 +91,7 @@ export function writeTokenFile(path: string, token: StoredToken) {
 export function removeTokenFile(path: string) {
   const existed = readTokenFile(path) !== null;
   rmSync(path, { force: true });
+
   return existed;
 }
 
@@ -90,6 +99,7 @@ export function fileTokenStore(path: string): TokenStore {
   return {
     load: (server) => {
       const stored = readTokenFile(path);
+
       return stored && stored.server === server ? stored : null;
     },
     save: (token) => writeTokenFile(path, token),

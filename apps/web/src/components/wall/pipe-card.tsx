@@ -13,6 +13,7 @@ import { ago } from "@/lib/time";
 /** The page's title, else the host; a pill falls back to just the pipe's own label. */
 function name(share: ShareCard, short = false) {
   const host = new URL(share.url).host;
+
   return share.title ?? (short ? host.split(".")[0] : host);
 }
 
@@ -20,6 +21,7 @@ function name(share: ShareCard, short = false) {
 function Mark({ share }: { share: ShareCard }) {
   // A favicon that won't load falls back to the square rather than a broken image.
   const [broken, setBroken] = useState(false);
+
   // One 16px slot for both, so every pill's label starts at the same place.
   return (
     <span aria-hidden className="flex size-4 shrink-0 items-center justify-center">
@@ -85,7 +87,9 @@ function fromParts(source: PipeSource): React.ReactNode[] {
   const git = [source.branch, source.commit && `@ ${source.commit.slice(0, 7)}`]
     .filter(Boolean)
     .join(" ");
+
   const agent = source.agent ?? (source.agentUrl ? "Agent" : null);
+
   return [
     agent &&
       (source.agentUrl ? (
@@ -121,18 +125,23 @@ function usePullRequest(share: ShareCard): React.ReactNode {
   const me = useMe();
   const onGithub = share.source?.repoHost === "github.com" && Boolean(share.source.repo);
   const github = useGithub(me.data?.role === "owner" && onGithub && !share.preview);
+
   if (share.preview) {
     return <RowLink href={share.preview.url}>#{share.preview.pullRequest}</RowLink>;
   }
+
   const account = share.source?.repo?.split("/")[0]?.toLowerCase();
   const linked = github.data?.installations.some((i) => i.account.toLowerCase() === account);
+
   if (!github.data?.available || linked) return null;
+
   return <RowLink href="/api/github/install">Connect GitHub</RowLink>;
 }
 
 /** A link's host and path, short enough for a row. */
 function shortUrl(href: string) {
   const url = new URL(href);
+
   return `${url.host}${url.pathname === "/" ? "" : url.pathname}`;
 }
 
@@ -153,13 +162,16 @@ export function PipeCard({ share }: { share: ShareCard }) {
   const now = useNow();
   const terminate = useTerminate();
   const shown = share.views.slice(0, VIEWS_SHOWN);
+
   const views = [
     ...shown.map((view) => `${view.name}, ${ago(view.lastSeenAt, now)}`),
     share.views.length > shown.length ? `+${share.views.length - shown.length}` : null,
   ].filter(Boolean);
+
   const { source } = share;
   const pullRequest = usePullRequest(share);
   const from = source ? fromParts(source) : [];
+
   const details: (Row | false | null)[] = [
     source &&
       from.length > 0 && {
@@ -184,6 +196,7 @@ export function PipeCard({ share }: { share: ShareCard }) {
     { term: "Last request", value: ago(share.lastRequestAt, now) ?? "None yet" },
     { term: "Viewers", value: views.length > 0 ? views.join(" · ") : "None yet" },
   ];
+
   const rows = details.filter((row) => row !== false && row !== null);
 
   return (

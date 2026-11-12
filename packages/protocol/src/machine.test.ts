@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it } from "vite-plus/test";
 import { MACHINE_LIMITS, parseHostMessage, parseRelayMessage } from "./machine.ts";
 
 // Catches: the CLI sending a shape the relay drops, so the wall never sees its ports or answers.
@@ -10,6 +10,7 @@ it("accepts what wurmhol host sends", () => {
       { port: 3000, title: null },
     ],
   };
+
   expect(parseHostMessage(ports)).toEqual(ports);
   const opened = { type: "opened", id: "a", url: "https://abcdefghij.wurmhol.dev/" };
   expect(parseHostMessage(opened)).toEqual(opened);

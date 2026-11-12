@@ -4,12 +4,23 @@
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
+/** An error reduced to what is safe to log: never its stack or cause. */
+export interface LoggedError {
+  readonly name: string;
+  readonly message: string;
+}
+
+/** A value a log line can carry; anything else is reduced to one of these first. */
+export type LogValue = string | number | boolean | null | undefined | LoggedError;
+
+export type LogFields = Readonly<Record<string, LogValue>>;
+
 export interface Logger {
-  debug(event: string, fields?: Record<string, unknown>): void;
-  info(event: string, fields?: Record<string, unknown>): void;
-  warn(event: string, fields?: Record<string, unknown>): void;
-  error(event: string, fields?: Record<string, unknown>): void;
-  child(fields: Record<string, unknown>): Logger;
+  debug(event: string, fields?: LogFields): void;
+  info(event: string, fields?: LogFields): void;
+  warn(event: string, fields?: LogFields): void;
+  error(event: string, fields?: LogFields): void;
+  child(fields: LogFields): Logger;
 }
 
 /** What web and iOS send, and what every response carries back. */
@@ -29,11 +40,12 @@ const sink: Record<LogLevel, (line: string) => void> = {
   error: (line) => console.error(line),
 };
 
-export function createLogger(base: Record<string, unknown> = {}): Logger {
-  const write = (level: LogLevel, event: string, fields?: Record<string, unknown>) => {
+export function createLogger(base: LogFields = {}): Logger {
+  const write = (level: LogLevel, event: string, fields?: LogFields) => {
     const line = { time: new Date().toISOString(), level, event, ...base, ...fields };
-    sink[level](JSON.stringify(line, replacer));
+    sink[level](JSON.stringify(line));
   };
+
   return {
     debug: (event, fields) => write("debug", event, fields),
     info: (event, fields) => write("info", event, fields),
@@ -43,9 +55,12 @@ export function createLogger(base: Record<string, unknown> = {}): Logger {
   };
 }
 
-function replacer(_key: string, value: unknown): unknown {
-  if (typeof value === "bigint") return value.toString();
-  // Messages only, never stacks or causes: database errors can quote bound values.
-  if (value instanceof Error) return { name: value.name, message: value.message.slice(0, 500) };
-  return value;
+/**
+ * A thrown value as a log field. Messages only, never stacks or causes: database errors can
+ * quote bound values.
+ */
+export function loggedError(cause: unknown): LoggedError {
+  if (cause instanceof Error) return { name: cause.name, message: cause.message.slice(0, 500) };
+
+  return { name: "NonError", message: String(cause).slice(0, 500) };
 }

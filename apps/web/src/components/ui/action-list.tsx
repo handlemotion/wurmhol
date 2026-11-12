@@ -18,13 +18,11 @@ const ITEM_SELECTOR = "[role='menuitem']";
  */
 export function ActionList<T extends object>({ className, ...props }: MenuProps<T>) {
   const hover = useMagneticHover({ itemSelector: ITEM_SELECTOR });
+
   return (
     <div className="relative" {...hover.containerProps}>
       <FluidHoverHighlight {...hover.highlightProps} className="bg-secondary" />
-      <MenuPrimitive
-        {...props}
-        className={cx("flex flex-col gap-0.5 outline-hidden", className as string)}
-      />
+      <MenuPrimitive {...props} className={cx("flex flex-col gap-0.5 outline-hidden", className)} />
     </div>
   );
 }
@@ -36,7 +34,7 @@ export function ActionItem({ className, ...props }: MenuItemProps) {
       className={cx(
         "relative flex h-8 cursor-default items-center gap-2.5 px-2 text-sm text-foreground outline-hidden select-none",
         "*:[svg]:size-icon *:[svg]:shrink-0 *:[svg]:text-foreground",
-        className as string,
+        className,
       )}
     />
   );

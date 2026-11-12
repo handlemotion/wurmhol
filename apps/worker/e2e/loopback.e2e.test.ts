@@ -7,13 +7,16 @@ import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer as createVite, type ViteDevServer } from "vite";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   browserFetch,
   browserSocket,
   cli,
   cliEnv,
   createToken,
+  listeningPort,
+  parseJson,
   type Person,
   share,
   signIn,
@@ -34,8 +37,8 @@ let port: number;
 async function requireIpv6Loopback() {
   const probe = createNetServer();
   await new Promise<void>((resolve, reject) => {
-    probe.once("error", (error) =>
-      reject(new Error(`this suite needs an IPv6 loopback (::1): ${(error as Error).message}`)),
+    probe.once("error", (error: Error) =>
+      reject(new Error(`this suite needs an IPv6 loopback (::1): ${error.message}`)),
     );
     probe.listen(0, "::1", resolve);
   });
@@ -60,7 +63,7 @@ beforeAll(async () => {
     server: { host: "::1", port: 0 },
   });
   await vite.listen();
-  port = (vite.httpServer!.address() as { port: number }).port;
+  port = listeningPort(vite.httpServer!);
 });
 
 afterAll(async () => {
@@ -82,7 +85,9 @@ it("a pipe serves a dev server listening only on ::1, hot reload included", asyn
   // Catches: the browser's WebSocket stream still dialing 127.0.0.1 after HTTP falls back.
   const socket = browserSocket(`${url}/?token=${token}`, ["vite-hmr"], { cookie, origin: url });
   const messages: { type: string }[] = [];
-  socket.on("message", (data) => messages.push(JSON.parse(data.toString()) as { type: string }));
+  const message = z.object({ type: z.string() });
+  socket.on("message", (data) => messages.push(parseJson(message, data.toString())));
+
   await new Promise<void>((resolve, reject) => {
     socket.once("open", () => resolve());
     socket.once("error", reject);

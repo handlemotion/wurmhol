@@ -8,7 +8,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "auth:generate": "auth generate --config auth.config.ts --output ../db/src/schema/auth.ts -y && cd ../db && oxfmt src/schema/auth.ts"
+    "auth:generate": "auth generate --config auth.config.ts --output ../db/src/schema/auth.ts -y && cd ../db && vp fmt src/schema/auth.ts"
   },
   "dependencies": {
     "@better-auth/cimd": "^1.7.20",

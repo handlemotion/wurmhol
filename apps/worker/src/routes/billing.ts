@@ -27,11 +27,14 @@ export const billing = new Hono<AppEnv>()
     const enabled = config.auth.billing !== undefined;
     const standing = await orgStanding(db, member.orgId, { enabled });
     const subscription = enabled ? await orgSubscription(db, member.orgId) : null;
+
     const cents =
       subscription?.plan === "business"
         ? ((await findSpendCap(db, member.orgId)) ?? DEFAULT_SPEND_CAP_CENTS)
         : null;
+
     const usage = enabled ? await orgStub(c.env, member.orgId).usage() : null;
+
     return c.json({
       enabled,
       canManage: member.role === "owner",
@@ -56,10 +59,13 @@ export const billing = new Hono<AppEnv>()
   /** Where Billing goes: the portal when the org has a plan, else Checkout for the asked one. */
   .post("/billing/open", requireOwner, zValidator("json", openBody), async (c) => {
     const { config, db, member, auth } = c.var;
+
     if (!config.auth.billing) {
       throw new HTTPException(404, { message: "billing is off on this install" });
     }
+
     const back = new URL("/", config.auth.baseURL).toString();
+
     if (await orgSubscription(db, member.orgId)) {
       const portal = await auth.api.createBillingPortal({
         headers: c.req.raw.headers,
@@ -70,8 +76,10 @@ export const billing = new Hono<AppEnv>()
           disableRedirect: true,
         },
       });
+
       return c.json({ url: portal.url });
     }
+
     const session = await auth.api.upgradeSubscription({
       headers: c.req.raw.headers,
       body: {
@@ -83,7 +91,9 @@ export const billing = new Hono<AppEnv>()
         disableRedirect: true,
       },
     });
+
     if (!session.url) throw new HTTPException(502, { message: "Stripe returned no checkout URL" });
+
     return c.json({ url: session.url });
   })
   /**
@@ -98,18 +108,24 @@ export const billing = new Hono<AppEnv>()
     async (c) => {
       const { config, db, member } = c.var;
       const plan = await orgPlan(db, config, member.orgId);
+
       if (plan?.plan !== "business") {
         throw new HTTPException(409, { message: "only Business has a spend cap" });
       }
+
       const { cents } = c.req.valid("json");
+
       if (cents < config.BUSINESS_BASE_CENTS || cents > MAX_SPEND_CAP_CENTS) {
         throw new HTTPException(400, {
           message: `set a spend cap from $${config.BUSINESS_BASE_CENTS / 100} to $${MAX_SPEND_CAP_CENTS / 100} a month`,
         });
       }
+
       await setSpendCap(db, member.orgId, cents);
       const updated = await orgPlan(db, config, member.orgId);
+
       if (updated) await orgStub(c.env, member.orgId).setLimits(updated.limits);
+
       return c.json({ cents, requests: businessRequests(config, cents) });
     },
   );

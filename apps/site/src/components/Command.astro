@@ -27,6 +27,7 @@ const { command, output } = Astro.props;
       } catch {
         return; // No clipboard (insecure context or denied): the text stays selectable.
       }
+
       if (!hint) return;
       hint.textContent = "Copied";
       setTimeout(() => (hint.textContent = "Click to copy"), 1600);

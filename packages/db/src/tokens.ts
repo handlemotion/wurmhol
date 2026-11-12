@@ -38,6 +38,7 @@ export async function createToken(
     createdBy: input.createdBy,
     loginCode: input.loginCode ?? null,
   });
+
   return { id, token };
 }
 
@@ -66,6 +67,7 @@ export async function revokeToken(db: Db, orgId: string, tokenId: string) {
     .set({ revokedAt: new Date() })
     .where(and(eq(tokens.id, tokenId), eq(tokens.orgId, orgId), isNull(tokens.revokedAt)))
     .returning({ id: tokens.id });
+
   return revoked.length > 0;
 }
 
@@ -76,6 +78,7 @@ export async function revokeTokensOf(db: Db, orgId: string, userId: string) {
     .set({ revokedAt: new Date() })
     .where(and(eq(tokens.orgId, orgId), eq(tokens.createdBy, userId), isNull(tokens.revokedAt)))
     .returning({ id: tokens.id });
+
   return revoked.map((token) => token.id);
 }
 
@@ -91,6 +94,7 @@ export async function useToken(db: Db, token: string): Promise<TokenUse> {
   if (!token.startsWith(TOKEN_PREFIX)) return { ok: false, reason: "unknown" };
   const hash = await sha256Hex(token);
   const now = new Date();
+
   const [row] = await db
     .update(tokens)
     .set({ lastUsedAt: now })
@@ -107,12 +111,15 @@ export async function useToken(db: Db, token: string): Promise<TokenUse> {
       createdBy: tokens.createdBy,
       scope: tokens.scope,
     });
+
   if (row) return { ok: true, ...row };
+
   const [expired] = await db
     .select({ id: tokens.id })
     .from(tokens)
     .where(and(eq(tokens.hash, hash), isNull(tokens.revokedAt)))
     .limit(1);
+
   return { ok: false, reason: expired ? "expired" : "unknown" };
 }
 
@@ -123,5 +130,6 @@ export async function isTokenLive(db: Db, tokenId: string) {
     .from(tokens)
     .where(and(eq(tokens.id, tokenId), isNull(tokens.revokedAt)))
     .limit(1);
+
   return row !== undefined;
 }

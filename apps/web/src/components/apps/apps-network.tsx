@@ -29,33 +29,41 @@ export function AppsNetwork({ apps }: { apps: App[] }) {
     restore.current = current;
     setOpen(null);
   };
+
   const onClosed = () => {
     const id = restore.current;
     restore.current = null;
+
     if (!id) return;
     const selector = id === ANCHOR ? "[data-create-app]" : `[data-app="${CSS.escape(id)}"]`;
+
     // As on the wall: the pill mounts once the card's exit completes.
     const focus = (frames: number) => {
       const pill = [...document.querySelectorAll<HTMLElement>(selector)].find(
         (el) => !el.closest("[inert]"),
       );
+
       if (pill) pill.focus();
       else if (frames > 0) requestAnimationFrame(() => focus(frames - 1));
     };
+
     focus(10);
   };
 
   useEffect(() => {
     if (!current) return;
     const onKey = (event: KeyboardEvent) => event.key === "Escape" && close();
+
     const onPress = (event: PointerEvent) => {
-      const target = event.target as Element;
       const keep = "[data-open], [data-app], [data-create-app], [role=dialog], [role=menu]";
-      if (target.closest(keep)) return;
+
+      if (event.target instanceof Element && event.target.closest(keep)) return;
       close();
     };
+
     document.addEventListener("keydown", onKey);
     document.addEventListener("pointerdown", onPress);
+
     return () => {
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("pointerdown", onPress);

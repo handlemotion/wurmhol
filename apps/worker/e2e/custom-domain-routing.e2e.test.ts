@@ -2,8 +2,9 @@
 // the same sign-in wall, signing in comes back to the host the viewer used, and a host that is not
 // proven, or not known, is never the console and never a pipe.
 import { randomBytes } from "node:crypto";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
 import { openPipe } from "wurmhol";
+import { z } from "zod";
 import { fakeCloudflare, fakeResolver, TOKEN, ZONE } from "./domain-fakes.ts";
 import {
   api,
@@ -12,6 +13,7 @@ import {
   cliEnv,
   createToken,
   localServer,
+  parseJson,
   type Person,
   signIn,
   type Stack,
@@ -54,23 +56,32 @@ afterAll(async () => {
   await resolver.close();
 });
 
+const wall = z.object({ shares: z.array(z.object({ url: z.string() })) });
+
 const customUrl = (hostname: string) => `http://${hostname}:${stack.port}`;
 
 /** Adds a domain and walks it through both proofs, as its owner would. */
 async function activate(hostname: string, pipe: string) {
-  const added = await api<{ domain: { dns: { value: string }[] } }>(stack, ada, "/api/domains", {
-    method: "POST",
-    body: { hostname, pipe },
-  });
+  const added = await api(
+    stack,
+    ada,
+    "/api/domains",
+    { method: "POST", body: { hostname, pipe } },
+    z.object({ domain: z.object({ dns: z.array(z.object({ value: z.string() })) }) }),
+  );
+
   expect(added.status).toBe(201);
   resolver.publish(`_wurmhol.${hostname}`, added.body.domain.dns[0]!.value);
   cloudflare.set(hostname, { status: "active", sslStatus: "active" });
-  const verified = await api<{ domain: { state: string } }>(
+
+  const verified = await api(
     stack,
     ada,
     `/api/domains/${hostname}/verify`,
     { method: "POST" },
+    z.object({ domain: z.object({ state: z.string() }) }),
   );
+
   expect(verified.body.domain.state).toBe("active");
 }
 
@@ -78,13 +89,14 @@ it("serves the name's pipe on the custom host, and signing in comes back to that
   await activate("preview.acme.localhost", "acme-app");
   const opened = await cli([String(local.port), "--name", "acme-app", "--json"], env);
   expect(opened.code).toBe(0);
-  const pipe = JSON.parse(opened.stdout) as { id: string; url: string };
+  const pipe = parseJson(z.object({ id: z.string(), url: z.string() }), opened.stdout);
   // The pipe's URL is the custom domain: what the CLI prints and the wall shows.
   expect(pipe.url).toBe(customUrl("preview.acme.localhost"));
 
   const first = await browserFetch(`${customUrl("preview.acme.localhost")}/`, {
     headers: navigate,
   });
+
   expect(first.status).toBe(302);
   const open = new URL(first.headers.get("location")!);
   expect(`${open.origin}${open.pathname}`).toBe(`${stack.url}/open`);
@@ -112,10 +124,12 @@ it("serves the name's pipe on the custom host, and signing in comes back to that
     new RegExp(`^${customUrl("preview.acme.localhost")}/__wurmhol/auth\\?code=`),
   );
   const set = await browserFetch(back.headers.get("location")!);
+
   const cookie = set.headers
     .getSetCookie()
     .map((c) => c.split(";")[0]!)
     .find((c) => c.startsWith("__Host-wurmhol="))!;
+
   // The dev server is told the host the viewer used, so the redirect URIs it builds are the brand's.
   const page = await browserFetch(`${customUrl("preview.acme.localhost")}/`, { cookie });
   expect(await page.text()).toBe(`host preview.acme.localhost:${stack.port}`);
@@ -143,11 +157,14 @@ it("does not serve a domain that is not proven, and never answers as the console
     method: "POST",
     body: { hostname: "unproven.acme.localhost", pipe: "acme-app" },
   });
+
   expect(added.status).toBe(201);
   cloudflare.set("unproven.acme.localhost", { status: "active", sslStatus: "active" });
+
   const unproven = await browserFetch(`${customUrl("unproven.acme.localhost")}/`, {
     headers: navigate,
   });
+
   expect(unproven.status).toBe(404);
   expect(await unproven.text()).toContain("not connected to a pipe");
 
@@ -156,6 +173,7 @@ it("does not serve a domain that is not proven, and never answers as the console
   const stranger = await browserFetch(`${customUrl("nothing.acme.localhost")}/`, {
     headers: navigate,
   });
+
   expect(stranger.status).toBe(404);
   expect(await stranger.text()).not.toContain("<div id=");
   expect((await browserFetch(`${stack.url}/health`)).status).toBe(200);
@@ -163,10 +181,11 @@ it("does not serve a domain that is not proven, and never answers as the console
 
 it("stops serving the moment the domain is removed, by its org or by the operator", async () => {
   const gone = "preview.acme.localhost";
+
   const wallUrl = async () =>
-    (await api<{ shares: { url: string }[] }>(stack, ada, "/api/shares")).body.shares.find((s) =>
-      s.url.includes("acme"),
-    )?.url;
+    (await api(stack, ada, "/api/shares", {}, wall)).body.shares.find((s) => s.url.includes("acme"))
+      ?.url;
+
   expect(await wallUrl()).toBe(customUrl(gone));
   const removed = await api(stack, ada, `/api/domains/${gone}`, { method: "DELETE" });
   expect(removed.status).toBe(200);
@@ -178,10 +197,12 @@ it("stops serving the moment the domain is removed, by its org or by the operato
   await activate("again.acme.localhost", "acme-app");
   // A domain that becomes active moves the open pipe to it too.
   expect(await wallUrl()).toBe(customUrl("again.acme.localhost"));
+
   const taken = await browserFetch(`${stack.url}/operator/domains/again.acme.localhost`, {
     method: "DELETE",
     headers: { authorization: `Bearer ${OPERATOR_TOKEN}` },
   });
+
   expect(taken.status).toBe(200);
   expect(cloudflare.has("again.acme.localhost")).toBe(false);
   expect((await browserFetch(`${customUrl("again.acme.localhost")}/`)).status).toBe(404);
@@ -190,11 +211,14 @@ it("stops serving the moment the domain is removed, by its org or by the operato
 it("lets a client with the pipe's access key in on the custom host, and no one else (ADR 0028)", async () => {
   await activate("keyed.acme.localhost", "acme-key");
   const seen: string[] = [];
+
   const dev = await localServer((req, res) => {
     seen.push(Object.keys(req.headers).join(","));
     res.end("ok");
   });
+
   const accessKey = randomBytes(24).toString("hex");
+
   const pipe = await openPipe({
     port: dev.port,
     token: (await createToken(stack, ada, "sdk")).token,
@@ -202,6 +226,7 @@ it("lets a client with the pipe's access key in on the custom host, and no one e
     name: "acme-key",
     accessKey,
   });
+
   try {
     const url = customUrl("keyed.acme.localhost");
     expect(pipe.url).toBe(url);

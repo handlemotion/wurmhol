@@ -28,23 +28,26 @@ export const PERMISSIONS_POLICY = [
  */
 const API_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
-const DEFAULTS: Record<string, string> = {
+const DEFAULTS = {
   "content-security-policy": API_CSP,
   // Two years, subdomains included. Browsers ignore it on plain http (local dev).
   "strict-transport-security": "max-age=63072000; includeSubDomains",
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
   "permissions-policy": PERMISSIONS_POLICY,
-};
+} satisfies Record<string, string>;
 
 export const securityHeaders = createMiddleware(async (c, next) => {
   await next();
+
   // A websocket upgrade's response belongs to the runtime and cannot be rebuilt.
   if (c.res.status === 101) return;
   // Some responses (fetch, R2, Better Auth) carry immutable headers: copy before editing.
   const response = new Response(c.res.body, c.res);
+
   for (const [name, value] of Object.entries(DEFAULTS)) {
     if (!response.headers.has(name)) response.headers.set(name, value);
   }
+
   c.res = response;
 });

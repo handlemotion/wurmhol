@@ -23,9 +23,13 @@ load every reference for every task.
 ## Commands and tools
 
 - Node: `.nvmrc`; pnpm: `package.json#packageManager`. Install: `pnpm install --frozen-lockfile`.
+- Toolchain: Vite+ (`vp`: Oxfmt, Oxlint with anti-slop and `complexity`, Vitest, `vp pack`). Fix
+  lint findings; never disable anti-slop or `complexity` rules.
 - Check: `pnpm check` and `pnpm check-types`. Unit tests: `pnpm test:all` (all) or `pnpm test`
   (affected). E2E: `pnpm test:e2e`; one file:
   `pnpm --filter @wurmhol/worker test:e2e e2e/<file>.e2e.test.ts`.
+- Prove a change with the [verify skill](.claude/skills/verify/SKILL.md); `pnpm verify` shares a real
+  server through the real CLI against the local stack.
 - Run the real local app: `pnpm stack:serve`; stop: `pnpm stack:serve:stop`.
   It migrates local D1, builds the web app, and returns when `/health` on port 8787 answers.
 - **Prefer the Cloudflare `cf` CLI, not `wrangler`, for direct Cloudflare operations.** Discover

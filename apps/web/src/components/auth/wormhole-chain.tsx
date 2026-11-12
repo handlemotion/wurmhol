@@ -20,23 +20,28 @@ import { useEffect } from "react";
 const HOLE = 310;
 const N = 9;
 const E = 0.45;
+
 /** One ring step (2π/N) per minute: slow enough to read as drift, not as a spinner. */
 const DRIFT = (Math.PI * 2) / N / 60;
+
 /**
  * Redraws per second. The chain's edges move at most 13 px/s, so a step is under half a pixel:
  * smooth to the eye, at half a 60 Hz screen's main-thread work and a quarter of a 120 Hz one's.
  */
 const FPS = 30;
+
 /** The dashes march one dash period (6 on, 5 off) every four seconds, so they loop without a seam. */
 const MARCH = 11 / 4;
 
 type Point = [number, number];
+
 type Circle = { c: Point; r: number };
 
 function invert({ c, r }: Circle, o: Point): Circle {
   const dx = c[0] - o[0];
   const dy = c[1] - o[1];
   const s = 1 / (dx * dx + dy * dy - r * r);
+
   return { c: [o[0] + dx * s, o[1] + dy * s], r: Math.abs(r * s) };
 }
 
@@ -51,14 +56,18 @@ export function steiner(phase: number) {
   const hole0 = invert({ c: [0, 0], r: R2 }, O);
   const k = HOLE / hole0.r;
   const flip = outer0.c[0] > hole0.c[0] ? 1 : -1;
+
   const T = (C: Circle): Circle => ({
     c: [flip * (C.c[0] - hole0.c[0]) * k, (C.c[1] - hole0.c[1]) * k],
     r: C.r * k,
   });
+
   const chain = Array.from({ length: N }, (_, i) => {
     const t = Math.PI + phase + (i / N) * Math.PI * 2;
+
     return T(invert({ c: [rho * Math.cos(t), rho * Math.sin(t)], r: rr }, O));
   });
+
   return { hole: T(hole0), outer: T(outer0), chain };
 }
 
@@ -66,18 +75,21 @@ function towards(from: Point, to: Point, d: number): Point {
   const dx = to[0] - from[0];
   const dy = to[1] - from[1];
   const L = Math.hypot(dx, dy) || 1;
+
   return [from[0] + (dx / L) * d, from[1] + (dy / L) * d];
 }
 
 /** The bezel: 240 radial ticks outside the outer circle, every 12th one long, as one path. */
 function bezelPath({ c, r }: Circle) {
   let d = "";
+
   for (let i = 0; i < 240; i++) {
     const t = (i / 240) * Math.PI * 2;
     const l = i % 12 === 0 ? 14 : 7;
     const [x, y] = [Math.cos(t), Math.sin(t)];
     d += `M${c[0] + x * r} ${c[1] + y * r}L${c[0] + x * (r + l)} ${c[1] + y * (r + l)}`;
   }
+
   return d;
 }
 
@@ -110,6 +122,7 @@ function chainPaths(phase: number) {
     nodes += square(towards(outer.c, C.c, outer.r), 6);
     nodes += ring({ c: C.c, r: 2.5 });
   });
+
   return { circles, dashes, nodes };
 }
 
@@ -117,6 +130,7 @@ function chainPaths(phase: number) {
 const REST = steiner(0);
 const REST_PATHS = chainPaths(0);
 const BEZEL = bezelPath(REST.outer);
+
 /**
  * The bezel's own box: a square around the outer circle and its longest ticks, on whole pixels
  * so its ticks rasterize exactly as they would in the plate's coordinates.
@@ -127,6 +141,7 @@ const BEZEL_BOX = (() => {
   const x = Math.floor(cx - r);
   const y = Math.floor(cy - r);
   const size = Math.ceil(cx + r) - x;
+
   return { x, y, size, origin: `${cx - x}px ${cy - y}px` };
 })();
 
@@ -139,7 +154,9 @@ export function useWormholeMotion(root: React.RefObject<HTMLElement | null>) {
   useEffect(() => {
     const el = root.current;
     const [circles, dashes, nodes] = el?.querySelectorAll("[data-chain] path") ?? [];
+
     if (!el || !circles || !dashes || !nodes) return;
+
     const draw = (seconds: number) => {
       const d = chainPaths(seconds * DRIFT);
       circles.setAttribute("d", d.circles);
@@ -147,30 +164,38 @@ export function useWormholeMotion(root: React.RefObject<HTMLElement | null>) {
       nodes.setAttribute("d", d.nodes);
       el.style.setProperty("--march", `${-((seconds * MARCH) % 11)}px`);
     };
+
     const query = matchMedia("(prefers-reduced-motion: reduce)");
     let frame = 0;
     let start = 0;
     let drawn = -Infinity;
+
     const tick = (now: number) => {
       start ||= now;
+
       // Skips frames on a faster screen: a redraw at most every 1/FPS s (less a millisecond,
       // so a 60 Hz screen's frames, which arrive a hair early or late, keep every other one).
       if (now - drawn >= 1000 / FPS - 1) {
         drawn = now;
         draw((now - start) / 1000);
       }
+
       frame = requestAnimationFrame(tick);
     };
+
     const update = () => {
       cancelAnimationFrame(frame);
       frame = 0;
       // Motion (re)starts from rest, as the bezel's CSS animation does.
       start = 0;
+
       if (query.matches) draw(0);
       else frame = requestAnimationFrame(tick);
     };
+
     update();
     query.addEventListener("change", update);
+
     return () => {
       query.removeEventListener("change", update);
       cancelAnimationFrame(frame);
@@ -184,11 +209,13 @@ const STROKE = {
   strokeWidth: 1,
   vectorEffect: "non-scaling-stroke",
 } as const;
+
 const DASH = { ...STROKE, strokeDasharray: "6 5" } as const;
 
 /** The chain and the bezel, laid over the generated plate in the same coordinates. */
 export function WormholeChain({ className }: { className?: string }) {
   const { x, y, size, origin } = BEZEL_BOX;
+
   return (
     <>
       <svg

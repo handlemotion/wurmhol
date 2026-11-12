@@ -39,6 +39,7 @@ export async function pruneExpired(
   { now, retentionDays }: { now: Date; retentionDays: number },
 ): Promise<Pruned> {
   const cutoff = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
+
   const [pipes, signIns, magicLinks, invites, devices, relayed, launches, events, grants] =
     await db.batch([
       db.delete(shares).where(lt(shares.startedAt, cutoff)),
@@ -53,6 +54,7 @@ export async function pruneExpired(
         .delete(embedGrants)
         .where(or(lt(embedGrants.expiresAt, cutoff), lt(embedGrants.revokedAt, cutoff))),
     ]);
+
   return {
     shares: pipes.meta.changes,
     sessions: signIns.meta.changes,

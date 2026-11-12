@@ -44,6 +44,7 @@ import {
   setEmbedTunnelStopped,
   useEmbedConnector,
   type Db,
+  type EmbedConnectorUse,
 } from "@wurmhol/db";
 import { TRIAL_DAYS } from "@wurmhol/auth";
 import { type Context, Hono } from "hono";
@@ -51,21 +52,24 @@ import { bearerToken, refuse } from "../bearer.ts";
 import type { AppEnv } from "../context.ts";
 import { reservedPipeNames, shareOrigin } from "../env.ts";
 import { shareUrl } from "../share-url.ts";
-import { orgStub, type Reservation } from "../org-do.ts";
+import { type AppLimits, orgStub, type Reservation, type TenantLimits } from "../org-do.ts";
 import { type OrgPlan, orgPlan } from "../plan.ts";
 import { checkRateLimit } from "../rate-limiter.ts";
 import { shareGone, shareStub, toShare } from "../share-do.ts";
 import type { ShareInit } from "../share-meta.ts";
 
 const MAX_VIEWERS = 50;
+
 /** Bigger than any source within `SOURCE_LIMITS`, URI-encoded. */
 const MAX_SOURCE_HEADER = 24 * 1024;
 
 function readSource(header: string | undefined): SourceResult {
   if (!header) return { ok: true, source: null };
+
   if (header.length > MAX_SOURCE_HEADER) {
     return { ok: false, field: "note", fix: "The pipe's source is too long." };
   }
+
   try {
     return parsePipeSource(JSON.parse(decodeURIComponent(header)));
   } catch {
@@ -88,28 +92,191 @@ async function takeOver(
 ) {
   const stub = shareStub(env, open.id);
   const { state } = await stub.status();
+
   if (state === "live" && !sameStarter) return false;
+
   if (state === "live" || state === "away") {
     await stub.terminate("stopped");
   } else {
     await recordShareEnd(db, { id: open.id, reason: "disconnected", bytes: 0 });
     await orgStub(env, orgId).remove(open.id);
   }
+
   return true;
+}
+
+type ConnectContext = Context<AppEnv>;
+
+type ShareRow = NonNullable<Awaited<ReturnType<typeof findShare>>>;
+
+/**
+ * A reconnect to the share `resume` names, still open, when `owns` says the caller started it;
+ * its end otherwise.
+ */
+async function resumeShare(c: ConnectContext, resume: string, owns: (share: ShareRow) => boolean) {
+  const share = SHARE_ID.test(resume) ? await findShare(c.var.db, resume) : null;
+
+  if (!share || !owns(share)) return shareGone(null);
+
+  if (share.endedAt) {
+    return shareGone(isEndReason(share.endReason) ? share.endReason : "disconnected");
+  }
+
+  return shareStub(c.env, share.id).fetch(toShare(c.req.raw, { cli: null }));
+}
+
+/** The pipe name the CLI asked for (null for none), or the refusal to send instead. */
+function requestedName(c: ConnectContext): string | null | Response {
+  const rawName = c.req.query("name");
+
+  if (rawName === undefined) return null;
+  const name = pipeName(rawName);
+
+  if (!name) return refuse(400, "bad name", `Pick a pipe name of ${PIPE_NAME_RULE}.`);
+
+  if (isEmbedTunnelName(name)) {
+    return refuse(
+      409,
+      "name reserved",
+      `Names like ${name} are kept for embedded tunnels. Pick another --name.`,
+    );
+  }
+
+  if (reservedPipeNames(c.var.config).includes(name)) {
+    return refuse(409, "name reserved", `The pipe name ${name} is reserved. Pick another --name.`);
+  }
+
+  return name;
+}
+
+/** The access key hash the CLI sent (null for none), or the refusal to send instead. */
+function requestedAccessHash(c: ConnectContext): string | null | Response {
+  const accessHash = c.req.header(CONNECT_HEADERS.access) ?? null;
+
+  if (accessHash !== null && !ACCESS_KEY_HASH.test(accessHash)) {
+    return refuse(
+      400,
+      "bad access key",
+      "Update the wurmhol CLI: it sent an access key the relay cannot read.",
+    );
+  }
+
+  return accessHash;
+}
+
+/**
+ * The members of `orgId` a new pipe is narrowed to (null: the whole org), or the refusal to send
+ * when the CLI named too many people or someone outside the org.
+ */
+async function requestedViewers(
+  c: ConnectContext,
+  orgId: string,
+): Promise<string[] | null | Response> {
+  const named = (c.req.header(CONNECT_HEADERS.viewers) ?? "")
+    .split(",")
+    .map((email) => email.trim())
+    .filter(Boolean);
+
+  if (named.length > MAX_VIEWERS) {
+    return refuse(400, "too many viewers", `Name at most ${MAX_VIEWERS} people with --only.`);
+  }
+
+  if (!named.length) return null;
+  const found = await findMembersByEmail(c.var.db, orgId, named);
+
+  if (found.unknown.length) {
+    return refuse(
+      400,
+      "not members",
+      `${found.unknown.join(", ")} ${found.unknown.length === 1 ? "is not a member" : "are not members"} of the token's org. Invite them at ${c.var.config.auth.baseURL} (menu → Members), or leave them out of --only.`,
+      { unknown: found.unknown },
+    );
+  }
+
+  return found.members.map((member) => member.userId);
+}
+
+/** What a token's CLI asks a new pipe to be. */
+interface PipeRequest {
+  port: number;
+  seconds: number;
+  name: string | null;
+  source: Extract<SourceResult, { ok: true }>["source"];
+  accessHash: string | null;
+  viewers: string[] | null;
+}
+
+/** A new pipe as the CLI asks for it, or the first refusal its request earns. */
+async function readPipeRequest(c: ConnectContext, orgId: string): Promise<PipeRequest | Response> {
+  const port = Number(c.req.query("port"));
+
+  if (!isPort(port)) {
+    return refuse(400, "bad port", "Pass the port your server listens on: npx wurmhol 8787.");
+  }
+
+  const seconds = pipeSeconds(c);
+
+  if (seconds instanceof Response) return seconds;
+  const name = requestedName(c);
+
+  if (name instanceof Response) return name;
+  const source = readSource(c.req.header(CONNECT_HEADERS.source));
+
+  if (!source.ok) return refuse(400, `bad ${source.field}`, source.fix);
+  const accessHash = requestedAccessHash(c);
+
+  if (accessHash instanceof Response) return accessHash;
+  const viewers = await requestedViewers(c, orgId);
+
+  if (viewers instanceof Response) return viewers;
+
+  return { port, seconds, name, source: source.source, accessHash, viewers };
+}
+
+/** Who the wall says started a token's pipe: its creator's name, else their address. */
+async function starterName(db: Db, createdBy: string | null) {
+  if (!createdBy) return null;
+
+  const starter = await db.query.users.findFirst({
+    where: (u, { eq }) => eq(u.id, createdBy),
+    columns: { name: true, email: true },
+  });
+
+  return starter?.name || starter?.email || null;
+}
+
+/**
+ * Hands the CLI's socket to the new share's object. A share whose object did not take it leaves
+ * the org's slot and is recorded as ended.
+ */
+async function openShare(c: ConnectContext, init: ShareInit, org: ReturnType<typeof orgStub>) {
+  const response = await shareStub(c.env, init.id).fetch(toShare(c.req.raw, { cli: init }));
+
+  if (response.status !== 101) {
+    await org.remove(init.id);
+    await recordShareEnd(c.var.db, { id: init.id, reason: "disconnected", bytes: 0 });
+  }
+
+  return response;
 }
 
 export const connect = new Hono<AppEnv>().get("/", async (c) => {
   if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
     return refuse(426, "expected a websocket upgrade", "Connect with the wurmhol CLI.");
   }
+
   const presented = /^Bearer (\S+)$/.exec(c.req.header("authorization") ?? "")?.[1];
+
   if (presented && embedCredentialKind(presented) === "connector") {
     return connectEmbedded(c, presented);
   }
+
   const { config, db } = c.var;
   const token = await bearerToken(c);
+
   if (token instanceof Response) return token;
   const plan = await orgPlan(db, config, token.orgId);
+
   if (!plan) {
     return refuse(
       402,
@@ -120,68 +287,19 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
 
   // A reconnect: the same token's share, still open.
   const resume = c.req.query("share");
+
   if (resume !== undefined) {
-    const share = SHARE_ID.test(resume) ? await findShare(db, resume) : null;
-    if (!share || share.orgId !== token.orgId || share.tokenId !== token.id) {
-      return shareGone(null);
-    }
-    if (share.endedAt) {
-      return shareGone(isEndReason(share.endReason) ? share.endReason : "disconnected");
-    }
-    return shareStub(c.env, share.id).fetch(toShare(c.req.raw, { cli: null }));
+    return resumeShare(
+      c,
+      resume,
+      (share) => share.orgId === token.orgId && share.tokenId === token.id,
+    );
   }
 
-  const port = Number(c.req.query("port"));
-  if (!isPort(port)) {
-    return refuse(400, "bad port", "Pass the port your server listens on: npx wurmhol 8787.");
-  }
-  const seconds = pipeSeconds(c);
-  if (seconds instanceof Response) return seconds;
-  const rawName = c.req.query("name");
-  const name = rawName === undefined ? null : pipeName(rawName);
-  if (rawName !== undefined && !name) {
-    return refuse(400, "bad name", `Pick a pipe name of ${PIPE_NAME_RULE}.`);
-  }
-  if (name && isEmbedTunnelName(name)) {
-    return refuse(
-      409,
-      "name reserved",
-      `Names like ${name} are kept for embedded tunnels. Pick another --name.`,
-    );
-  }
-  if (name && reservedPipeNames(config).includes(name)) {
-    return refuse(409, "name reserved", `The pipe name ${name} is reserved. Pick another --name.`);
-  }
-  const source = readSource(c.req.header(CONNECT_HEADERS.source));
-  if (!source.ok) return refuse(400, `bad ${source.field}`, source.fix);
-  const accessHash = c.req.header(CONNECT_HEADERS.access) ?? null;
-  if (accessHash !== null && !ACCESS_KEY_HASH.test(accessHash)) {
-    return refuse(
-      400,
-      "bad access key",
-      "Update the wurmhol CLI: it sent an access key the relay cannot read.",
-    );
-  }
-  let viewers: string[] | null = null;
-  const named = (c.req.header(CONNECT_HEADERS.viewers) ?? "")
-    .split(",")
-    .map((email) => email.trim())
-    .filter(Boolean);
-  if (named.length > MAX_VIEWERS) {
-    return refuse(400, "too many viewers", `Name at most ${MAX_VIEWERS} people with --only.`);
-  }
-  if (named.length) {
-    const found = await findMembersByEmail(db, token.orgId, named);
-    if (found.unknown.length) {
-      return refuse(
-        400,
-        "not members",
-        `${found.unknown.join(", ")} ${found.unknown.length === 1 ? "is not a member" : "are not members"} of the token's org. Invite them at ${config.auth.baseURL} (menu → Members), or leave them out of --only.`,
-        { unknown: found.unknown },
-      );
-    }
-    viewers = found.members.map((member) => member.userId);
-  }
+  const asked = await readPipeRequest(c, token.orgId);
+
+  if (asked instanceof Response) return asked;
+  const { port, seconds, name, source, accessHash, viewers } = asked;
 
   const record = () =>
     recordShareStart(db, {
@@ -190,9 +308,11 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
       startedBy: token.createdBy,
       port,
       name,
-      source: source.source,
+      source,
     });
+
   let started = await record();
+
   if (
     !started.ok &&
     started.reason === "open" &&
@@ -201,6 +321,7 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
     c.var.log.info("share.name_taken_over", { shareId: started.open.id, orgId: token.orgId });
     started = await record();
   }
+
   if (!started.ok) {
     return started.reason === "taken"
       ? refuse(409, "name taken", `Another org has the pipe name ${name}. Pick another --name.`)
@@ -210,22 +331,17 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
           `The org already has a pipe named ${name} open on port ${started.open.port}. End it first: wurmhol stop ${name}, or terminate it on ${config.auth.baseURL}.`,
         );
   }
-  const starter = token.createdBy
-    ? await db.query.users.findFirst({
-        where: (u, { eq }) => eq(u.id, token.createdBy!),
-        columns: { name: true, email: true },
-      })
-    : undefined;
+
   const init: ShareInit = {
     id: started.id,
     orgId: token.orgId,
     tokenId: token.id,
     port,
     url: await shareUrl(db, config, { id: started.id, name }),
-    startedBy: starter?.name || starter?.email || null,
+    startedBy: await starterName(db, token.createdBy),
     startedAt: started.startedAt.getTime(),
     viewers,
-    source: source.source,
+    source,
     accessHash,
     limits: {
       seconds,
@@ -233,7 +349,9 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
       monthlyRequests: plan.limits.monthlyRequests,
     },
   };
+
   const org = orgStub(c.env, token.orgId);
+
   const reservation = await org.reserve(
     newShareCard({
       id: init.id,
@@ -245,8 +363,10 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
     }),
     plan.limits,
   );
+
   if (!reservation.ok) {
     await recordShareEnd(db, { id: init.id, reason: "limit", bytes: 0 });
+
     return reservationRefusal(
       reservation,
       plan,
@@ -255,16 +375,12 @@ export const connect = new Hono<AppEnv>().get("/", async (c) => {
       config.auth.baseURL,
     );
   }
-  const response = await shareStub(c.env, init.id).fetch(toShare(c.req.raw, { cli: init }));
-  if (response.status !== 101) {
-    await org.remove(init.id);
-    await recordShareEnd(db, { id: init.id, reason: "disconnected", bytes: 0 });
-  }
+
+  const response = await openShare(c, init, org);
   c.var.log.info("share.started", { shareId: init.id, orgId: init.orgId, port });
+
   return response;
 });
-
-type ConnectContext = Context<AppEnv>;
 
 /** A new pipe's lifetime in seconds from `ttl`, or the refusal to send instead. */
 function pipeSeconds(c: ConnectContext): number | Response {
@@ -272,9 +388,11 @@ function pipeSeconds(c: ConnectContext): number | Response {
   const limit = config.LIMIT_SHARE_SECONDS;
   const ttl = c.req.query("ttl");
   const seconds = ttl === undefined ? Math.min(config.DEFAULT_SHARE_SECONDS, limit) : Number(ttl);
+
   if (!Number.isSafeInteger(seconds) || seconds < 1) {
     return refuse(400, "bad ttl", "Pass a lifetime like --ttl 90m or --ttl 8h.");
   }
+
   if (seconds > limit) {
     return refuse(
       400,
@@ -283,6 +401,7 @@ function pipeSeconds(c: ConnectContext): number | Response {
       { limit },
     );
   }
+
   return seconds;
 }
 
@@ -296,6 +415,7 @@ function reservationRefusal(
   if (reservation.reason === "active_limit") {
     return refuse(429, "active pipe limit", activeFix(reservation.limit));
   }
+
   return reservation.reason === "monthly_limit"
     ? refuse(
         429,
@@ -311,30 +431,46 @@ function reservationRefusal(
       );
 }
 
-/**
- * `/connect` with a connector (`whc_`, ADR 0032): an agent opening, reopening or reconnecting to
- * its one embedded tunnel, at the tunnel's own host. It names nothing about the pipe but its port
- * and lifetime: no name, no viewers, no access key. Its session is never an org pipe.
- */
-async function connectEmbedded(c: ConnectContext, presented: string) {
-  const { config, db } = c.var;
+/** Why a presented connector opens nothing. */
+function connectorRefusal(reason: Extract<EmbedConnectorUse, { ok: false }>["reason"]) {
   const fix = "Ask the app that set up this tunnel for a new connector.";
+
+  if (reason === "expired") return refuse(401, "connector expired", fix);
+
+  if (reason === "disabled") {
+    return refuse(403, "tunnel disabled", "The app turned this tunnel's account off.");
+  }
+
+  return refuse(401, "connector revoked or unknown", fix);
+}
+
+type LiveConnector = Extract<EmbedConnectorUse, { ok: true }>;
+
+/**
+ * The connector `presented` is and its org's plan, when embedded tunnels are on, the connector
+ * is live, its org is not blocked, is on Business (where billing is on) and is not rate-limited;
+ * else the refusal to send.
+ */
+async function admitConnector(
+  c: ConnectContext,
+  presented: string,
+): Promise<{ connector: LiveConnector; plan: OrgPlan } | Response> {
+  const { config, db } = c.var;
+
   if (!config.EMBEDDED_ENABLED) {
     return refuse(401, "connector unknown", "This relay has no embedded tunnels.");
   }
+
   const connector = await useEmbedConnector(db, presented);
-  if (!connector.ok) {
-    if (connector.reason === "expired") return refuse(401, "connector expired", fix);
-    if (connector.reason === "disabled") {
-      return refuse(403, "tunnel disabled", "The app turned this tunnel's account off.");
-    }
-    return refuse(401, "connector revoked or unknown", fix);
-  }
-  const { orgId } = connector;
-  if (await isOrgBlocked(db, orgId)) {
+
+  if (!connector.ok) return connectorRefusal(connector.reason);
+
+  if (await isOrgBlocked(db, connector.orgId)) {
     return refuse(401, "org blocked", `Contact the operator of ${config.auth.baseURL}.`);
   }
-  const plan = await orgPlan(db, config, orgId);
+
+  const plan = await orgPlan(db, config, connector.orgId);
+
   if (!plan || (config.auth.billing && plan.plan !== "business")) {
     return refuse(
       402,
@@ -342,44 +478,115 @@ async function connectEmbedded(c: ConnectContext, presented: string) {
       "The app's Wurmhol org is not on Business. Ask the app's team to check its plan.",
     );
   }
+
   const wait = await checkRateLimit(c.env, config, "connect", connector.connectorId);
+
   if (wait) {
     return refuse(429, "too many requests", `Wait ${wait} s and try again.`, { retryAfter: wait });
   }
 
-  // A reconnect: this connector's session of this tunnel, still open.
-  const resume = c.req.query("share");
-  if (resume !== undefined) {
-    const share = SHARE_ID.test(resume) ? await findShare(db, resume) : null;
-    if (
-      !share ||
-      share.tunnelId !== connector.tunnelId ||
-      share.connectorId !== connector.connectorId
-    ) {
-      return shareGone(null);
-    }
-    if (share.endedAt) {
-      return shareGone(isEndReason(share.endReason) ? share.endReason : "disconnected");
-    }
-    return shareStub(c.env, share.id).fetch(toShare(c.req.raw, { cli: null }));
-  }
+  return { connector, plan };
+}
 
-  if (
+/** Whether the CLI asked a connector's session for what only a token's pipe has. */
+function asksForPipeOptions(c: ConnectContext) {
+  return (
     c.req.query("name") !== undefined ||
     c.req.header(CONNECT_HEADERS.viewers) !== undefined ||
     c.req.header(CONNECT_HEADERS.access) !== undefined
-  ) {
+  );
+}
+
+/** The application's and the tenant's own limits, as the org's object keeps them. */
+function embeddedLimits(
+  set: Awaited<ReturnType<typeof embedLimitsOf>>,
+): [app: AppLimits, tenant: TenantLimits] {
+  return [
+    {
+      monthlyRequests: set?.appMonthlyRequests ?? null,
+      activeTunnels: set?.appActiveTunnels ?? null,
+      tenantMonthlyRequests: set?.tenantMonthlyRequests ?? null,
+      tenantActiveTunnels: set?.tenantActiveTunnels ?? null,
+    },
+    {
+      monthlyRequests: set?.ownMonthlyRequests ?? null,
+      activeTunnels: set?.ownActiveTunnels ?? null,
+    },
+  ];
+}
+
+/** Why the org's object refused an embedded session a slot. */
+function embeddedReservationRefusal(
+  reservation: Exclude<Reservation, { ok: true }>,
+  plan: OrgPlan,
+  appURL: string,
+) {
+  // An application's or tenant's own limit: the app's to raise, not the org's plan.
+  if (reservation.scope === "app" || reservation.scope === "tenant") {
+    const whose = reservation.scope === "app" ? "The app" : "This account";
+
+    return reservation.reason === "active_limit"
+      ? refuse(
+          429,
+          "active pipe limit",
+          `${whose} already has ${reservation.limit} tunnels open. Close one, or ask the app to raise its limit.`,
+        )
+      : refuse(
+          429,
+          "monthly request limit",
+          `${whose} has used this month's requests. Ask the app to raise its limit.`,
+        );
+  }
+
+  return reservationRefusal(
+    reservation,
+    plan,
+    () => "The app has too many tunnels open. Try again later.",
+    appURL,
+  );
+}
+
+/**
+ * `/connect` with a connector (`whc_`, ADR 0032): an agent opening, reopening or reconnecting to
+ * its one embedded tunnel, at the tunnel's own host. It names nothing about the pipe but its port
+ * and lifetime: no name, no viewers, no access key. Its session is never an org pipe.
+ */
+async function connectEmbedded(c: ConnectContext, presented: string) {
+  const { config, db } = c.var;
+  const admitted = await admitConnector(c, presented);
+
+  if (admitted instanceof Response) return admitted;
+  const { connector, plan } = admitted;
+  const { orgId } = connector;
+
+  // A reconnect: this connector's session of this tunnel, still open.
+  const resume = c.req.query("share");
+
+  if (resume !== undefined) {
+    return resumeShare(
+      c,
+      resume,
+      (share) =>
+        share.tunnelId === connector.tunnelId && share.connectorId === connector.connectorId,
+    );
+  }
+
+  if (asksForPipeOptions(c)) {
     return refuse(
       400,
       "not for a tunnel",
       "A connector opens its own tunnel: leave out --name, --only and WURMHOL_ACCESS_KEY.",
     );
   }
+
   const port = Number(c.req.query("port"));
+
   if (!isPort(port)) {
     return refuse(400, "bad port", "Pass the port your server listens on: npx wurmhol 8787.");
   }
+
   const seconds = pipeSeconds(c);
+
   if (seconds instanceof Response) return seconds;
 
   const embed = {
@@ -388,6 +595,7 @@ async function connectEmbedded(c: ConnectContext, presented: string) {
     tunnelId: connector.tunnelId,
     connectorId: connector.connectorId,
   };
+
   const record = () =>
     recordShareStart(db, {
       orgId,
@@ -397,7 +605,9 @@ async function connectEmbedded(c: ConnectContext, presented: string) {
       name: connector.name,
       embed,
     });
+
   let started = await record();
+
   if (
     !started.ok &&
     started.reason === "open" &&
@@ -411,6 +621,7 @@ async function connectEmbedded(c: ConnectContext, presented: string) {
   ) {
     started = await record();
   }
+
   if (!started.ok) {
     return refuse(
       409,
@@ -418,6 +629,7 @@ async function connectEmbedded(c: ConnectContext, presented: string) {
       "This tunnel is already open from another connection. Stop that one first.",
     );
   }
+
   if (connector.stopped) await setEmbedTunnelStopped(db, orgId, connector.tunnelId, false);
 
   const init: ShareInit = {
@@ -438,51 +650,28 @@ async function connectEmbedded(c: ConnectContext, presented: string) {
       monthlyRequests: plan.limits.monthlyRequests,
     },
   };
+
   const org = orgStub(c.env, orgId);
-  const set = await embedLimitsOf(db, embed.appId, embed.tenantId);
+
+  const [appLimits, tenantLimits] = embeddedLimits(
+    await embedLimitsOf(db, embed.appId, embed.tenantId),
+  );
+
   const reservation = await org.reserveEmbedded(
     { id: init.id, appId: embed.appId, tenantId: embed.tenantId, tunnelId: embed.tunnelId },
     { ...plan.limits, active: config.LIMIT_EMBED_ACTIVE },
-    {
-      monthlyRequests: set?.appMonthlyRequests ?? null,
-      activeTunnels: set?.appActiveTunnels ?? null,
-      tenantMonthlyRequests: set?.tenantMonthlyRequests ?? null,
-      tenantActiveTunnels: set?.tenantActiveTunnels ?? null,
-    },
-    {
-      monthlyRequests: set?.ownMonthlyRequests ?? null,
-      activeTunnels: set?.ownActiveTunnels ?? null,
-    },
+    appLimits,
+    tenantLimits,
   );
+
   if (!reservation.ok) {
     await recordShareEnd(db, { id: init.id, reason: "limit", bytes: 0 });
-    // An application's or tenant's own limit: the app's to raise, not the org's plan.
-    if (reservation.scope === "app" || reservation.scope === "tenant") {
-      const whose = reservation.scope === "app" ? "The app" : "This account";
-      return reservation.reason === "active_limit"
-        ? refuse(
-            429,
-            "active pipe limit",
-            `${whose} already has ${reservation.limit} tunnels open. Close one, or ask the app to raise its limit.`,
-          )
-        : refuse(
-            429,
-            "monthly request limit",
-            `${whose} has used this month's requests. Ask the app to raise its limit.`,
-          );
-    }
-    return reservationRefusal(
-      reservation,
-      plan,
-      () => "The app has too many tunnels open. Try again later.",
-      config.auth.baseURL,
-    );
+
+    return embeddedReservationRefusal(reservation, plan, config.auth.baseURL);
   }
-  const response = await shareStub(c.env, init.id).fetch(toShare(c.req.raw, { cli: init }));
-  if (response.status !== 101) {
-    await org.remove(init.id);
-    await recordShareEnd(db, { id: init.id, reason: "disconnected", bytes: 0 });
-  }
+
+  const response = await openShare(c, init, org);
+
   c.var.log.info("embed.session_started", {
     shareId: init.id,
     orgId,
@@ -490,5 +679,6 @@ async function connectEmbedded(c: ConnectContext, presented: string) {
     tunnelId: embed.tunnelId,
     port,
   });
+
   return response;
 }

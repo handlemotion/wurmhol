@@ -5,7 +5,8 @@ import { spawn } from "node:child_process";
 import { closeSync, existsSync, fstatSync, openSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   alive,
   api,
@@ -15,14 +16,17 @@ import {
   cliPath,
   connectProxy,
   createToken,
+  type JsonValue,
   localServer,
   me,
+  parseJson,
   type Person,
   signIn,
   type Stack,
   startStack,
   stopAll,
   viewerCookie,
+  readJson,
   waitFor,
 } from "./support.ts";
 
@@ -52,7 +56,9 @@ function loginEnv(extra: Record<string, string> = {}) {
     HTTP_PROXY: proxy.url,
     ...extra,
   });
+
   delete env.WURMHOL_TOKEN;
+
   return env;
 }
 
@@ -62,21 +68,25 @@ async function startLogin(env: Record<string, string>) {
     env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
+
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
   child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+
   const done = new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) =>
     child.on("close", (code) => resolve({ code, stdout, stderr })),
   );
+
   const line = await waitFor(() => /^Open (\S+) and enter (\S+)$/m.exec(stdout), {
     what: `the login prompt (stderr: ${stderr})`,
   });
+
   return { url: line[1]!, code: line[2]!, done };
 }
 
 /** The CLI's own calls, made directly where a test needs to place a step between two of them. */
-const post = (path: string, body: unknown) =>
+const post = (path: string, body: JsonValue) =>
   browserFetch(`${cliHost}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -84,10 +94,13 @@ const post = (path: string, body: unknown) =>
   });
 
 const device = (person: Person, path: string, code: string) =>
-  api<{ error?: string; ok?: boolean }>(stack, person, `/api/device/${path}`, {
-    method: "POST",
-    body: { code },
-  });
+  api(stack, person, `/api/device/${path}`, { method: "POST", body: { code } });
+
+const count = z.object({ n: z.number() });
+const pipeLink = z.object({ url: z.string() });
+const deviceError = z.object({ error: z.string() });
+const tokenNames = z.object({ tokens: z.array(z.object({ name: z.string() })) });
+const devicePipe = z.object({ url: z.string().nullable() });
 
 it("login prints the console's /device and a code; approving stores a token that opens a pipe", async () => {
   const env = loginEnv();
@@ -95,11 +108,19 @@ it("login prints the console's /device and a code; approving stores a token that
   expect(login.url).toBe(`${stack.url}/device`);
   expect(login.code).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/);
 
-  const shown = await api<{ code: string; name: string; status: string; org: { id: string } }>(
+  const shown = await api(
     stack,
     ada,
     `/api/device?code=${login.code.toLowerCase()}`,
+    {},
+    z.object({
+      code: z.string(),
+      name: z.string(),
+      status: z.string(),
+      org: z.object({ id: z.string() }),
+    }),
   );
+
   expect(shown.status).toBe(200);
   expect(shown.body).toMatchObject({ code: login.code, name: hostname(), status: "pending" });
   expect(shown.body.org.id).toBe((await me(stack, ada)).activeOrgId);
@@ -113,35 +134,51 @@ it("login prints the console's /device and a code; approving stores a token that
   // One descriptor for both the mode and the contents: they describe the same file.
   const fd = openSync(file, "r");
   let saved: { token: string; server: string };
+
   try {
     expect(fstatSync(fd).mode & 0o777).toBe(0o600);
-    saved = JSON.parse(readFileSync(fd, "utf8")) as typeof saved;
+    saved = parseJson(
+      z.object({ token: z.string(), server: z.string() }),
+      readFileSync(fd, "utf8"),
+    );
   } finally {
     closeSync(fd);
   }
+
   expect(saved.token).toMatch(/^wh_/);
   expect(saved.server).toBe(cliHost);
 
   // An org token named after the computer, for pipes only, for 90 days; the session the plugin
   // made is gone.
-  const tokens = await api<{ tokens: { name: string; scope: string; expiresAt: string }[] }>(
+  const tokens = await api(
     stack,
     ada,
     "/api/tokens",
+    {},
+    z.object({
+      tokens: z.array(
+        z.object({ name: z.string(), scope: z.string(), expiresAt: z.string().nullable() }),
+      ),
+    }),
   );
+
   const minted = tokens.body.tokens.find((t) => t.name === hostname());
   expect(minted?.scope).toBe("pipes");
-  const days = (Date.parse(minted!.expiresAt) - Date.now()) / 86_400_000;
+  // A missing expiry parses to NaN, which fails both bounds below.
+  const days = (Date.parse(minted?.expiresAt ?? "") - Date.now()) / 86_400_000;
   expect(days).toBeGreaterThan(89.9);
   expect(days).toBeLessThanOrEqual(90);
   const db = stack.db();
+
   try {
     const { user } = await me(stack, ada);
-    const sessions = db
-      .prepare("select count(*) as n from sessions where user_id = ?")
-      .get(user.id) as { n: number };
+
+    const sessions = count.parse(
+      db.prepare("select count(*) as n from sessions where user_id = ?").get(user.id),
+    );
+
     expect(sessions.n).toBe(1);
-    const codes = db.prepare("select count(*) as n from device_codes").get() as { n: number };
+    const codes = count.parse(db.prepare("select count(*) as n from device_codes").get());
     expect(codes.n).toBe(0);
   } finally {
     db.close();
@@ -150,7 +187,7 @@ it("login prints the console's /device and a code; approving stores a token that
   const local = await localServer((_req, res) => res.end("logged in"));
   const opened = await cli([String(local.port), "--json"], env);
   expect({ code: opened.code, stderr: opened.stderr }).toMatchObject({ code: 0 });
-  const { url } = JSON.parse(opened.stdout) as { url: string };
+  const { url } = parseJson(pipeLink, opened.stdout);
   const cookie = await viewerCookie(stack, ada, url);
   expect(await (await browserFetch(`${url}/`, { cookie })).text()).toBe("logged in");
   await stopAll(env);
@@ -177,7 +214,12 @@ it("with no token, a share prints a link; approving it there opens that pipe and
   const local = await localServer((_req, res) => res.end("approved from the link"));
   const first = await cli([String(local.port), "--json"], env);
   expect({ code: first.code, stderr: first.stderr }).toMatchObject({ code: 0 });
-  const waiting = JSON.parse(first.stdout) as { url: string; port: number; approval?: boolean };
+
+  const waiting = parseJson(
+    z.object({ url: z.string(), port: z.number(), approval: z.boolean().optional() }),
+    first.stdout,
+  );
+
   expect(waiting).toMatchObject({ port: local.port, approval: true });
   expect(waiting.url.startsWith(`${stack.url}/device?code=`)).toBe(true);
   // Agents re-run commands: the same link, not a second code.
@@ -185,23 +227,31 @@ it("with no token, a share prints a link; approving it there opens that pipe and
   expect(JSON.parse(again.stdout)).toMatchObject({ url: waiting.url, approval: true });
 
   const code = new URL(waiting.url).searchParams.get("code")!;
-  const shown = await api<{ name: string; port: number | null }>(
+
+  const shown = await api(
     stack,
     ada,
     `/api/device?code=${code}`,
+    {},
+    z.object({ name: z.string(), port: z.number().nullable() }),
   );
+
   expect(shown.body).toMatchObject({ name: hostname(), port: local.port });
+
   const pipeOf = (person: Person) =>
-    api<{ url: string | null }>(stack, person, `/api/device/pipe?code=${code}`);
+    api(stack, person, `/api/device/pipe?code=${code}`, {}, devicePipe);
+
   expect((await pipeOf(ada)).body.url).toBeNull();
 
   expect((await device(ada, "approve", code)).status).toBe(200);
+
   // The page follows the approved code to the pipe it opened.
   const url = await waitFor(async () => (await pipeOf(ada)).body.url, {
     timeoutMs: 20_000,
     intervalMs: 500,
     what: "the approved share's pipe",
   });
+
   const cookie = await viewerCookie(stack, ada, url);
   expect(await (await browserFetch(`${url}/`, { cookie })).text()).toBe("approved from the link");
   // Someone in another org learns nothing from the code.
@@ -209,13 +259,15 @@ it("with no token, a share prints a link; approving it there opens that pipe and
   expect((await pipeOf(bo)).body.url).toBeNull();
 
   // Logged in now: `ls` shows the pipe, and the next share opens with no approval.
-  const listed = JSON.parse((await cli(["ls", "--json"], env)).stdout) as { url: string }[];
+  const listed = parseJson(z.array(pipeLink), (await cli(["ls", "--json"], env)).stdout);
   expect(listed.map((s) => s.url)).toEqual([url]);
   const other = await localServer((_req, res) => res.end("second"));
-  const next = JSON.parse((await cli([String(other.port), "--json"], env)).stdout) as {
-    url: string;
-    approval?: boolean;
-  };
+
+  const next = parseJson(
+    z.object({ url: z.string(), approval: z.boolean().optional() }),
+    (await cli([String(other.port), "--json"], env)).stdout,
+  );
+
   expect(next.approval).toBeUndefined();
   expect(next.url).not.toBe(url);
   await stopAll(env);
@@ -226,17 +278,19 @@ it("with no token, a share prints a link; approving it there opens that pipe and
 // tokens minted for one computer, or a second share that never opens once the first is approved.
 it("a second share with no token waits on the first one's link and opens once it is approved", async () => {
   const env = loginEnv();
+
   const computers = async () =>
-    (await api<{ tokens: { name: string }[] }>(stack, ada, "/api/tokens")).body.tokens.filter(
+    (await api(stack, ada, "/api/tokens", {}, tokenNames)).body.tokens.filter(
       (t) => t.name === hostname(),
     ).length;
+
   const before = await computers();
   const app = await localServer((_req, res) => res.end("first port"));
   const web = await localServer((_req, res) => res.end("second port"));
 
   const first = await cli([String(app.port), "--json"], env);
   expect({ code: first.code, stderr: first.stderr }).toMatchObject({ code: 0 });
-  const link = (JSON.parse(first.stdout) as { url: string }).url;
+  const link = parseJson(pipeLink, first.stdout).url;
   const second = await cli([String(web.port), "--json"], env);
   expect({ code: second.code, stderr: second.stderr }).toMatchObject({ code: 0 });
   expect(JSON.parse(second.stdout)).toMatchObject({ url: link, port: web.port, approval: true });
@@ -245,10 +299,12 @@ it("a second share with no token waits on the first one's link and opens once it
   const again = await cli([String(web.port)], env);
   expect(again.stdout.trim()).toBe(link);
   expect(again.stderr).toContain("another share is already waiting on this link");
-  const waiting = JSON.parse((await cli(["ls", "--json"], env)).stdout) as {
-    port: number;
-    approval?: boolean;
-  }[];
+
+  const waiting = parseJson(
+    z.array(z.object({ port: z.number(), approval: z.boolean().optional() })),
+    (await cli(["ls", "--json"], env)).stdout,
+  );
+
   expect(waiting.map((s) => [s.port, s.approval])).toEqual([
     [app.port, true],
     [web.port, true],
@@ -256,17 +312,19 @@ it("a second share with no token waits on the first one's link and opens once it
 
   const code = new URL(link).searchParams.get("code")!;
   expect((await device(ada, "approve", code)).status).toBe(200);
+
   const open = await waitFor(
     async () => {
-      const listed = JSON.parse((await cli(["ls", "--json"], env)).stdout) as {
-        port: number;
-        url: string;
-        approval?: boolean;
-      }[];
+      const listed = parseJson(
+        z.array(z.object({ port: z.number(), url: z.string(), approval: z.boolean().optional() })),
+        (await cli(["ls", "--json"], env)).stdout,
+      );
+
       return listed.length === 2 && listed.every((s) => !s.approval) ? listed : null;
     },
     { timeoutMs: 20_000, intervalMs: 500, what: "both shares' pipes" },
   );
+
   for (const [port, body] of [
     [app.port, "first port"],
     [web.port, "second port"],
@@ -275,12 +333,16 @@ it("a second share with no token waits on the first one's link and opens once it
     const cookie = await viewerCookie(stack, ada, url);
     expect(await (await browserFetch(`${url}/`, { cookie })).text()).toBe(body);
   }
+
   // The approval page asked to open the first port: it goes there, though the second opened later.
-  const page = await api<{ url: string | null }>(
+  const page = await api(
     stack,
     ada,
     `/api/device/pipe?code=${code}&port=${app.port}`,
+    {},
+    devicePipe,
   );
+
   expect(page.body.url).toBe(open.find((s) => s.port === app.port)!.url);
   // One approval, one token for this computer.
   expect(await computers()).toBe(before + 1);
@@ -297,21 +359,26 @@ it("with no plan, a share's approval page says so instead of waiting for a pipe 
     STRIPE_PRICE_BUSINESS: "price_e2e_business",
     STRIPE_PRICE_BUSINESS_REQUESTS: "price_e2e_business_requests",
   });
+
   const local = await localServer((_req, res) => res.end("never served"));
   const env: Record<string, string> = cliEnv(billed, "");
   delete env.WURMHOL_TOKEN;
+
   try {
     const cy = await signIn(billed);
     const first = await cli([String(local.port), "--json"], env);
     expect({ code: first.code, stderr: first.stderr }).toMatchObject({ code: 0 });
-    const code = new URL((JSON.parse(first.stdout) as { url: string }).url).searchParams.get(
-      "code",
-    )!;
-    const shown = await api<{ port: number | null; role: string; standing: unknown }>(
+
+    const code = new URL(parseJson(pipeLink, first.stdout).url).searchParams.get("code")!;
+
+    const shown = await api(
       billed,
       cy,
       `/api/device?code=${code}`,
+      {},
+      z.object({ port: z.number().nullable(), role: z.string(), standing: z.json() }),
     );
+
     expect(shown.body).toMatchObject({
       port: local.port,
       role: "owner",
@@ -324,17 +391,21 @@ it("with no plan, a share's approval page says so instead of waiting for a pipe 
       method: "POST",
       body: { code },
     });
+
     expect(approved.status).toBe(200);
+
     const failed = await waitFor(
       async () => {
         const logs = await cli(["logs", String(local.port)], env);
+
         return /open\.failed .*no plan yet/.test(logs.stdout) ? logs.stdout : null;
       },
       { timeoutMs: 20_000, intervalMs: 500, what: "the refused pipe in wurmhol logs" },
     );
+
     expect(failed).toContain("trial at");
     expect(
-      (await api<{ url: string | null }>(billed, cy, `/api/device/pipe?code=${code}`)).body.url,
+      (await api(billed, cy, `/api/device/pipe?code=${code}`, {}, devicePipe)).body.url,
     ).toBeNull();
   } finally {
     await stopAll(env);
@@ -375,10 +446,12 @@ it("a wrong code, someone else's code, and the plugin's own routes are refused",
     const response = await api(stack, ada, path, { method: "POST", body: {} });
     expect({ path, status: response.status }).toEqual({ path, status: 404 });
   }
+
   // Nothing of the console's API is on the CLI's host.
   const viaCliHost = await browserFetch(`${cliHost}/api/device?code=${login.code}`, {
     cookie: ada.cookie,
   });
+
   expect(viaCliHost.status).toBe(404);
 
   expect((await device(ada, "deny", login.code)).status).toBe(200);
@@ -390,7 +463,7 @@ it("a wrong code, someone else's code, and the plugin's own routes are refused",
 it("an approver who leaves the org before the CLI redeems gets no token for it", async () => {
   const bo = await signIn(stack);
   const boOrg = (await me(stack, bo)).activeOrgId;
-  const invite = await api<{ url: string }>(stack, bo, "/api/invites", { method: "POST" });
+  const invite = await api(stack, bo, "/api/invites", { method: "POST" }, pipeLink);
   const cy = await signIn(stack);
   const joinCode = invite.body.url.split("/join/")[1]!;
   expect((await api(stack, cy, `/api/invites/${joinCode}/accept`, { method: "POST" })).status).toBe(
@@ -399,20 +472,25 @@ it("an approver who leaves the org before the CLI redeems gets no token for it",
   expect((await me(stack, cy)).activeOrgId).toBe(boOrg);
 
   // The removal lands between approval and redemption.
-  const issued = (await (await post("/device/code", { name: "cy-laptop" })).json()) as {
-    device_code: string;
-    user_code: string;
-  };
+  const issued = await readJson(
+    z.object({ device_code: z.string(), user_code: z.string() }),
+    await post("/device/code", { name: "cy-laptop" }),
+  );
+
   const pending = await post("/device/token", { device_code: issued.device_code });
   expect(pending.status).toBe(400);
-  expect(((await pending.json()) as { error: string }).error).toBe("authorization_pending");
+  expect((await readJson(deviceError, pending)).error).toBe("authorization_pending");
 
   expect((await device(cy, "approve", issued.user_code)).status).toBe(200);
-  const members = await api<{ members: { id: string; email: string }[] }>(
+
+  const members = await api(
     stack,
     bo,
     "/api/members",
+    {},
+    z.object({ members: z.array(z.object({ id: z.string(), email: z.string() })) }),
   );
+
   const cyMember = members.body.members.find((m) => m.email === cy.email)!;
   expect((await api(stack, bo, `/api/members/${cyMember.id}`, { method: "DELETE" })).status).toBe(
     200,
@@ -422,15 +500,18 @@ it("an approver who leaves the org before the CLI redeems gets no token for it",
   await new Promise((resolve) => setTimeout(resolve, 5_500));
   const refused = await post("/device/token", { device_code: issued.device_code });
   expect(refused.status).toBe(403);
-  expect(((await refused.json()) as { error: string }).error).toBe("access_denied");
-  const tokens = await api<{ tokens: { name: string }[] }>(stack, bo, "/api/tokens");
+  expect((await readJson(deviceError, refused)).error).toBe("access_denied");
+  const tokens = await api(stack, bo, "/api/tokens", {}, tokenNames);
   expect(tokens.body.tokens.map((t) => t.name)).not.toContain("cy-laptop");
   const db = stack.db();
+
   try {
     const { user } = await me(stack, cy);
-    const sessions = db
-      .prepare("select count(*) as n from sessions where user_id = ?")
-      .get(user.id) as { n: number };
+
+    const sessions = count.parse(
+      db.prepare("select count(*) as n from sessions where user_id = ?").get(user.id),
+    );
+
     expect(sessions.n).toBe(1);
   } finally {
     db.close();
@@ -438,14 +519,15 @@ it("an approver who leaves the org before the CLI redeems gets no token for it",
 });
 
 it("polling faster than the interval gets slow_down", async () => {
-  const issued = (await (await post("/device/code", { name: "fast" })).json()) as {
-    device_code: string;
-    interval: number;
-  };
+  const issued = await readJson(
+    z.object({ device_code: z.string(), interval: z.number() }),
+    await post("/device/code", { name: "fast" }),
+  );
+
   expect(issued.interval).toBeGreaterThan(0);
   await post("/device/token", { device_code: issued.device_code });
   const fast = await post("/device/token", { device_code: issued.device_code });
-  expect(((await fast.json()) as { error: string }).error).toBe("slow_down");
+  expect((await readJson(deviceError, fast)).error).toBe("slow_down");
 });
 
 it("a signed-in computer is listed by when it was approved and last used; signing it out stops its token at once", async () => {
@@ -457,21 +539,25 @@ it("a signed-in computer is listed by when it was approved and last used; signin
   const local = await localServer((_req, res) => res.end("from this computer"));
   const opened = await cli([String(local.port), "--json"], env);
   expect({ code: opened.code, stderr: opened.stderr }).toMatchObject({ code: 0 });
-  const started = JSON.parse(opened.stdout) as { id: string; url: string };
+  const started = parseJson(z.object({ id: z.string(), url: z.string() }), opened.stdout);
   const cookie = await viewerCookie(stack, ada, started.url);
   expect(await (await browserFetch(`${started.url}/`, { cookie })).text()).toBe(
     "from this computer",
   );
 
-  type Listed = {
-    id: string;
-    name: string;
-    source: string;
-    createdAt: string;
-    lastUsedAt: string | null;
-    createdBy: string | null;
-  };
-  const listed = await api<{ tokens: Listed[] }>(stack, ada, "/api/tokens");
+  const listedTokens = z.object({
+    tokens: z.array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        source: z.string(),
+        createdAt: z.string(),
+        lastUsedAt: z.string().nullable(),
+      }),
+    ),
+  });
+
+  const listed = await api(stack, ada, "/api/tokens", {}, listedTokens);
   const computers = listed.body.tokens.filter((t) => t.source === "login");
   const computer = computers.find((t) => t.name === hostname());
   expect(computer).toBeDefined();
@@ -480,14 +566,14 @@ it("a signed-in computer is listed by when it was approved and last used; signin
   expect(Date.parse(computer!.lastUsedAt!)).toBeGreaterThanOrEqual(Date.parse(computer!.createdAt));
   // Console tokens are not computers.
   await createToken(stack, ada, "made in the console");
-  const after = await api<{ tokens: Listed[] }>(stack, ada, "/api/tokens");
+  const after = await api(stack, ada, "/api/tokens", {}, listedTokens);
   expect(after.body.tokens.find((t) => t.name === "made in the console")?.source).toBe("console");
 
-  const pid = (
-    JSON.parse(readFileSync(join(env.WURMHOL_HOME!, "shares", `${started.id}.json`), "utf8")) as {
-      pid: number;
-    }
+  const pid = parseJson(
+    z.object({ pid: z.number() }),
+    readFileSync(join(env.WURMHOL_HOME!, "shares", `${started.id}.json`), "utf8"),
   ).pid;
+
   const signedOut = await api(stack, ada, `/api/tokens/${computer!.id}`, { method: "DELETE" });
   expect(signedOut.status).toBe(200);
 
@@ -498,7 +584,7 @@ it("a signed-in computer is listed by when it was approved and last used; signin
   const again = await cli([String(local.port)], env);
   expect(again.code).toBe(1);
   expect(again.stderr).toContain("Create a new token");
-  const gone = await api<{ tokens: Listed[] }>(stack, ada, "/api/tokens");
+  const gone = await api(stack, ada, "/api/tokens", {}, listedTokens);
   expect(gone.body.tokens.map((t) => t.id)).not.toContain(computer!.id);
   await local.close();
 });

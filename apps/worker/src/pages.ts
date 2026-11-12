@@ -11,6 +11,7 @@ const escape = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCode
 
 export function errorPage(status: number, message: string, options: { refresh?: number } = {}) {
   const refresh = options.refresh ? `<meta http-equiv="refresh" content="${options.refresh}">` : "";
+
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 ${refresh}<title>Wurmhol</title>
@@ -23,6 +24,7 @@ svg{position:fixed;left:50%;top:50%;width:3600px;height:2400px;margin:-1200px 0 
 p{margin:0}small{display:block;margin-top:8px;color:var(--muted)}
 </style></head>
 <body><svg viewBox="-1800 -1200 3600 2400" aria-hidden="true">${PLATE}</svg><main><p>${escape(message)}</p><small>Wurmhol</small></main></body></html>`;
+
   return new Response(html, {
     status,
     headers: {

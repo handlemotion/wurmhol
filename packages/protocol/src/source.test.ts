@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it } from "vite-plus/test";
 import { agentFromEnv, parsePipeSource, repoFromRemote } from "./source.ts";
 
 it.each([
@@ -65,6 +65,7 @@ it("keeps valid fields, folds a note onto one line, and drops unknown keys", () 
     link: "https://linear.app/acme/issue/ACME-1",
     extra: "ignored",
   });
+
   expect(result).toEqual({
     ok: true,
     source: {
@@ -103,6 +104,7 @@ it("names a verified agent, and links it to the Actions run it runs in", () => {
     GITHUB_REPOSITORY: "acme/app",
     GITHUB_RUN_ID: "123",
   };
+
   expect(agentFromEnv({ ...run, CODEX_THREAD_ID: "0193" })).toEqual({
     agent: "Codex",
     agentUrl: "https://github.com/acme/app/actions/runs/123",

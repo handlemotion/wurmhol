@@ -4,7 +4,8 @@
 import { spawn } from "node:child_process";
 import { hostname } from "node:os";
 import { type Browser, type BrowserContext, chromium, type Page } from "playwright";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   api,
   cli,
@@ -35,7 +36,9 @@ describe("the wall in a browser", () => {
     const local = await localServer((_req, res) =>
       res.writeHead(200, { "content-type": "text/html" }).end(`<title>${title}</title>`),
     );
+
     servers.push(local);
+
     return share(stack, env, local.port);
   }
 
@@ -54,6 +57,7 @@ describe("the wall in a browser", () => {
       ada.cookie.split("; ").map((pair) => {
         const at = pair.indexOf("=");
         const [name, value] = [pair.slice(0, at), pair.slice(at + 1)];
+
         return { name, value, domain: "localhost", path: "/", secure: true, sameSite: "Lax" };
       }),
     );
@@ -101,6 +105,7 @@ describe("the wall in a browser", () => {
 
   it("copies each way to start a pipe from Create pipe", async () => {
     await page.locator("[data-create]").click();
+
     const rows: [string, string][] = [
       [
         "Copy agent prompt",
@@ -108,6 +113,7 @@ describe("the wall in a browser", () => {
       ],
       ["Copy npx command", "npx wurmhol <port>"],
     ];
+
     for (const [label, text] of rows) {
       await page.getByRole("menuitem", { name: label }).click();
       // Catches: a row copying another row's text, or nothing reaching the clipboard.
@@ -115,6 +121,7 @@ describe("the wall in a browser", () => {
         .poll(() => page.evaluate(() => navigator.clipboard.readText()), { message: label })
         .toBe(text);
     }
+
     await page.keyboard.press("Escape");
     await expect.poll(() => page.locator("[data-create]").isVisible()).toBe(true);
   });
@@ -125,7 +132,9 @@ describe("the wall in a browser", () => {
       viewport: { width: 1280, height: 800 },
       storageState: await context.storageState(),
     });
+
     const wall = await moving.newPage();
+
     try {
       await wall.goto(`${stack.url}/`);
       const button = wall.locator("[data-create]:not([inert] *)");
@@ -152,28 +161,36 @@ describe("the wall in a browser", () => {
       await cdp.send("Page.stopScreencast");
       // Where the magenta is in each frame, decoded by the browser itself.
       const reader = await moving.newPage();
+
       const boxes = await reader.evaluate(async (pngs) => {
         const found: { x: number; y: number }[] = [];
+
         for (const png of pngs) {
           const image = await createImageBitmap(
             await (await fetch(`data:image/png;base64,${png}`)).blob(),
           );
+
           const canvas = new OffscreenCanvas(image.width, image.height);
           const g = canvas.getContext("2d")!;
           g.drawImage(image, 0, 0);
           const { data, width } = g.getImageData(0, 0, image.width, image.height);
           let [x, y] = [Infinity, Infinity];
+
           for (let i = 0; i < data.length; i += 4) {
             if (data[i]! > 240 && data[i + 1]! < 20 && data[i + 2]! > 240) {
               x = Math.min(x, (i / 4) % width);
               y = Math.min(y, Math.floor(i / 4 / width));
             }
           }
+
           if (x !== Infinity) found.push({ x, y });
         }
+
         return found;
       }, frames);
+
       expect(boxes.length).toBeGreaterThan(0);
+
       // Catches: the button painted at the closed card's corner (the flicker) until the frame
       // loop's next idle tick moves it home. Drift moves it a couple of pixels at most.
       for (const at of boxes) expect(Math.hypot(at.x - rest.x, at.y - rest.y)).toBeLessThan(4);
@@ -201,6 +218,7 @@ describe("the wall in a browser", () => {
     await page.locator("[data-create]").click();
     const rows = page.getByRole("menuitem");
     const fill = page.locator("[data-slot=fluid-hover-highlight]");
+
     for (const label of ["Copy agent prompt", "Copy npx command", "Copy agent prompt"]) {
       const row = page.getByRole("menuitem", { name: label });
       const box = (await row.boundingBox())!;
@@ -210,16 +228,19 @@ describe("the wall in a browser", () => {
         .poll(
           async () => {
             const lit = await fill.boundingBox();
+
             return (await fill.count()) === 1 && lit !== null && Math.abs(lit.y - box.y) < 1;
           },
           { message: label },
         )
         .toBe(true);
     }
+
     // Catches: a row painting a fill of its own beside the moving one.
     const fills = await rows.evaluateAll((els) =>
       els.map((el) => getComputedStyle(el).backgroundColor),
     );
+
     expect(fills.every((fill) => fill === "rgba(0, 0, 0, 0)")).toBe(true);
     await page.keyboard.press("Escape");
     await expect.poll(() => page.locator("[data-create]").isVisible()).toBe(true);
@@ -231,10 +252,13 @@ describe("the wall in a browser", () => {
     const pills = page.locator("[data-pipe]");
     await expect.poll(() => pills.count(), { timeout: 5000 }).toBe(3);
     const ids = await pills.evaluateAll((els) => els.map((el) => el.getAttribute("data-pipe")!));
+
     const centre = async (id: string) => {
       const box = (await page.locator(`[data-pipe="${id}"]`).boundingBox())!;
+
       return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     };
+
     const opened = ids[0]!;
     const before = await centre(ids[1]!);
 
@@ -246,9 +270,17 @@ describe("the wall in a browser", () => {
     await expect
       .poll(async () => {
         const c = (await card.boundingBox())!;
+
         const others = await page
           .locator(`[data-pipe]:not([data-pipe="${opened}"]), [data-create]`)
-          .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().toJSON() as DOMRect));
+          .evaluateAll((els) =>
+            els.map((el) => {
+              const { x, y, width, height } = el.getBoundingClientRect();
+
+              return { x, y, width, height };
+            }),
+          );
+
         return others.filter(
           (o) =>
             o.x < c.x + c.width &&
@@ -272,6 +304,7 @@ describe("the wall in a browser", () => {
     await expect
       .poll(async () => {
         const back = await centre(ids[1]!);
+
         return Math.hypot(back.x - before.x, back.y - before.y) < 1.5;
       })
       .toBe(true);
@@ -281,13 +314,16 @@ describe("the wall in a browser", () => {
     const local = await localServer((_req, res) =>
       res.writeHead(200, { "content-type": "text/html" }).end("<title>From this computer</title>"),
     );
+
     servers.push(local);
     await page.locator("[data-create]").click();
     await page.getByRole("menuitem", { name: "Create from this computer" }).click();
     const card = page.locator("section[data-open]");
+
     const run = card.getByRole("button", {
       name: /^Copy run: npx wurmhol@latest host --code \S+$/,
     });
+
     // Catches: the steps opening without the command to run, or in a card of another size. The
     // command waits on the card's setup-code request, as the pills wait on the wall's feed.
     await expect.poll(() => run.count(), { timeout: 5000 }).toBe(1);
@@ -303,12 +339,15 @@ describe("the wall in a browser", () => {
     const fresh: Record<string, string> = cliEnv(stack, "");
     delete fresh.WURMHOL_TOKEN;
     let said = "";
+
     const host = spawn(process.execPath, [cliPath, ...args], {
       env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...fresh },
       stdio: ["ignore", "pipe", "pipe"],
     });
+
     host.stdout!.on("data", (chunk: Buffer) => (said += chunk));
     host.stderr!.on("data", (chunk: Buffer) => (said += chunk));
+
     try {
       const row = card.getByRole("menuitem", { name: new RegExp(`:${local.port}`) });
       // Catches: the card not hearing that the computer connected, or its ports.
@@ -346,12 +385,16 @@ describe("the wall in a browser", () => {
     const reused = await cli(args, fresh);
     expect(reused.code).toBe(1);
     expect(reused.stderr).toContain("Copy the command again from Create pipe");
+
     // Catches: the token named after something other than the computer, or owned by no one.
-    const { body } = await api<{ tokens: { name: string; source: string }[] }>(
+    const { body } = await api(
       stack,
       ada,
       "/api/tokens",
+      {},
+      z.object({ tokens: z.array(z.object({ name: z.string(), source: z.string() })) }),
     );
+
     expect(body.tokens.filter((t) => t.name === hostname() && t.source === "login")).toHaveLength(
       1,
     );

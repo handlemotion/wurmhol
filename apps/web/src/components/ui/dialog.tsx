@@ -6,6 +6,7 @@
 // stack: one opened from another dims the one below again.
 import { XMarkIcon } from "@heroicons/react/16/solid";
 import { cn } from "cn";
+import { renderChildren } from "@/lib/primitive";
 import {
   DialogTrigger as DialogTriggerPrimitive,
   Dialog as PrimitiveDialog,
@@ -55,6 +56,7 @@ export function Dialog({
 }: DialogProps) {
   const dismissable = isDismissable ?? role !== "alertdialog";
   const full = size === "full";
+
   return (
     <ModalOverlay
       data-slot="dialog-overlay"
@@ -90,7 +92,7 @@ export function Dialog({
         >
           {(values) => (
             <>
-              {typeof children === "function" ? children(values) : children}
+              {renderChildren(children, values)}
               {closeButton && dismissable && (
                 <DialogCloseIcon filled={full} className={full ? "top-4 right-4" : undefined} />
               )}
@@ -175,6 +177,7 @@ export function DialogCloseIcon({
   filled?: boolean;
 }) {
   if (!isDismissable) return null;
+
   return (
     <Button
       slot="close"

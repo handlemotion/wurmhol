@@ -32,7 +32,19 @@ interface Held {
   startedAt: Date;
 }
 
-const pipeShape = {
+/** What a pipe tool returns about a pipe. */
+type PipeResult = {
+  id: string;
+  url: string;
+  port: number;
+  name: string | null;
+  startedAt: string;
+  endsAt: string;
+  pageUrl?: string;
+  approval?: boolean;
+};
+
+const pipeResult = {
   id: z.string().describe("The pipe's id, as on the wall"),
   url: z.string().describe("The private URL to send the user"),
   port: z.number().int(),
@@ -50,11 +62,12 @@ interface PendingLogin {
   url: string;
   startedAt: Date;
   endsAt: Date;
-  opens: Map<number, (token: string) => Promise<unknown>>;
+  opens: Map<number, (token: string) => Promise<Held>>;
 }
 
-function describe(held: Held) {
+function describe(held: Held): PipeResult {
   const { pipe } = held;
+
   return {
     id: pipe.id,
     url: pipe.url,
@@ -69,8 +82,9 @@ function ok<T extends Record<string, unknown>>(text: string, structuredContent: 
   return { content: [{ type: "text" as const, text }], structuredContent };
 }
 
-function failure(error: unknown) {
-  const text = error instanceof FixError ? error.message : `Wurmhol failed: ${String(error)}`;
+function failure(cause: unknown) {
+  const text = cause instanceof FixError ? cause.message : `Wurmhol failed: ${String(cause)}`;
+
   return { content: [{ type: "text" as const, text }], isError: true };
 }
 
@@ -87,11 +101,13 @@ export function createServer(pipes: Map<string, Held>) {
     pipes.set(pipe.id, held);
     pipe.on("request", (request) => appendRequest(pipe.id, request, { port: pipe.port }));
     pipe.once("close", () => pipes.delete(pipe.id));
+
     return held;
   };
 
   // One login per process: a second port asked for while it waits opens with the same approval.
   let login: Promise<PendingLogin> | null = null;
+
   const pendingLogin = (port: number) => {
     login ??= (async () => {
       const code = await startLogin({
@@ -100,6 +116,7 @@ export function createServer(pipes: Map<string, Held>) {
         version: pkg.version,
         port,
       });
+
       const pending: PendingLogin = {
         id: `login-${code.user_code}`,
         url: code.verification_uri_complete,
@@ -107,6 +124,7 @@ export function createServer(pipes: Map<string, Held>) {
         endsAt: new Date(Date.now() + code.expires_in * 1000),
         opens: new Map(),
       };
+
       void (async () => {
         try {
           const granted = await awaitLogin({ server: server(), version: pkg.version, code });
@@ -117,9 +135,10 @@ export function createServer(pipes: Map<string, Held>) {
             name: granted.name,
           });
           login = null;
+
           for (const [waiting, open] of pending.opens) {
-            open(granted.token).catch((error: unknown) =>
-              process.stderr.write(`wurmhol: port ${waiting}: ${String(error)}\n`),
+            open(granted.token).catch((cause: unknown) =>
+              process.stderr.write(`wurmhol: port ${waiting}: ${String(cause)}\n`),
             );
           }
         } catch (error) {
@@ -128,10 +147,12 @@ export function createServer(pipes: Map<string, Held>) {
           process.stderr.write(`wurmhol: login: ${message}\n`);
         }
       })();
+
       return pending;
     })();
     // A code that could not be started is not kept: the next call asks again.
     login.catch(() => (login = null));
+
     return login;
   };
 
@@ -165,7 +186,7 @@ export function createServer(pipes: Map<string, Held>) {
           ),
       },
       outputSchema: {
-        ...pipeShape,
+        ...pipeResult,
         pageUrl: z.string().optional().describe("The URL at `path`, when one was given"),
         approval: z
           .boolean()
@@ -180,14 +201,19 @@ export function createServer(pipes: Map<string, Held>) {
       try {
         const page = path === undefined ? undefined : pagePath(path);
         let seconds: number | undefined;
+
         if (ttl !== undefined) {
           seconds = parseDuration(ttl) ?? undefined;
+
           if (seconds === undefined) throw new FixError(`Not a lifetime: ${ttl}. Use 90m or 8h.`);
         }
+
         if (name !== undefined && !pipeName(name)) {
           throw new FixError(`Not a pipe name: ${name}. Use ${PIPE_NAME_RULE}.`);
         }
+
         const viewers = only?.map((email) => email.trim()).filter(Boolean);
+
         const open = async (token: string) =>
           hold(
             await openPipe({
@@ -204,10 +230,14 @@ export function createServer(pipes: Map<string, Held>) {
             }),
             name ? pipeName(name) : null,
           );
+
         const token = findToken();
+
         if (!token) {
           const pending = await pendingLogin(port);
+
           if (!pending.opens.has(port)) pending.opens.set(port, open);
+
           return ok(
             `${pending.url}\nNot logged in yet. Send this link to the user: once someone in their org approves this computer there, port ${port} opens and the page becomes the pipe. list_pipes shows its URL after.`,
             {
@@ -221,14 +251,15 @@ export function createServer(pipes: Map<string, Held>) {
             },
           );
         }
+
         const held = await open(token);
         const { pipe } = held;
         const result = describe(held);
         const at = page === undefined ? undefined : pageUrl(pipe.url, page);
-        return ok(`${at ?? pipe.url}\nPort ${port}, ends ${result.endsAt}. Id ${pipe.id}.`, {
-          ...result,
-          ...(at ? { pageUrl: at } : {}),
-        });
+
+        if (at) result.pageUrl = at;
+
+        return ok(`${at ?? pipe.url}\nPort ${port}, ends ${result.endsAt}. Id ${pipe.id}.`, result);
       } catch (error) {
         return failure(error);
       }
@@ -241,14 +272,16 @@ export function createServer(pipes: Map<string, Held>) {
       title: "List pipes",
       description:
         "The pipes this MCP server has open. Pipes started with `npx wurmhol` in a terminal are listed by `wurmhol ls` instead.",
-      outputSchema: { pipes: z.array(z.object(pipeShape)) },
+      outputSchema: { pipes: z.array(z.object(pipeResult)) },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async () => {
       const list = [...pipes.values()].map(describe);
+
       const text = list.length
         ? list.map((p) => `${p.port}\t${p.url}\t${p.id}\tends ${p.endsAt}`).join("\n")
         : "No open pipes. Open one with open_pipe.";
+
       return ok(text, { pipes: list });
     },
   );
@@ -287,31 +320,36 @@ export function createServer(pipes: Map<string, Held>) {
     async ({ target, limit }) => {
       try {
         const wanted = target.trim().toLowerCase();
-        const own = [...pipes.values()]
-          .filter(
-            ({ pipe, name }) =>
-              pipe.id === target ||
-              String(pipe.port) === wanted ||
-              name === wanted ||
-              new URL(pipe.url).hostname.split(".")[0] === wanted,
-          )
-          .map(({ pipe }) => ({ id: pipe.id, url: pipe.url }));
+
+        const own = [...pipes.values()].flatMap(({ pipe, name }) =>
+          pipe.id === target ||
+          String(pipe.port) === wanted ||
+          name === wanted ||
+          new URL(pipe.url).hostname.split(".")[0] === wanted
+            ? [{ id: pipe.id, url: pipe.url }]
+            : [],
+        );
+
         const found =
           own.at(-1) ??
           listStates()
             .filter((s) => matches(s, target))
             .at(-1);
+
         if (!found) {
           throw new FixError(
             `No open pipe for ${target} on this machine. See list_pipes, or \`wurmhol ls\`.`,
           );
         }
+
         const requests = recentRequests(found.id, limit ?? 20) ?? [];
+
         const text = requests.length
           ? requests
               .map((r) => `${r.time}  ${r.method} ${r.path}  ${r.status}  ${r.durationMs} ms`)
               .join("\n")
           : `No requests through ${found.url} yet.`;
+
         return ok(text, { id: found.id, url: found.url, requests });
       } catch (error) {
         return failure(error);
@@ -336,6 +374,7 @@ export function createServer(pipes: Map<string, Held>) {
       try {
         if (!all && !target) throw new FixError("Say which pipe: a port, id or name, or all.");
         const wanted = target?.trim().toLowerCase();
+
         const chosen = [...pipes.values()].filter(
           ({ pipe, name }) =>
             all ||
@@ -344,16 +383,20 @@ export function createServer(pipes: Map<string, Held>) {
             name === wanted ||
             new URL(pipe.url).hostname.split(".")[0] === wanted,
         );
+
         if (!chosen.length && !all) {
           throw new FixError(
             `No open pipe for ${target} in this MCP session. See list_pipes; pipes started with \`npx wurmhol\` stop with \`wurmhol stop ${target}\`.`,
           );
         }
+
         await Promise.all(chosen.map(({ pipe }) => pipe.close()));
         const stopped = chosen.map(({ pipe }) => ({ id: pipe.id, url: pipe.url }));
+
         const text = stopped.length
           ? stopped.map((s) => `stopped ${s.url}`).join("\n")
           : "No open pipes.";
+
         return ok(text, { stopped });
       } catch (error) {
         return failure(error);
@@ -369,6 +412,7 @@ export async function serve() {
   const pipes = new Map<string, Held>();
   const mcp = createServer(pipes);
   let stopping = false;
+
   const shutdown = async () => {
     if (stopping) return;
     stopping = true;
@@ -376,6 +420,7 @@ export async function serve() {
     await Promise.race([closing, new Promise((resolve) => setTimeout(resolve, SHUTDOWN_MS))]);
     process.exit(0);
   };
+
   // The client ends the session by closing our stdin (MCP stdio transport).
   process.stdin.once("end", () => void shutdown());
   process.once("SIGTERM", () => void shutdown());

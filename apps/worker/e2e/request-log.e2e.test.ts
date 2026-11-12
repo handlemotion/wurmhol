@@ -6,14 +6,17 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   browserFetch,
   cli,
   cliEnv,
   cliPath,
   createToken,
+  type JsonValue,
   localServer,
+  parseJson,
   type Person,
   signIn,
   type Stack,
@@ -47,35 +50,49 @@ afterAll(async () => {
   await stack.stop();
 });
 
-interface Logged {
-  event: string;
-  method?: string;
-  path?: string;
-  status?: number;
-  durationMs?: number;
-}
+/** A logged request; loose, so two reads of the same log compare whole. */
+const requestEntry = z.looseObject({
+  method: z.string().optional(),
+  path: z.string().optional(),
+  status: z.number().optional(),
+  durationMs: z.number().optional(),
+});
+
+/** A line of `wurmhol logs --json`: a request or another pipe event. */
+const logLine = requestEntry.extend({ event: z.string() });
+
+const openedPipe = z.object({ id: z.string(), url: z.string() });
+
+/** recent_requests's answer: the pipe and its requests, or an error with no structured content. */
+const recentRequests = z.object({
+  structuredContent: openedPipe.extend({ requests: z.array(requestEntry) }).optional(),
+  isError: z.boolean().optional(),
+});
 
 async function logged(target: string) {
   const run = await cli(["logs", target, "--json"], env);
   expect(run.stderr).toBe("");
+
   return run.stdout
     .trim()
     .split("\n")
-    .map((line) => JSON.parse(line) as Logged)
+    .map((line) => parseJson(logLine, line))
     .filter((r) => r.event === "request");
 }
 
 it("logs each request's method, path and status, and none of its query values, body or cookies", async () => {
   const opened = await cli([String(local.port), "--name", "log-test", "--json"], env);
-  const pipe = JSON.parse(opened.stdout) as { id: string; url: string };
+  const pipe = parseJson(openedPipe, opened.stdout);
   const cookie = await viewerCookie(stack, ada, pipe.url);
   await (await browserFetch(`${pipe.url}/`, { cookie })).text();
+
   const failed = await browserFetch(`${pipe.url}/api/checkout?card=4242424242424242&step=pay`, {
     method: "POST",
     cookie: `${cookie}; app_session=s3cr3t-session`,
     headers: { "content-type": "application/json", authorization: "Bearer app-bearer-value" },
     body: JSON.stringify({ secret: "the-request-body" }),
   });
+
   expect(failed.status).toBe(500);
   await failed.text();
 
@@ -83,10 +100,12 @@ it("logs each request's method, path and status, and none of its query values, b
   const requests = await waitFor(
     async () => {
       const found = await logged(String(local.port));
+
       return found.length >= 2 ? found : null;
     },
     { what: "two logged requests" },
   );
+
   expect(requests.map(({ method, path, status }) => ({ method, path, status }))).toEqual([
     { method: "GET", path: "/", status: 200 },
     { method: "POST", path: "/api/checkout?card=&step=", status: 500 },
@@ -100,6 +119,7 @@ it("logs each request's method, path and status, and none of its query values, b
   // Catches: a card number, a token, a cookie or a body written to disk.
   const files = readdirSync(join(env.WURMHOL_HOME!, "logs"));
   const disk = files.map((f) => readFileSync(join(env.WURMHOL_HOME!, "logs", f), "utf8")).join("");
+
   for (const secret of [
     "4242424242424242",
     "s3cr3t-session",
@@ -120,14 +140,17 @@ it("logs each request's method, path and status, and none of its query values, b
 
 it("--follow prints requests as they happen", async () => {
   const opened = await cli([String(local.port), "--json"], env);
-  const pipe = JSON.parse(opened.stdout) as { id: string; url: string };
+  const pipe = parseJson(openedPipe, opened.stdout);
   const cookie = await viewerCookie(stack, ada, pipe.url);
+
   const follower = spawn(process.execPath, [cliPath, "logs", pipe.id, "--follow"], {
     env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
+
   let output = "";
   follower.stdout.on("data", (chunk: Buffer) => (output += chunk));
+
   try {
     // Started: it printed the log so far (the pipe's `connected`).
     await waitFor(() => output.includes("connected"), { what: "the log so far" });
@@ -143,17 +166,21 @@ it("--follow prints requests as they happen", async () => {
 
 it("keeps each pipe's log bounded, and still shows the latest requests", async () => {
   const opened = await cli([String(local.port), "--json"], env);
-  const pipe = JSON.parse(opened.stdout) as { id: string; url: string };
+  const pipe = parseJson(openedPipe, opened.stdout);
   const cookie = await viewerCookie(stack, ada, pipe.url);
   const long = "x".repeat(8000);
+
   // About 1.3 MB of log lines: past the 1 MiB at which a log moves to `.1`.
   for (let i = 0; i < 160; i++) {
     await (await browserFetch(`${pipe.url}/${long}/${i}`, { cookie })).text();
   }
+
   const dir = join(env.WURMHOL_HOME!, "logs");
+
   const bytes = readdirSync(dir)
     .filter((f) => f.startsWith(pipe.id))
     .reduce((sum, f) => sum + statSync(join(dir, f)).size, 0);
+
   // Catches: a log that grows for as long as the pipe is open.
   expect(bytes).toBeLessThanOrEqual(2 * 1024 * 1024);
   expect(bytes).toBeGreaterThan(1024 * 1024);
@@ -169,48 +196,50 @@ it("recent_requests gives an agent the requests of its own pipes and of npx wurm
     env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
     stderr: "pipe",
   });
+
   const client = new Client({ name: "wurmhol-e2e", version: "0" });
   await client.connect(transport);
-  type Result = {
-    structuredContent?: { id: string; url: string; requests: Logged[] };
-    isError?: boolean;
-  };
-  const call = async (name: string, args: Record<string, unknown>) =>
-    (await client.callTool({ name, arguments: args })) as Result;
+
+  const call = async (name: string, args: { [key: string]: JsonValue }) =>
+    recentRequests.parse(await client.callTool({ name, arguments: args }));
+
   try {
-    const opened = (await call("open_pipe", { port: local.port })) as {
-      structuredContent?: { id: string; url: string };
-    };
-    const pipe = opened.structuredContent!;
+    const opened = await client.callTool({ name: "open_pipe", arguments: { port: local.port } });
+    const pipe = z.object({ structuredContent: openedPipe }).parse(opened).structuredContent;
     const cookie = await viewerCookie(stack, ada, pipe.url);
     await (await browserFetch(`${pipe.url}/api/checkout?id=7`, { cookie })).text();
+
     // Catches: the MCP server's own pipes logging nothing, so the agent sees no failures.
     const own = await waitFor(
       async () => {
         const result = await call("recent_requests", { target: pipe.id });
+
         return result.structuredContent?.requests.length ? result.structuredContent : null;
       },
       { what: "the MCP pipe's request" },
     );
+
     expect(own.requests.map(({ method, path, status }) => ({ method, path, status }))).toEqual([
       { method: "GET", path: "/api/checkout?id=", status: 500 },
     ]);
 
-    const daemon = JSON.parse((await cli([String(local.port), "--json"], env)).stdout) as {
-      id: string;
-      url: string;
-    };
+    const daemon = parseJson(openedPipe, (await cli([String(local.port), "--json"], env)).stdout);
+
     const daemonCookie = await viewerCookie(stack, ada, daemon.url);
+
     for (const path of ["/one", "/two", "/three"]) {
       await (await browserFetch(`${daemon.url}${path}`, { cookie: daemonCookie })).text();
     }
+
     const theirs = await waitFor(
       async () => {
         const result = await call("recent_requests", { target: daemon.id, limit: 2 });
+
         return result.structuredContent?.requests.length === 2 ? result.structuredContent : null;
       },
       { what: "the daemon pipe's requests" },
     );
+
     expect(theirs.url).toBe(daemon.url);
     expect(theirs.requests.map((r) => r.path)).toEqual(["/two", "/three"]);
 

@@ -27,6 +27,7 @@ type DomainsEnv = AppEnv & {
 /** The feature is configured, or every call answers that it is off. */
 const requireEnabled = createMiddleware<DomainsEnv>(async (c, next) => {
   const deps = domainDeps(c.var.config, c.var.db, c.env);
+
   if (!deps) {
     return c.json(
       {
@@ -37,6 +38,7 @@ const requireEnabled = createMiddleware<DomainsEnv>(async (c, next) => {
       404,
     );
   }
+
   c.set("domains", deps);
   await next();
 });
@@ -45,8 +47,10 @@ const requireEnabled = createMiddleware<DomainsEnv>(async (c, next) => {
 const limitChanges = createMiddleware<DomainsEnv>(async (c, next) => {
   if (c.req.method !== "GET") {
     const wait = await checkRateLimit(c.env, c.var.config, "manage", c.var.rateKey);
+
     if (wait) return tooManyRequests(wait);
   }
+
   await next();
 });
 
@@ -56,11 +60,12 @@ const addBody = z.object({
 });
 
 /** What a refusal from the service becomes on the wire. */
-function refusal(error: unknown) {
-  if (error instanceof DomainRefusal) {
-    return Response.json(error.body(), { status: error.status });
+function refusal(cause: unknown) {
+  if (cause instanceof DomainRefusal) {
+    return Response.json(cause.body(), { status: cause.status });
   }
-  throw error;
+
+  throw cause;
 }
 
 const endpoints = new Hono<DomainsEnv>()
@@ -69,6 +74,7 @@ const endpoints = new Hono<DomainsEnv>()
   .post("/", zValidator("json", addBody), async (c) => {
     try {
       const row = await add(c.var.domains, c.var.orgId, c.req.valid("json"));
+
       return c.json({ domain: domainView(c.var.config, row) }, 201);
     } catch (error) {
       return refusal(error);
@@ -77,6 +83,7 @@ const endpoints = new Hono<DomainsEnv>()
   .get("/:hostname", async (c) => {
     try {
       const row = await get(c.var.domains, c.var.orgId, c.req.param("hostname"));
+
       return c.json({ domain: domainView(c.var.config, row) });
     } catch (error) {
       return refusal(error);
@@ -86,6 +93,7 @@ const endpoints = new Hono<DomainsEnv>()
     try {
       const row = await get(c.var.domains, c.var.orgId, c.req.param("hostname"));
       const checked = await check(c.var.domains, row, { nudge: true });
+
       return c.json({ domain: domainView(c.var.config, checked) });
     } catch (error) {
       return refusal(error);
@@ -98,7 +106,9 @@ const endpoints = new Hono<DomainsEnv>()
         if (error instanceof DomainRefusal && error.code === "not_found") return null;
         throw error;
       });
+
       if (row) await remove(c.var.domains, row);
+
       return c.json({ ok: true });
     } catch (error) {
       return refusal(error);
@@ -110,6 +120,7 @@ export const domainsV1 = new Hono<DomainsEnv>()
   .use(
     createMiddleware<DomainsEnv>(async (c, next) => {
       const token = await bearerToken(c, { org: true });
+
       if (token instanceof Response) return token;
       c.set("orgId", token.orgId);
       c.set("rateKey", token.id);

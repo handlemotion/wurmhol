@@ -2,9 +2,9 @@
 // computer's web ports, and its owner opens a pipe to one from the API the Create pipe card uses.
 import { type ChildProcess, spawn } from "node:child_process";
 import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
 import type WebSocket from "ws";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import {
   api,
   browserFetch,
@@ -13,7 +13,9 @@ import {
   cliEnv,
   cliPath,
   createToken,
+  listeningPort,
   localServer,
+  parseJson,
   type Person,
   share,
   signIn,
@@ -24,31 +26,55 @@ import {
   waitFor,
 } from "./support.ts";
 
-interface Machine {
-  id: string;
-  name: string;
-  ports: { port: number; title: string | null }[];
+const machineSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  ports: z.array(z.object({ port: z.number(), title: z.string().nullable() })),
+});
+
+type Machine = z.infer<typeof machineSchema>;
+
+/** A machines feed message; other event types carry no machine list. */
+const feedEvent = z.object({ type: z.string(), machines: z.array(machineSchema).optional() });
+
+const urlBody = z.object({ url: z.string() });
+const sharesBody = z.object({ shares: z.array(z.object({ url: z.string() })) });
+
+/** What a Create pipe card holds: the latest machine list (null until the first) and its socket. */
+interface MachineFeed {
+  machines: Machine[] | null;
+  socket: WebSocket;
+}
+
+/** The real `wurmhol host`, with what it printed and how it exited (undefined while it runs). */
+interface HostRun {
+  process: ChildProcess;
+  output: string;
+  exited: number | null | undefined;
 }
 
 /** A Create pipe card's feed of `person`'s machines: the latest list it was sent. */
 function watch(stack: Stack, person: Person) {
-  const state: { machines: Machine[] | null; socket: WebSocket } = {
+  const state: MachineFeed = {
     machines: null,
     socket: browserSocket(`${stack.url}/api/machines/live`, [], {
       cookie: person.cookie,
       origin: stack.url,
     }),
   };
+
   state.socket.on("message", (data) => {
-    const event = JSON.parse(String(data)) as { type: string; machines: Machine[] };
-    if (event.type === "machines") state.machines = event.machines;
+    const event = parseJson(feedEvent, String(data));
+
+    if (event.type === "machines" && event.machines) state.machines = event.machines;
   });
+
   return state;
 }
 
-/** The real `wurmhol host`, with what it printed and how it exited (undefined while it runs). */
+/** Starts the real `wurmhol host`. */
 function startHost(env: Record<string, string>) {
-  const state: { process: ChildProcess; output: string; exited: number | null | undefined } = {
+  const state: HostRun = {
     process: spawn(process.execPath, [cliPath, "host"], {
       env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
       stdio: ["ignore", "pipe", "pipe"],
@@ -56,9 +82,11 @@ function startHost(env: Record<string, string>) {
     output: "",
     exited: undefined,
   };
+
   state.process.stdout!.on("data", (chunk: Buffer) => (state.output += chunk));
   state.process.stderr!.on("data", (chunk: Buffer) => (state.output += chunk));
   state.process.on("exit", (code) => (state.exited = code));
+
   return state;
 }
 
@@ -83,13 +111,14 @@ describe("a computer running wurmhol host", () => {
     ada = await signIn(stack);
     bea = await signIn(stack);
     cy = await signIn(stack);
+
     for (const person of [bea, cy]) {
-      const { body: invite } = await api<{ url: string }>(stack, ada, "/api/invites", {
-        method: "POST",
-      });
+      const { body: invite } = await api(stack, ada, "/api/invites", { method: "POST" }, urlBody);
+
       const code = invite.url.split("/join/")[1]!;
       await api(stack, person, `/api/invites/${code}/accept`, { method: "POST" });
     }
+
     local = await localServer((_req, res) => {
       hits++;
       res.writeHead(200, { "content-type": "text/html" }).end("<title>Machine &amp; test</title>");
@@ -121,19 +150,23 @@ describe("a computer running wurmhol host", () => {
   it("shows its owner the web servers open on it, with their titles, and no one else", async () => {
     const adas = watch(stack, ada);
     const beas = watch(stack, bea);
+
     // Catches: ports never reported, the title probe failing, or the card's feed not pushed.
     const machine = await waitFor(
       () => adas.machines?.find((m) => m.ports.some((p) => p.port === local.port)) ?? null,
       { timeoutMs: 15_000, what: `ada's machine with port ${local.port}` },
     );
+
     expect(machine.ports.find((p) => p.port === local.port)?.title).toBe("Machine & test");
     // Catches: one member's computer listed (and openable) for everyone in the org.
     await waitFor(() => beas.machines !== null, { what: "bea's feed" });
     expect(beas.machines).toEqual([]);
+
     const asBea = await api(stack, bea, `/api/machines/${machine.id}/open`, {
       method: "POST",
       body: { port: local.port },
     });
+
     expect(asBea.status).toBe(404);
     adas.socket.close();
     beas.socket.close();
@@ -141,6 +174,7 @@ describe("a computer running wurmhol host", () => {
 
   it("lists dev servers and APIs, but not debuggers or the ports its owner ignores", async () => {
     const adas = watch(stack, ada);
+
     // Every port open before the CLI started is probed in its first scan, so once these two are
     // listed the others have been decided. Catches: an API whose `/` is a 404 dropped as noise.
     const machine = await waitFor(
@@ -150,6 +184,7 @@ describe("a computer running wurmhol host", () => {
         ) ?? null,
       { timeoutMs: 15_000, what: "the dev server and the API listed" },
     );
+
     const ports = machine.ports.map((p) => p.port);
     // Catches: a debugger's port offered as a web server to share.
     expect(ports).not.toContain(inspector.port);
@@ -165,20 +200,24 @@ describe("a computer running wurmhol host", () => {
     const server = createServer((_req, res) => {
       res.writeHead(200, { "content-type": "text/html" }).end("<title>IPv6 only</title>");
     });
+
     await new Promise<void>((resolve, reject) => {
       server.once("error", (error) =>
         reject(new Error(`this test needs an IPv6 loopback (::1): ${error.message}`)),
       );
       server.listen(0, "::1", resolve);
     });
-    const { port } = server.address() as AddressInfo;
+    const port = listeningPort(server);
+
     try {
       const adas = watch(stack, ada);
+
       // Catches: the probe asking only 127.0.0.1, so the port never shows in Create pipe.
       const machine = await waitFor(
         () => adas.machines?.find((m) => m.ports.some((p) => p.port === port)) ?? null,
         { timeoutMs: 15_000, what: `port ${port} on ::1 listed` },
       );
+
       expect(machine.ports.find((p) => p.port === port)?.title).toBe("IPv6 only");
       adas.socket.close();
     } finally {
@@ -189,21 +228,28 @@ describe("a computer running wurmhol host", () => {
 
   it("opens a pipe to a port it reported when its owner picks it, and to no other port", async () => {
     const adas = watch(stack, ada);
+
     const machine = await waitFor(
       () => adas.machines?.find((m) => m.ports.some((p) => p.port === local.port)) ?? null,
       { timeoutMs: 15_000, what: "ada's machine" },
     );
+
     // Catches: the wall reaching a port the computer did not offer (a database, say).
     const unlisted = await api(stack, ada, `/api/machines/${machine.id}/open`, {
       method: "POST",
       body: { port: 1 },
     });
+
     expect(unlisted.status).toBe(409);
 
-    const opened = await api<{ url: string }>(stack, ada, `/api/machines/${machine.id}/open`, {
-      method: "POST",
-      body: { port: local.port },
-    });
+    const opened = await api(
+      stack,
+      ada,
+      `/api/machines/${machine.id}/open`,
+      { method: "POST", body: { port: local.port } },
+      urlBody,
+    );
+
     // Catches: the open never reaching the CLI, or its answer never reaching the caller.
     expect(opened.status).toBe(200);
     const before = hits;
@@ -211,14 +257,18 @@ describe("a computer running wurmhol host", () => {
     const page = await browserFetch(`${opened.body.url}/`, { cookie });
     expect(await page.text()).toContain("Machine &amp; test");
     expect(hits).toBeGreaterThan(before);
-    const { body } = await api<{ shares: { url: string }[] }>(stack, ada, "/api/shares");
+    const { body } = await api(stack, ada, "/api/shares", {}, sharesBody);
     expect(body.shares.map((s) => s.url)).toContain(opened.body.url);
 
     // Catches: a second pick of the same port opening a second pipe to it.
-    const again = await api<{ url: string }>(stack, ada, `/api/machines/${machine.id}/open`, {
-      method: "POST",
-      body: { port: local.port },
-    });
+    const again = await api(
+      stack,
+      ada,
+      `/api/machines/${machine.id}/open`,
+      { method: "POST", body: { port: local.port } },
+      urlBody,
+    );
+
     expect(again.body.url).toBe(opened.body.url);
     adas.socket.close();
   });
@@ -247,6 +297,7 @@ describe("a computer running wurmhol host", () => {
   async function leavesTheOrg(person: Person, go: () => Promise<void>) {
     const theirEnv = cliEnv(stack, (await createToken(stack, person, "their laptop")).token);
     const theirHost = startHost(theirEnv);
+
     try {
       const feed = watch(stack, person);
       await waitFor(() => feed.machines?.length === 1, {
@@ -268,7 +319,8 @@ describe("a computer running wurmhol host", () => {
       // Catches: their open pipe still on the org's wall, served from a computer the org let go.
       await waitFor(
         async () => {
-          const { body } = await api<{ shares: { url: string }[] }>(stack, ada, "/api/shares");
+          const { body } = await api(stack, ada, "/api/shares", {}, sharesBody);
+
           return !body.shares.some((s) => s.url === pipe.url);
         },
         { what: "their pipe ended" },
@@ -285,11 +337,14 @@ describe("a computer running wurmhol host", () => {
   }
 
   it("disconnects a member's computer and ends their pipes when an owner removes them", async () => {
-    const { body } = await api<{ members: { id: string; email: string }[] }>(
+    const { body } = await api(
       stack,
       ada,
       "/api/members",
+      {},
+      z.object({ members: z.array(z.object({ id: z.string(), email: z.string() })) }),
     );
+
     const member = body.members.find((m) => m.email === bea.email)!;
     await leavesTheOrg(bea, async () => {
       const removed = await api(stack, ada, `/api/members/${member.id}`, { method: "DELETE" });

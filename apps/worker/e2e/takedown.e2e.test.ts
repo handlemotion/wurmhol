@@ -2,7 +2,8 @@
 // revoked with its other pipes, and a blocked org starts no more pipes with any token.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   alive,
   browserFetch,
@@ -10,6 +11,7 @@ import {
   cliEnv,
   createToken,
   localServer,
+  parseJson,
   type Person,
   share,
   signIn,
@@ -23,28 +25,34 @@ import {
 const OPERATOR_TOKEN = "e2e-operator-token-e2e-operator-token-0";
 
 function pidOf(env: Record<string, string>, id: string) {
-  return (
-    JSON.parse(readFileSync(join(env.WURMHOL_HOME!, "shares", `${id}.json`), "utf8")) as {
-      pid: number;
-    }
+  return parseJson(
+    z.object({ pid: z.number() }),
+    readFileSync(join(env.WURMHOL_HOME!, "shares", `${id}.json`), "utf8"),
   ).pid;
 }
 
-async function takedown(stack: Stack, body: unknown, token = OPERATOR_TOKEN) {
+interface TakedownRequest {
+  pipe: string;
+  blockOrg?: boolean;
+  note?: string;
+}
+
+/** What a takedown the operator is allowed ended. */
+const takenDown = z.object({
+  pipe: z.object({ id: z.string() }),
+  tokenRevoked: z.string().nullable(),
+  endedPipes: z.array(z.string()),
+  orgBlocked: z.boolean(),
+});
+
+async function takedown(stack: Stack, body: TakedownRequest, token = OPERATOR_TOKEN) {
   const response = await fetch(`${stack.url}/operator/takedown`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  return {
-    status: response.status,
-    body: (await response.json()) as {
-      pipe: { id: string };
-      tokenRevoked: string | null;
-      endedPipes: string[];
-      orgBlocked: boolean;
-    },
-  };
+
+  return { status: response.status, text: await response.text() };
 }
 
 describe("operator takedown", () => {
@@ -56,12 +64,15 @@ describe("operator takedown", () => {
   async function server() {
     const local = await localServer((_req, res) => res.end("ok"));
     servers.push(local);
+
     return local.port;
   }
+
   async function tokenEnv(person: Person, name: string) {
     const created = await createToken(stack, person, name);
     const env = cliEnv(stack, created.token);
     envs.push(env);
+
     return { id: created.id, env };
   }
 
@@ -71,6 +82,7 @@ describe("operator takedown", () => {
   });
   afterAll(async () => {
     for (const env of envs) await stopAll(env);
+
     for (const local of servers) await local.close();
     await stack.stop();
   });
@@ -91,10 +103,11 @@ describe("operator takedown", () => {
     const pids = [pidOf(reported.env, pipe.id), pidOf(reported.env, sibling.id)];
     const done = await takedown(stack, { pipe: host });
     expect(done.status).toBe(200);
-    expect(done.body.pipe.id).toBe(pipe.id);
-    expect(done.body.tokenRevoked).toBe(reported.id);
-    expect(done.body.endedPipes.toSorted()).toEqual([pipe.id, sibling.id].toSorted());
-    expect(done.body.orgBlocked).toBe(false);
+    const taken = parseJson(takenDown, done.text);
+    expect(taken.pipe.id).toBe(pipe.id);
+    expect(taken.tokenRevoked).toBe(reported.id);
+    expect(taken.endedPipes.toSorted()).toEqual([pipe.id, sibling.id].toSorted());
+    expect(taken.orgBlocked).toBe(false);
 
     await waitFor(() => pids.every((pid) => !alive(pid)), { what: "both CLIs to exit" });
     const ended = await browserFetch(`${pipe.url}/`, { cookie });
@@ -117,8 +130,10 @@ describe("operator takedown", () => {
 
     const done = await takedown(stack, { pipe: `${pipe.url}/login`, blockOrg: true, note: "e2e" });
     expect(done.status).toBe(200);
-    expect(done.body.orgBlocked).toBe(true);
-    expect(done.body.endedPipes).toContain(unrelated.id);
+    const taken = parseJson(takenDown, done.text);
+    expect(taken.orgBlocked).toBe(true);
+    expect(taken.endedPipes).toContain(unrelated.id);
+
     await waitFor(() => !alive(pid), { what: "the bystander's CLI to exit" });
 
     for (const env of [bystander.env, (await tokenEnv(ada, "made after")).env]) {

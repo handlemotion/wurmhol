@@ -48,16 +48,20 @@ function useView(me: Me): [WallView, (view: WallView) => void] {
   const [view, setView] = useState<WallView>(() =>
     location.pathname === "/apps" ? "apps" : "pipes",
   );
+
   // Back and forward move between the two, as the address bar shows.
   useEffect(() => {
     const onPop = () => setView(location.pathname === "/apps" ? "apps" : "pipes");
     addEventListener("popstate", onPop);
+
     return () => removeEventListener("popstate", onPop);
   }, []);
+
   const go = (next: WallView) => {
     history.pushState(null, "", next === "apps" ? "/apps" : "/");
     setView(next);
   };
+
   // An org (or a role) without apps shows its pipes, wherever the address points.
   return [me.apps ? view : "pipes", go];
 }
@@ -106,6 +110,7 @@ export function Wall({ me }: { me: Me }) {
 function NeedsPlan({ owner }: { owner: boolean }) {
   const billing = useOpenBilling();
   const pending = billing.isPending ? billing.variables : undefined;
+
   return (
     <div className="mx-auto mt-4 flex max-w-xl flex-wrap items-center justify-between gap-3 border border-border p-5">
       <Text>
@@ -138,10 +143,13 @@ function NeedsPlan({ owner }: { owner: boolean }) {
 
 export function WallPage() {
   const me = useMe();
+
   if (me.isError) {
     toLogin();
+
     return null;
   }
+
   return me.data ? (
     <SkeletonProvider>
       <LazyMotion features={motionFeatures} strict>

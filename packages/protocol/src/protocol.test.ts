@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import {
   chunk,
   decodeFrame,
@@ -10,6 +10,7 @@ import {
   ProtocolError,
 } from "./frame.ts";
 import { parseRefusal, refusal } from "./connect.ts";
+import type { JsonValue } from "./json.ts";
 import {
   forwardable,
   pipeSetCookie,
@@ -87,13 +88,15 @@ describe("frame round-trips", () => {
 describe("malformed frames are refused", () => {
   // Catches: a hostile CLI crashing the Durable Object, or smuggling a request with a path that
   // is not a path (an absolute URL would let it pick the upstream).
-  const json = (type: number, payload: unknown) => {
+  const json = (type: number, payload: JsonValue) => {
     const body = new TextEncoder().encode(JSON.stringify(payload));
     const frame = new Uint8Array(5 + body.byteLength);
     frame[0] = type;
     frame.set(body, 5);
+
     return frame;
   };
+
   const cases: [string, string | Uint8Array][] = [
     ["short", bytes(1, 0, 0)],
     ["unknown type", bytes(200, 0, 0, 0, 1)],
@@ -112,6 +115,7 @@ describe("malformed frames are refused", () => {
     ["invalid UTF-8 JSON", bytes(4, 0, 0, 0, 1, 0xff, 0xfe)],
     ["oversized data", new Uint8Array(5 + MAX_CHUNK_BYTES + 1).fill(3, 0, 1)],
   ];
+
   it.each(cases)("%s", (_name, message) => {
     expect(() => decodeFrame(message)).toThrow(ProtocolError);
   });
@@ -128,6 +132,7 @@ describe("chunking", () => {
   it("splits a body into chunks of at most 64 KB that join back exactly", () => {
     // Catches: an off-by-one that drops or repeats the last partial chunk of a large asset.
     const body = new Uint8Array(3 * MAX_CHUNK_BYTES + 17);
+
     for (let i = 0; i < body.length; i++) body[i] = (i * 31) & 0xff;
     const chunks = [...chunk(body)];
     expect(chunks.map((c) => c.byteLength)).toEqual([
@@ -138,12 +143,15 @@ describe("chunking", () => {
     ]);
     const joined = new Uint8Array(body.length);
     let offset = 0;
+
     for (const c of chunks) {
       const decoded = decodeFrame(encodeFrame({ stream: 5, type: "data", payload: c }));
+
       if (decoded.type !== "data") throw new Error("expected data");
       joined.set(decoded.payload, offset);
       offset += decoded.payload.byteLength;
     }
+
     expect(joined).toEqual(body);
   });
 
@@ -161,21 +169,27 @@ describe("stream interleaving", () => {
       [2, new Uint8Array(70_000).fill(2)],
       [3, new Uint8Array(5).fill(3)],
     ]);
+
     const queues = [...bodies].map(([stream, body]) =>
       [...chunk(body)].map((payload) => encodeFrame({ stream, type: "data", payload })),
     );
+
     const wire: Uint8Array[] = [];
+
     while (queues.some((q) => q.length))
       for (const q of queues) if (q.length) wire.push(q.shift()!);
 
     const received = new Map<number, number[]>();
+
     for (const message of wire) {
       const frame = decodeFrame(message);
+
       if (frame.type !== "data") throw new Error("expected data");
       const list = received.get(frame.stream) ?? [];
       list.push(...frame.payload);
       received.set(frame.stream, list);
     }
+
     for (const [stream, body] of bodies) expect(received.get(stream)).toEqual([...body]);
   });
 
@@ -214,9 +228,11 @@ describe("flow control", () => {
     const window = new SendWindow(100);
     window.take(100);
     let resumed = false;
+
     const waiting = window.ready(40).then(() => {
       resumed = true;
     });
+
     await Promise.resolve();
     expect(resumed).toBe(false);
     window.grant(20);
@@ -254,6 +270,7 @@ describe("flow control", () => {
     const body = new Uint8Array(50 * 1024 * 1024 + 123);
     let sent = 0;
     let delivered = 0;
+
     for (const piece of chunk(body)) {
       await send.ready(piece.byteLength);
       send.take(piece.byteLength);
@@ -261,8 +278,10 @@ describe("flow control", () => {
       receive.received(piece.byteLength);
       delivered += piece.byteLength;
       const grant = receive.consumed(piece.byteLength);
+
       if (grant) send.grant(grant);
     }
+
     expect(sent).toBe(body.byteLength);
     expect(delivered).toBe(body.byteLength);
   });
@@ -275,6 +294,7 @@ describe("websocket send backlog", () => {
   // flood that is never cut (drain credited ahead of time, so a later burst starts negative).
   it("allows a steady stream at the drain rate, and refuses a burst over the limit", () => {
     const backlog = new SendBacklog({ limit: 4 * MiB, drainPerSecond: 2 * MiB, now: 0 });
+
     for (let t = 0; t <= 60_000; t += 500) expect(backlog.add(MiB, t)).toBe(true);
     // An idle minute earns no credit for the burst after it.
     expect(backlog.pending).toBeLessThanOrEqual(MiB);
@@ -334,6 +354,7 @@ describe("headers", () => {
       ],
       "https://abcdefghij.wurmhol.dev",
     );
+
     expect(headers).toEqual([
       ["accept", "text/html"],
       ["cookie", "sid=1"],
@@ -375,6 +396,7 @@ describe("refusals", () => {
     // `disconnected`; a rate limit ending a share a retry would have kept.
     const read = (...args: Parameters<typeof refusal>) =>
       parseRefusal(JSON.stringify(refusal(...args)))?.reason;
+
     expect(read(402, "no subscription", "Subscribe.")).toBe("no_subscription");
     expect(read(401, "token expired", "Make a token.")).toBe("revoked");
     expect(read(410, "share ended", "Start again.", { reason: "expired" })).toBe("expired");

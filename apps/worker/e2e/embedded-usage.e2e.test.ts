@@ -4,15 +4,19 @@
 // counts, never anything from inside a tunnel.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   alive,
   api,
+  type ApiResult,
   browserFetch,
   cli,
   cliEnv,
+  type JsonValue,
   localServer,
   me,
+  parseJson,
   type Person,
   share,
   signIn,
@@ -34,59 +38,94 @@ let appId: string;
 let local: Awaited<ReturnType<typeof localServer>>;
 const envs: Record<string, string>[] = [];
 
-async function embed<T = Record<string, unknown>>(
-  path: string,
-  init: { method?: string; body?: unknown } = {},
-) {
-  const response = await browserFetch(`${apiHost}/v1/embed${path}`, {
-    method: init.method ?? "GET",
-    headers: {
-      authorization: `Bearer ${key}`,
-      ...(init.body ? { "content-type": "application/json" } : {}),
-    },
-    body: init.body ? JSON.stringify(init.body) : undefined,
-  });
-  const text = await response.text();
-  return { status: response.status, body: (text ? JSON.parse(text) : null) as T };
+interface EmbedInit {
+  method?: string;
+  body?: JsonValue;
 }
 
-async function tenant(id: string, body: Record<string, unknown> = {}) {
+/**
+ * A bearer call to `/v1/embed…` on the CLI's host with the app's key. The body is decoded with
+ * `schema` (an empty body is `null`); without one it is any JSON value.
+ */
+async function embed(path: string, init?: EmbedInit): Promise<ApiResult<JsonValue>>;
+async function embed<S extends z.ZodType>(
+  path: string,
+  init: EmbedInit,
+  schema: S,
+): Promise<ApiResult<z.output<S>>>;
+async function embed<T>(
+  path: string,
+  init: EmbedInit = {},
+  schema?: z.ZodType<T>,
+): Promise<ApiResult<T | JsonValue>> {
+  const authorization = `Bearer ${key}`;
+
+  const response = await browserFetch(`${apiHost}/v1/embed${path}`, {
+    method: init.method ?? "GET",
+    headers: init.body ? { authorization, "content-type": "application/json" } : { authorization },
+    body: init.body ? JSON.stringify(init.body) : undefined,
+  });
+
+  const text = (await response.text()) || "null";
+
+  return {
+    status: response.status,
+    body: schema ? parseJson(schema, text) : parseJson(z.json(), text),
+  };
+}
+
+/** A tenant's own limits; one left out follows the application's default. */
+type TenantLimits = {
+  activeTunnels?: number;
+  monthlyRequests?: number;
+};
+
+async function tenant(id: string, body: TenantLimits = {}) {
   expect((await embed(`/tenants/${id}`, { method: "PUT", body })).status).toBe(200);
+
   const subject = await embed(`/tenants/${id}/subjects/user`, {
     method: "PUT",
     body: { kind: "user" },
   });
+
   expect(subject.status).toBe(200);
 }
 
 async function newTunnel(tenantId: string) {
-  const made = await embed<{
-    tunnel: { id: string; url: string };
-    connector: { connector: string };
-  }>("/tunnels", { method: "POST", body: { tenant: tenantId, owner: "user" } });
+  const made = await embed("/tunnels", {
+    method: "POST",
+    body: { tenant: tenantId, owner: "user" },
+  });
+
   expect(made.status).toBe(201);
-  const env = cliEnv(stack, made.body.connector.connector);
+
+  const { tunnel, connector } = z
+    .object({
+      tunnel: z.object({ id: z.string(), url: z.string() }),
+      connector: z.object({ connector: z.string() }),
+    })
+    .parse(made.body);
+
+  const env = cliEnv(stack, connector.connector);
   envs.push(env);
-  return { ...made.body.tunnel, env };
+
+  return { ...tunnel, env };
 }
 
 async function token(tunnel: string) {
-  const made = await embed<{ grant: { token: string } }>("/grants", {
-    method: "POST",
-    body: { tunnel, subject: "user", kind: "client" },
-  });
+  const made = await embed(
+    "/grants",
+    { method: "POST", body: { tunnel, subject: "user", kind: "client" } },
+    z.object({ grant: z.object({ token: z.string() }) }),
+  );
+
   return made.body.grant.token;
 }
 
 function pidOf(env: Record<string, string>, id: string) {
   const file = join(env.WURMHOL_HOME!, "shares", `${id}.json`);
-  return (JSON.parse(readFileSync(file, "utf8")) as { pid: number }).pid;
-}
 
-interface Counts {
-  requests: number;
-  bytes: number;
-  openTunnels: number;
+  return parseJson(z.object({ pid: z.number() }), readFileSync(file, "utf8")).pid;
 }
 
 beforeAll(async () => {
@@ -98,16 +137,24 @@ beforeAll(async () => {
   apiHost = `http://api.localhost:${stack.port}`;
   owner = await signIn(stack);
   await startPlan(stack, (await me(stack, owner)).activeOrgId, "business");
-  const app = await api<{ app: { id: string } }>(stack, owner, "/api/apps", {
-    method: "POST",
-    body: { name: "Dorks" },
-  });
+
+  const app = await api(
+    stack,
+    owner,
+    "/api/apps",
+    { method: "POST", body: { name: "Dorks" } },
+    z.object({ app: z.object({ id: z.string() }) }),
+  );
+
   appId = app.body.app.id;
   key = (
-    await api<{ key: string }>(stack, owner, `/api/apps/${appId}/keys`, {
-      method: "POST",
-      body: { name: "backend", permissions: ALL },
-    })
+    await api(
+      stack,
+      owner,
+      `/api/apps/${appId}/keys`,
+      { method: "POST", body: { name: "backend", permissions: ALL } },
+      z.object({ key: z.string() }),
+    )
   ).body.key;
   local = await localServer((_req, res) => res.end("ok"));
 });
@@ -134,10 +181,12 @@ describe("open tunnels", () => {
 
   it("follow the application's default for tenants, changed at once", async () => {
     await tenant("defaulted");
+
     const patched = await api(stack, owner, `/api/apps/${appId}`, {
       method: "PATCH",
       body: { tenantActiveTunnels: 1 },
     });
+
     expect(patched.status).toBe(200);
     const first = await newTunnel("defaulted");
     await share(stack, first.env, local.port);
@@ -166,6 +215,7 @@ describe("requests", () => {
     await waitFor(
       async () => {
         await browserFetch(`${metered.url}/`, { headers: meteredGrant }).catch(() => null);
+
         return !alive(pid);
       },
       { what: "the metered tenant's tunnel to end", timeoutMs: 30_000, intervalMs: 250 },
@@ -178,21 +228,40 @@ describe("requests", () => {
   });
 
   it("count toward the org, attributed to the application and each tenant", async () => {
-    const usage = await embed<{
-      window: string;
-      app: Counts;
-      tenants: Record<string, Counts & { limits: { monthlyRequests: number | null } }>;
-    }>("/usage?tenant=metered&tenant=calm&tenant=nobody");
+    // Loose throughout: the whole answer is searched for anything from inside a tunnel.
+    const usage = await embed(
+      "/usage?tenant=metered&tenant=calm&tenant=nobody",
+      {},
+      z.looseObject({
+        app: z.looseObject({ requests: z.number() }),
+        tenants: z.record(
+          z.string(),
+          z.looseObject({
+            requests: z.number(),
+            limits: z.looseObject({ monthlyRequests: z.number().nullable() }).optional(),
+          }),
+        ),
+      }),
+    );
+
     expect(usage.status).toBe(200);
     const { app, tenants } = usage.body;
     expect(Object.keys(tenants).toSorted()).toEqual(["calm", "metered"]);
     expect(tenants.metered!.requests).toBeGreaterThanOrEqual(3);
-    expect(tenants.metered!.limits.monthlyRequests).toBe(3);
+    expect(tenants.metered!.limits?.monthlyRequests).toBe(3);
     expect(tenants.calm!.requests).toBeGreaterThanOrEqual(1);
     expect(app.requests).toBeGreaterThanOrEqual(tenants.metered!.requests + tenants.calm!.requests);
     expect(JSON.stringify(usage.body)).not.toMatch(/title|favicon|path/);
+
     // Every request in this org is embedded, so the org's count is the application's.
-    const billing = await api<{ usage: { requests: number } }>(stack, owner, "/api/billing");
+    const billing = await api(
+      stack,
+      owner,
+      "/api/billing",
+      {},
+      z.object({ usage: z.object({ requests: z.number() }) }),
+    );
+
     expect(billing.body.usage.requests).toBe(app.requests);
   });
 });

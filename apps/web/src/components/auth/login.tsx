@@ -12,11 +12,13 @@ import { Wormhole } from "@/components/auth/wormhole";
 import { useSignInMethods } from "@/hooks/use-app";
 import { safeNext, signInMagicLink, signInPasskey, signInSocial } from "@/lib/auth";
 
-const REASONS: Record<string, string> = {
-  "not-member": "That pipe belongs to an org you're not in. Sign in with an account that is.",
-  "not-listed":
+const REASONS = new Map([
+  ["not-member", "That pipe belongs to an org you're not in. Sign in with an account that is."],
+  [
+    "not-listed",
     "That pipe is open only to the people it was shared with. Ask whoever started it to add you.",
-};
+  ],
+]);
 
 /**
  * A brand mark drawn at 14px inside the 17px slot a `lg` button gives its icon, so the label
@@ -35,7 +37,7 @@ function ProviderMark({ children }: { children: React.ReactNode }) {
 export function Login() {
   const params = new URLSearchParams(location.search);
   const next = safeNext(params.get("next"));
-  const reason = REASONS[params.get("reason") ?? ""];
+  const reason = REASONS.get(params.get("reason") ?? "");
   const methods = useSignInMethods();
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
@@ -47,19 +49,23 @@ export function Login() {
       location.assign(next);
     },
   });
+
   const social = useMutation({
     mutationFn: async (provider: "google" | "github") => {
       await signInSocial(provider, callbackURL);
     },
   });
+
   const magicLink = useMutation({
     mutationFn: async () => {
       const devLink = await signInMagicLink(email, callbackURL);
+
       // A development stack has no mail to send: open the link it returned instead.
       if (devLink) return location.assign(devLink);
       setSent(true);
     },
   });
+
   const failure = passkey.error ?? social.error ?? magicLink.error;
 
   const passkeyButton = (

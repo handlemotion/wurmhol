@@ -12,7 +12,9 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, sep } from "node:path";
+import { isString } from "@wurmhol/protocol";
 import { FixError } from "@wurmhol/sdk";
+import { errorCode } from "@wurmhol/sdk/internal";
 
 export interface ServiceSpec {
   /** The Node binary that runs the CLI. */
@@ -27,6 +29,7 @@ export interface ServiceSpec {
 
 const LABEL = "com.wurmhol.host";
 const UNIT = "wurmhol-host.service";
+
 /** Seconds between restarts, so a revoked token or a dead network does not spin. */
 const RESTART_SECONDS = 30;
 
@@ -41,16 +44,19 @@ export function stableEntry(entry: string): string {
   const real = realpathSync(entry);
   const parts = real.split(sep);
   const temp = realpathSync(tmpdir());
+
   const throwaway =
     parts.includes("_npx") ||
     parts.includes("dlx") ||
     parts.some((part) => part.startsWith("dlx-") || part.startsWith("bunx-")) ||
     real.startsWith(temp + sep);
+
   if (throwaway) {
     throw new FixError(
       `wurmhol host --install needs wurmhol installed, not run through npx. ${GLOBAL_INSTALL}`,
     );
   }
+
   return real;
 }
 
@@ -59,22 +65,29 @@ function run(command: string, args: string[]) {
 }
 
 /** A failed command's first line of stderr, or its error message. */
-function why(error: unknown): string {
-  const { stderr, message } = error as { stderr?: string; message?: string };
-  return (stderr?.trim() || message || String(error)).split("\n")[0] ?? "";
+function why(cause: unknown): string {
+  const stderr =
+    cause instanceof Error && "stderr" in cause && isString(cause.stderr) ? cause.stderr : "";
+
+  const message = cause instanceof Error ? cause.message : "";
+
+  return (stderr.trim() || message || String(cause)).split("\n")[0] ?? "";
 }
 
 // ---------- Linux: systemd user unit ----------
 
 function unitFile() {
   const config = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+
   return join(config, "systemd", "user", UNIT);
 }
 
 /** A quoted value with systemd's specifiers (%) escaped; ExecStart also expands `$`. */
 function systemdQuote(value: string, { exec }: { exec: boolean }) {
   let escaped = value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%");
+
   if (exec) escaped = escaped.replaceAll("$", "$$$$");
+
   return `"${escaped}"`;
 }
 
@@ -82,10 +95,13 @@ export function systemdUnit(spec: ServiceSpec): string {
   const exec = [spec.node, spec.entry, "host"]
     .map((arg) => systemdQuote(arg, { exec: true }))
     .join(" ");
+
   const env = Object.entries(spec.env).map(
     ([name, value]) => `Environment=${systemdQuote(`${name}=${value}`, { exec: false })}\n`,
   );
+
   const log = spec.log.replaceAll("%", "%%");
+
   return `[Unit]
 Description=wurmhol host: open pipes to this computer from the wall
 
@@ -112,7 +128,7 @@ function requireSystemd() {
   try {
     systemctl("show-environment");
   } catch (error) {
-    const detail = (error as NodeJS.ErrnoException).code === "ENOENT" ? "no systemctl" : why(error);
+    const detail = errorCode(error) === "ENOENT" ? "no systemctl" : why(error);
     throw new FixError(
       `systemd user services are not available here (${detail}). Keep wurmhol host running in a terminal instead.`,
     );
@@ -123,6 +139,7 @@ function installSystemd(spec: ServiceSpec): string {
   const file = unitFile();
   mkdirSync(join(file, ".."), { recursive: true });
   writeFileSync(file, systemdUnit(spec));
+
   try {
     systemctl("daemon-reload");
     systemctl("enable", UNIT);
@@ -131,23 +148,29 @@ function installSystemd(spec: ServiceSpec): string {
   } catch (error) {
     throw new FixError(`systemctl --user could not start ${UNIT}: ${why(error)}`);
   }
+
   return file;
 }
 
 function uninstallSystemd(): string | null {
   const file = unitFile();
+
   if (readIfExists(file) === null) return null;
+
   try {
     systemctl("disable", "--now", UNIT);
   } catch {
     // The manager is gone or never loaded it: removing the file is what is left to do.
   }
+
   rmSync(file, { force: true });
+
   try {
     systemctl("daemon-reload");
   } catch {
     // As above.
   }
+
   return file;
 }
 
@@ -167,9 +190,11 @@ function xml(value: string) {
 
 export function launchdPlist(spec: ServiceSpec): string {
   const string = (value: string) => `<string>${xml(value)}</string>`;
+
   const env = Object.entries(spec.env)
     .map(([name, value]) => `\n      <key>${xml(name)}</key>${string(value)}`)
     .join("");
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -201,29 +226,36 @@ function installLaunchd(spec: ServiceSpec): string {
   const file = plistFile();
   mkdirSync(join(file, ".."), { recursive: true });
   writeFileSync(file, launchdPlist(spec));
+
   try {
     // Unload an earlier install first, so a reinstall picks up the new definition.
     run("launchctl", ["bootout", `${domain()}/${LABEL}`]);
   } catch {
     // Not loaded.
   }
+
   try {
     run("launchctl", ["bootstrap", domain(), file]);
   } catch (error) {
     throw new FixError(`launchctl could not load ${file}: ${why(error)}`);
   }
+
   return file;
 }
 
 function uninstallLaunchd(): string | null {
   const file = plistFile();
+
   if (readIfExists(file) === null) return null;
+
   try {
     run("launchctl", ["bootout", `${domain()}/${LABEL}`]);
   } catch {
     // Not loaded: removing the file is what is left to do.
   }
+
   rmSync(file, { force: true });
+
   return file;
 }
 
@@ -246,6 +278,7 @@ function unsupported(): never {
 /** Throws the fix when this computer cannot run the service, before anything asks for a login. */
 export function checkService() {
   if (process.platform === "darwin") return;
+
   if (process.platform === "linux") return requireSystemd();
   unsupported();
 }
@@ -253,6 +286,7 @@ export function checkService() {
 /** Installs and starts the service (after `checkService`); returns the file that defines it. */
 export function installService(spec: ServiceSpec): string {
   if (process.platform === "darwin") return installLaunchd(spec);
+
   if (process.platform === "linux") return installSystemd(spec);
   unsupported();
 }
@@ -260,6 +294,7 @@ export function installService(spec: ServiceSpec): string {
 /** Stops and removes the service; returns the file it removed, or null when none was installed. */
 export function uninstallService(): string | null {
   if (process.platform === "darwin") return uninstallLaunchd();
+
   if (process.platform === "linux") return uninstallSystemd();
   unsupported();
 }

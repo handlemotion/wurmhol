@@ -55,14 +55,17 @@ export function explainRefusal(
   context: { server: string; viaProxy: boolean },
 ): FixError {
   const refusal = parseRefusal(body);
+
   if (refusal)
     return new FixError(refusal.fix, { reason: refusal.reason, code: "refused", status });
+
   if (context.viaProxy && [403, 407].includes(status)) {
     return new FixError(
       `The network proxy refused the connection (HTTP ${status}). Allowlist ${hosts(context.server)} in the sandbox's network settings.`,
       { code: "proxy", status },
     );
   }
+
   return new FixError(
     `${context.server} answered HTTP ${status}. Check WURMHOL_URL, or try again.`,
     { code: "network", status },
@@ -85,13 +88,16 @@ export function explainConnectError(
   context: { server: string; proxy: string },
 ): FixError {
   const message = error.message ?? "";
+
   if (context.proxy && /\b(403|407)\b/.test(message)) {
     return new FixError(
       `The network proxy refused the connection. Allowlist ${hosts(context.server)} in the sandbox's network settings.`,
       { code: "proxy" },
     );
   }
+
   if (isTlsError(error)) return new FixError(TLS_FIX, { code: "tls" });
+
   if (error.code === "ENOTFOUND" || error.code === "EAI_AGAIN") {
     return new FixError(
       context.proxy
@@ -100,6 +106,7 @@ export function explainConnectError(
       { code: "dns" },
     );
   }
+
   if (error.code === "ECONNREFUSED") {
     return new FixError(
       context.proxy
@@ -108,6 +115,7 @@ export function explainConnectError(
       { code: "unreachable" },
     );
   }
+
   return new FixError(`Could not reach ${context.server}: ${error.code ?? message}. Try again.`, {
     code: "network",
   });

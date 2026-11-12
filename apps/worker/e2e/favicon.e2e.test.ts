@@ -1,13 +1,14 @@
 // A new pipe's favicon and title reach the wall as soon as it starts, before anyone opens it: the
 // relay asks the dev server for `/` through the CLI and reads only the start of the page.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   api,
   browserFetch,
   cliEnv,
   createToken,
+  listeningPort,
   localServer,
   type Person,
   share,
@@ -35,15 +36,20 @@ afterAll(async () => {
   await stack.stop();
 });
 
-interface Card {
-  id: string;
-  title: string | null;
-  favicon: boolean;
-  lastRequestAt: number | null;
-}
+const wallBody = z.object({
+  shares: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string().nullable(),
+      favicon: z.boolean(),
+      lastRequestAt: z.number().nullable(),
+    }),
+  ),
+});
 
 async function card(id: string) {
-  const wall = await api<{ shares: Card[] }>(stack, ada, "/api/shares");
+  const wall = await api(stack, ada, "/api/shares", {}, wallBody);
+
   return wall.body.shares.find((s) => s.id === id);
 }
 
@@ -53,6 +59,7 @@ function app(
 ) {
   return (req: IncomingMessage, res: ServerResponse) => {
     seen.push(`${req.method} ${req.url}`);
+
     if (req.url === "/icon.png")
       return void res.writeHead(200, { "content-type": icon.type }).end(icon.body);
     res.writeHead(200, { "content-type": "text/html" });
@@ -66,20 +73,25 @@ it("shows a new pipe's favicon and title before anyone opens it", async () => {
   const seen: string[] = [];
   const local = await localServer(app(seen));
   const started = await share(stack, env, local.port);
+
   const shown = await waitFor(
     async () => {
       const found = await card(started.id);
+
       return found?.favicon ? found : null;
     },
     { what: "the favicon on the wall" },
   );
+
   expect(shown.title).toBe("Shop");
   // The relay's own requests are not a viewer's.
   expect(shown.lastRequestAt).toBeNull();
   expect(seen).toEqual(["GET /", "GET /icon.png"]);
+
   const icon = await browserFetch(`${stack.url}/api/shares/${started.id}/favicon`, {
     cookie: ada.cookie,
   });
+
   expect(icon.status).toBe(200);
   expect(Buffer.from(await icon.arrayBuffer())).toEqual(ICON);
   await stopAll(env);
@@ -90,7 +102,7 @@ it("waits for a server that starts after its pipe, and never takes the waiting p
   const seen: string[] = [];
   const server = createServer(app(seen));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
+  const port = listeningPort(server);
   await new Promise((resolve) => server.close(resolve));
 
   const started = await share(stack, env, port);
@@ -100,13 +112,16 @@ it("waits for a server that starts after its pipe, and never takes the waiting p
 
   const late = createServer(app(seen));
   await new Promise<void>((resolve) => late.listen(port, "127.0.0.1", resolve));
+
   const shown = await waitFor(
     async () => {
       const found = await card(started.id);
+
       return found?.favicon ? found : null;
     },
     { timeoutMs: 20_000, what: "the favicon once the server is up" },
   );
+
   expect(shown.title).toBe("Shop");
   await stopAll(env);
   late.closeAllConnections();

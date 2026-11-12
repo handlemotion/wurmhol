@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState } from "react";
 import {
   TextField as TextFieldPrimitive,
   type TextFieldProps,
@@ -20,27 +20,28 @@ export function TextField({
   onChange,
   ref,
   ...props
-}: TextFieldProps & { ref?: React.Ref<HTMLDivElement> }) {
+}: TextFieldProps & { ref?: React.Ref<HTMLDivElement | null> }) {
   const own = useRef<HTMLDivElement>(null);
   const [edited, setEdited] = useState(false);
 
+  // The caller's ref sees the same element this keeps for its own listener.
+  useImperativeHandle<HTMLDivElement | null, HTMLDivElement | null>(ref, () => own.current);
+
   useEffect(() => {
     const field = own.current;
+
     if (!field) return;
     // `invalid` does not bubble; a capture listener on the field still hears its input's.
     const shown = () => setEdited(false);
     field.addEventListener("invalid", shown, true);
+
     return () => field.removeEventListener("invalid", shown, true);
   }, []);
 
   return (
     <TextFieldPrimitive
       data-slot="control"
-      ref={(node) => {
-        own.current = node;
-        if (typeof ref === "function") ref(node);
-        else if (ref) ref.current = node;
-      }}
+      ref={own}
       isInvalid={isInvalid ?? (edited ? false : undefined)}
       onChange={(value) => {
         setEdited(true);

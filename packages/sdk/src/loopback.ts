@@ -24,10 +24,12 @@ export class Loopback {
   target(port: number, host: string | undefined): Target {
     if (host) return { host };
     const order = this.#v6.has(port) ? [V6, V4] : [V4, V6];
-    const lookup = ((_name, options, callback) => {
-      if (options.all) (callback as (e: null, a: typeof order) => void)(null, order);
+
+    const lookup: LookupFunction = (_name, options, callback) => {
+      if (options.all) callback(null, order);
       else callback(null, order[0]!.address, order[0]!.family);
-    }) as LookupFunction;
+    };
+
     // The name is never resolved: `lookup` answers for it.
     return { host: "localhost", lookup, autoSelectFamily: true };
   }
@@ -38,6 +40,7 @@ export class Loopback {
       if (socket.remoteAddress === V6.address) this.#v6.add(port);
       else if (socket.remoteAddress === V4.address) this.#v6.delete(port);
     };
+
     if (socket.remoteAddress) note();
     else socket.once("connect", note);
   }

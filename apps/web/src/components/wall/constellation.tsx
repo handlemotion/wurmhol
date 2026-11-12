@@ -22,20 +22,26 @@ import { ANCHOR, grow, hash, layout, type Point, type Size } from "./constellati
 
 /** Drift, in px: a few pixels at most, slow enough to read as floating, not as motion. */
 const DRIFT = { pipe: 2.5, anchor: 1.5, open: 0 };
+
 /** The nodes' spring: a touch under critical damping, so a pushed pill settles with a little give. */
 const NODE = { stiffness: 140, damping: 21 };
+
 /** The camera's and the centring's spring: critically damped, so the view never overshoots. */
 const VIEW = { stiffness: 110, damping: 21 };
+
 /** Integration step: small enough to keep the springs stable on a slow frame. */
 const STEP = 1 / 240;
+
 /**
  * Ticks per second while only the drift moves. The drift is under 1.75 px/s and every position
  * snaps to device pixels, so 15 steps a second is as smooth as the screen's rate.
  */
 const IDLE_FPS = 15;
+
 /** Closer than this to its goal (px) and slower than `REST_V` (px/s), a spring is at rest. */
 const REST_D = 0.05;
 const REST_V = 0.5;
+
 /** Space kept above and below the network inside the canvas. */
 const PAD = 48;
 
@@ -65,15 +71,60 @@ function settle(body: Body, goal: Point) {
 /** Settles `body` once it is close enough to rest; returns whether it still moves. */
 function moving(body: Body, goal: Point) {
   const near = Math.abs(goal.x - body.x) < REST_D && Math.abs(goal.y - body.y) < REST_D;
+
   if (near && Math.abs(body.vx) < REST_V && Math.abs(body.vy) < REST_V) {
     settle(body, goal);
+
     return false;
   }
+
   return true;
+}
+
+/** How far a node drifts: an open card holds still, the anchor drifts less than a pipe. */
+function driftOf(id: string, open: string | null) {
+  if (id === open) return DRIFT.open;
+
+  return id === ANCHOR ? DRIFT.anchor : DRIFT.pipe;
+}
+
+/**
+ * Where the camera pans to: an open pipe's card (`focus`, its centre, sized `card`) in the middle
+ * of what is visible of the canvas, else at rest. Create pipe's card opens where its button
+ * stands, centred on it: the camera moves only as far as it takes to keep the card in view.
+ */
+function cameraGoal(
+  open: string | null,
+  focus: Point | undefined,
+  card: Size | undefined,
+  box: HTMLElement | null,
+  view: DOMRect | undefined,
+  seat: Point,
+): Point {
+  const goal = { x: 0, y: 0 };
+
+  if (!focus || !card || !box || !view) return goal;
+  const top = Math.max(0, -view.top);
+  const bottom = Math.min(box.clientHeight, innerHeight - view.top);
+  const x = seat.x + focus.x;
+  const y = seat.y + focus.y;
+
+  if (open === ANCHOR) {
+    const room = (bottom - top - card.h) / 2;
+    const clear = Math.min(PAD / 2, Math.max(0, room));
+    goal.y =
+      Math.max(0, top + clear - (y - card.h / 2)) - Math.max(0, y + card.h / 2 - (bottom - clear));
+  } else {
+    goal.x = box.clientWidth / 2 - x;
+    goal.y = Math.max((top + bottom) / 2, top + card.h / 2 + PAD / 2) - y;
+  }
+
+  return goal;
 }
 
 function snap(px: number) {
   const dpr = devicePixelRatio || 1;
+
   return Math.round(px * dpr) / dpr;
 }
 
@@ -108,26 +159,34 @@ export function Constellation(props: {
 
   const relayout = useCallback(() => {
     const box = canvas.current;
+
     if (!box) return;
+
     const size = (id: string): Size => {
       const el = els.current.get(id);
       const known = closed.current.get(id);
+
       // A node showing its card keeps the size it had as a pill.
       if (!el || (known && el.querySelector("[data-open]"))) return known ?? { w: 0, h: 0 };
       const measured = { w: el.offsetWidth, h: el.offsetHeight };
       closed.current.set(id, measured);
+
       return measured;
     };
+
     // The open card, once it is showing (its pill leaves first).
     const card = open ? els.current.get(open) : undefined;
+
     const input = {
       width: box.clientWidth,
       anchor: size(ANCHOR),
       pipes: nodes.map((node) => ({ id: node.id, size: size(node.id) })),
     };
+
     // The network at rest places it in the canvas; an open card only moves nodes within that
     // frame (and the camera), so opening one never shifts the whole network at once.
     const rest = layout(input);
+
     const result = layout({
       ...input,
       open:
@@ -135,18 +194,21 @@ export function Constellation(props: {
           ? { id: open, size: { w: card.offsetWidth, h: card.offsetHeight } }
           : null,
     });
+
     // Fill the viewport below the header, or grow past it when the network (or a card) needs it.
     const room = innerHeight - box.getBoundingClientRect().top - scrollY - PAD / 2;
     const need = rest.bottom - rest.top + PAD * 2;
     // Centred, a touch above the true middle where it looks centred (DESIGN.md, optics).
     const slack = Math.max(0, room - need);
     const y = PAD + slack / 2 - Math.min(24, slack / 4) - rest.top;
+
     const height = Math.max(
       room,
       need,
       y + result.bottom + PAD,
       card ? card.offsetHeight + PAD * 2 : 0,
     );
+
     box.style.height = `${height}px`;
     origin.current = { x: box.clientWidth / 2, y };
     targets.current = result.at;
@@ -158,8 +220,11 @@ export function Constellation(props: {
   // Sizes change without a render: fonts arrive, a title loads, the window narrows.
   useEffect(() => {
     const observer = new ResizeObserver(() => relayout());
+
     if (canvas.current) observer.observe(canvas.current);
+
     for (const el of els.current.values()) observer.observe(el);
+
     return () => observer.disconnect();
   }, [relayout]);
 
@@ -174,25 +239,52 @@ export function Constellation(props: {
     let last = 0;
     /** What each element was last given, so an unchanged value is never written again. */
     const written = new Map<string, string>();
+
     const put = (key: string, value: string, write: () => void) => {
       if (written.get(key) === value) return;
       written.set(key, value);
       write();
     };
+
+    /** The spokes, from the anchor to each pipe as drawn, with the camera at (`ox`, `oy`). */
+    const drawLines = (drawn: Map<string, Point>, ox: number, oy: number) => {
+      const hub = drawn.get(ANCHOR);
+
+      for (const [id, line] of lines.current) {
+        const end = drawn.get(id);
+
+        if (!hub || !end) continue;
+        // On a device pixel's centre: a 1px line on a pixel boundary paints two half-lit pixels
+        // and reads twice as thick.
+        const mid = 0.5 / (devicePixelRatio || 1);
+        const [x1, y1] = [snap(ox + hub.x) + mid, snap(oy + hub.y) + mid];
+        const [x2, y2] = [snap(ox + end.x) + mid, snap(oy + end.y) + mid];
+        put(`${id} line`, `${x1} ${y1} ${x2} ${y2}`, () => {
+          line.setAttribute("x1", String(x1));
+          line.setAttribute("y1", String(y1));
+          line.setAttribute("x2", String(x2));
+          line.setAttribute("y2", String(y2));
+        });
+      }
+    };
+
     const tick = (now: number) => {
       frame = 0;
       // A long gap (a background tab) is cut short, so nothing leaps when the page comes back.
       const dt = last ? Math.min(0.064, (now - last) / 1000) : 1 / 60;
       last = now;
       let busy = false;
+
       const move = (body: Body, goal: Point, k: typeof NODE) => {
         if (still) settle(body, goal);
         else spring(body, goal, dt, k);
         busy = moving(body, goal) || busy;
       };
+
       const t = now / 1000;
       // Every read before any write, so the loop never forces a layout between its writes.
       const live = new Map<string, Size>();
+
       for (const [id, el] of els.current) live.set(id, { w: el.offsetWidth, h: el.offsetHeight });
       const box = canvas.current;
       const view = box?.getBoundingClientRect();
@@ -200,16 +292,19 @@ export function Constellation(props: {
       const hubTarget = targets.current.get(ANCHOR) ?? { x: 0, y: 0 };
       const drawn = new Map<string, Point>();
       const centres = new Map<string, Point>();
+
       for (const [id, target] of targets.current) {
         // A new pipe comes out of the anchor.
         let p = sim.current.get(id);
+
         if (!p) {
           const from = sim.current.get(ANCHOR) ?? hubTarget;
           p = { x: from.x, y: from.y, vx: 0, vy: 0 };
           sim.current.set(id, p);
         }
+
         move(p, target, NODE);
-        const a = still ? 0 : id === open ? DRIFT.open : id === ANCHOR ? DRIFT.anchor : DRIFT.pipe;
+        const a = still ? 0 : driftOf(id, open);
         const phase = hash(id, 3) * Math.PI;
         const x = p.x + a * Math.sin(t * (0.55 + hash(id, 4) * 0.15) + phase);
         const y = p.y + a * Math.cos(t * (0.45 + hash(id, 5) * 0.15) + phase);
@@ -217,6 +312,7 @@ export function Constellation(props: {
         // A card grows outwards from its pill: the pill's corner nearest the anchor stays put.
         const pill = closed.current.get(id);
         const size = live.get(id);
+
         if (!pill || !size) continue;
         const { x: dx, y: dy } = grow(id, target, hubTarget, pill, size);
         centres.set(id, { x: x + dx, y: y + dy });
@@ -231,30 +327,14 @@ export function Constellation(props: {
         });
       }
 
-      // The camera: an open pipe's card in the middle of what is visible of the canvas, else at
-      // rest. Create pipe's card opens where its button stands, centred on it: the camera moves
-      // only as far as it takes to keep the card in view (a short window).
-      const focus = open ? centres.get(open) : undefined;
-      const goal = { x: 0, y: 0 };
       if (!origin.current) return void (frame = requestAnimationFrame(tick));
+
       if (!seat.current) seat.current = { ...origin.current, vx: 0, vy: 0 };
-      if (focus && box && view) {
-        const top = Math.max(0, -view.top);
-        const bottom = Math.min(box.clientHeight, innerHeight - view.top);
-        const card = live.get(open!)!;
-        const x = seat.current.x + focus.x;
-        const y = seat.current.y + focus.y;
-        if (open === ANCHOR) {
-          const room = (bottom - top - card.h) / 2;
-          const clear = Math.min(PAD / 2, Math.max(0, room));
-          goal.y =
-            Math.max(0, top + clear - (y - card.h / 2)) -
-            Math.max(0, y + card.h / 2 - (bottom - clear));
-        } else {
-          goal.x = box.clientWidth / 2 - x;
-          goal.y = Math.max((top + bottom) / 2, top + card.h / 2 + PAD / 2) - y;
-        }
-      }
+      // The camera (a short window): see `cameraGoal`.
+      const focus = open ? centres.get(open) : undefined;
+      const card = open ? live.get(open) : undefined;
+      const goal = cameraGoal(open, focus, card, box, view, seat.current);
+
       const cam = camera.current;
       move(cam, goal, VIEW);
       move(seat.current, origin.current, VIEW);
@@ -273,10 +353,12 @@ export function Constellation(props: {
           el.style.visibility = "visible";
         });
       }
+
       // The backdrop holds still on the anchor's resting place: it ignores the camera's pan and the
       // Create pipe card's offset, so opening the card only scales it up where it stands. Nor does
       // it follow the anchor's drift: a whole drawing swaying would read as the page moving.
       const hubAt = sim.current.get(ANCHOR);
+
       if (backdrop.current && hubAt) {
         const x = snap(seat.current.x + hubAt.x);
         const y = snap(seat.current.y + hubAt.y);
@@ -286,22 +368,9 @@ export function Constellation(props: {
           style.visibility = "visible";
         });
       }
-      const hub = drawn.get(ANCHOR);
-      for (const [id, line] of lines.current) {
-        const end = drawn.get(id);
-        if (!hub || !end) continue;
-        // On a device pixel's centre: a 1px line on a pixel boundary paints two half-lit pixels
-        // and reads twice as thick.
-        const mid = 0.5 / (devicePixelRatio || 1);
-        const [x1, y1] = [snap(ox + hub.x) + mid, snap(oy + hub.y) + mid];
-        const [x2, y2] = [snap(ox + end.x) + mid, snap(oy + end.y) + mid];
-        put(`${id} line`, `${x1} ${y1} ${x2} ${y2}`, () => {
-          line.setAttribute("x1", String(x1));
-          line.setAttribute("y1", String(y1));
-          line.setAttribute("x2", String(x2));
-          line.setAttribute("y2", String(y2));
-        });
-      }
+
+      drawLines(drawn, ox, oy);
+
       if (busy) frame = requestAnimationFrame(tick);
       else if (!still) {
         idle = window.setTimeout(() => {
@@ -311,6 +380,7 @@ export function Constellation(props: {
         }, 1000 / IDLE_FPS);
       } else last = 0;
     };
+
     // A tick now, not on the next frame: a resize observer or a layout effect calls this before
     // the browser paints, so a node whose size just changed (a card folding back into its pill)
     // is placed in the frame it first shows, never painted at its old box's corner.
@@ -320,18 +390,22 @@ export function Constellation(props: {
       idle = 0;
       tick(performance.now());
     };
+
     const onMotion = () => {
       still = query.matches;
       wakeUp();
     };
+
     wake.current = wakeUp;
     query.addEventListener("change", onMotion);
     // The camera keeps an open card in view, so its goal moves with the page.
     addEventListener("scroll", wakeUp, { passive: true });
     addEventListener("resize", wakeUp);
     wakeUp();
+
     return () => {
       wake.current = () => {};
+
       query.removeEventListener("change", onMotion);
       removeEventListener("scroll", wakeUp);
       removeEventListener("resize", wakeUp);
@@ -342,6 +416,7 @@ export function Constellation(props: {
 
   // Forget the ones that left, so a pipe that comes back flies out of the anchor again.
   const live = new Set([ANCHOR, ...nodes.map((node) => node.id)]);
+
   for (const id of sim.current.keys()) if (!live.has(id)) sim.current.delete(id);
 
   const place = (id: string) => (el: HTMLElement | null) => {

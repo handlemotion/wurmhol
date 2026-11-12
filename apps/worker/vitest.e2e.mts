@@ -1,4 +1,4 @@
-import { mergeConfig } from "vitest/config";
+import { mergeConfig } from "vite-plus";
 import { e2e } from "../../vitest.shared.mts";
 
 export default mergeConfig(e2e, {

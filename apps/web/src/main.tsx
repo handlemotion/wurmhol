@@ -18,6 +18,7 @@ addEventListener("vite:preloadError", (event) => {
 
 const path = location.pathname;
 const join = /^\/join\/([^/]+)$/.exec(path);
+
 // The wall's data starts loading now, alongside its code, not after it.
 if (path !== "/login" && path !== "/device" && path !== "/oauth/consent" && !join) {
   prefetchMe(queryClient);
@@ -47,6 +48,7 @@ const page = (
 ) satisfies Promise<React.ReactNode>;
 
 const root = document.getElementById("root");
+
 if (!root) throw new Error("index.html has no #root");
 
 createRoot(root).render(

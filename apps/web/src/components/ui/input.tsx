@@ -12,6 +12,7 @@ export interface InputProps extends Omit<InputPrimitiveProps, "size"> {
   /** md is 32px, lg is 36px. */
   size?: "md" | "lg";
 }
+
 export function Input({ className, ref, size = "md", ...props }: InputProps) {
   return (
     <span data-slot="control" className="relative block w-full">

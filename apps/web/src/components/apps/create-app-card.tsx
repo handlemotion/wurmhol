@@ -13,6 +13,7 @@ export function CreateAppCard({ onCreated }: { onCreated: (id: string) => void }
   useEffect(() => card.current?.focus({ preventScroll: true }), []);
   const create = useCreateApp();
   const [name, setName] = useState("");
+
   return (
     <section
       ref={card}

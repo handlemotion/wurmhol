@@ -4,6 +4,7 @@
  */
 export function initials(name: string, email = "") {
   const source = name.trim() || email.split("@")[0]!;
+
   return source
     .split(/[\s._-]+/)
     .filter(Boolean)

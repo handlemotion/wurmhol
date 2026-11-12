@@ -3,7 +3,8 @@
 // or stale gives its name to the next one (ADR 0025).
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   alive,
   api,
@@ -12,6 +13,7 @@ import {
   cliEnv,
   createToken,
   localServer,
+  parseJson,
   type Person,
   signIn,
   type Stack,
@@ -35,12 +37,16 @@ afterAll(async () => {
   await stack.stop();
 });
 
+const wallBody = z.object({ shares: z.array(z.object({ id: z.string(), state: z.string() })) });
+
 const navigate = { accept: "text/html", "sec-fetch-mode": "navigate" };
 
 async function openNamed(env: Record<string, string>, port: number, name: string) {
   const result = await cli([String(port), "--name", name, "--json"], env);
+
   if (result.code !== 0) throw new Error(`wurmhol --name failed: ${result.stderr}`);
-  return JSON.parse(result.stdout) as { id: string; url: string };
+
+  return parseJson(z.object({ id: z.string(), url: z.string() }), result.stdout);
 }
 
 it("a name keeps its URL across pipes, and a viewer's cookie for one pipe does not open the next", async () => {
@@ -91,6 +97,7 @@ it("a name stays with its org, and one pipe at a time holds it", async () => {
     [String(local.port), "--name", "claimed"],
     cliEnv(stack, (await createToken(stack, ada)).token),
   );
+
   expect(twice.code).toBe(1);
   expect(twice.stderr).toContain("wurmhol stop claimed");
 
@@ -108,20 +115,25 @@ it("re-running a crashed pipe's name takes it back at the same URL; another toke
   const local = await localServer((_req, res) => res.end("back"));
   const token = (await createToken(stack, ada)).token;
   const env = cliEnv(stack, token);
+
   const pidOf = (id: string) =>
-    (
-      JSON.parse(readFileSync(join(env.WURMHOL_HOME!, "shares", `${id}.json`), "utf8")) as {
-        pid: number;
-      }
+    parseJson(
+      z.object({ pid: z.number() }),
+      readFileSync(join(env.WURMHOL_HOME!, "shares", `${id}.json`), "utf8"),
     ).pid;
+
   const endReasons = () => {
     const db = stack.db();
+
     try {
-      return (
-        db
-          .prepare("select end_reason from shares where name = ? order by started_at")
-          .all("crashy") as { end_reason: string | null }[]
-      ).map((row) => row.end_reason);
+      return z
+        .array(z.object({ end_reason: z.string().nullable() }))
+        .parse(
+          db
+            .prepare("select end_reason from shares where name = ? order by started_at")
+            .all("crashy"),
+        )
+        .map((row) => row.end_reason);
     } finally {
       db.close();
     }
@@ -140,7 +152,7 @@ it("re-running a crashed pipe's name takes it back at the same URL; another toke
   const cookie = await viewerCookie(stack, ada, second.url);
   expect(await (await browserFetch(`${second.url}/`, { cookie })).text()).toBe("back");
   expect(endReasons()).toEqual(["stopped", null]);
-  const { body } = await api<{ shares: { id: string }[] }>(stack, ada, "/api/shares");
+  const { body } = await api(stack, ada, "/api/shares", {}, wallBody);
   expect(body.shares.map((s) => s.id)).not.toContain(first.id);
 
   // Another of the org's tokens takes the name once its pipe is away, not while it is live.
@@ -149,11 +161,8 @@ it("re-running a crashed pipe's name takes it back at the same URL; another toke
   process.kill(secondPid, "SIGKILL");
   await waitFor(
     async () => {
-      const { body: wall } = await api<{ shares: { id: string; state: string }[] }>(
-        stack,
-        ada,
-        "/api/shares",
-      );
+      const { body: wall } = await api(stack, ada, "/api/shares", {}, wallBody);
+
       return wall.shares.find((s) => s.id === second.id)?.state === "away";
     },
     { what: "the killed pipe away" },

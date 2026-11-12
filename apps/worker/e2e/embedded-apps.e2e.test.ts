@@ -3,9 +3,11 @@
 // another org's application does not exist; and the routes are absent unless the install turns
 // embedded mode on.
 import { createHash } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   api,
+  type JsonValue,
   me,
   type Person,
   signIn,
@@ -15,13 +17,12 @@ import {
   STRIPE_E2E_VARS,
 } from "./support.ts";
 
-interface App {
-  id: string;
-  name: string;
-  launchUrl: string | null;
-  allowedOrigins: string[];
-  tenantActiveTunnels: number | null;
-}
+// Loose: tests match the rest of an application's fields as the API returned them.
+const appSchema = z.looseObject({ id: z.string(), name: z.string() });
+const appBody = z.object({ app: appSchema });
+const count = z.object({ n: z.number() });
+
+type App = z.infer<typeof appSchema>;
 
 let stack: Stack;
 let owner: Person;
@@ -37,12 +38,25 @@ afterAll(async () => {
   await stack.stop();
 });
 
-function createApp(person: Person, body: Record<string, unknown> = { name: "Dorks" }) {
-  return api<{ app: App }>(stack, person, "/api/apps", { method: "POST", body });
+/** Creates an application; the body is decoded by the caller, as refusals carry no `app`. */
+function createApp(person: Person, body: JsonValue = { name: "Dorks" }) {
+  return api(stack, person, "/api/apps", { method: "POST", body });
+}
+
+/** The application a successful create returned. */
+async function createdApp(person: Person, body: JsonValue) {
+  return appBody.parse((await createApp(person, body)).body).app;
 }
 
 async function joinAsMember(person: Person) {
-  const invite = await api<{ url: string }>(stack, owner, "/api/invites", { method: "POST" });
+  const invite = await api(
+    stack,
+    owner,
+    "/api/invites",
+    { method: "POST" },
+    z.object({ url: z.string() }),
+  );
+
   const code = invite.body.url.split("/join/")[1];
   const accepted = await api(stack, person, `/api/invites/${code}/accept`, { method: "POST" });
   expect(accepted.status).toBe(200);
@@ -60,27 +74,35 @@ describe("applications", () => {
 
   it("lets a Business org's owner create, change and list one", async () => {
     await startPlan(stack, orgId, "business", "customer.subscription.updated");
+
     const created = await createApp(owner, {
       name: "Dorks",
       launchUrl: "https://app.dorks.example/wurmhol/launch",
       allowedOrigins: ["https://app.dorks.example"],
       tenantActiveTunnels: 10,
     });
+
     expect(created.status).toBe(201);
-    expect(created.body.app).toMatchObject({
+    const made = appBody.parse(created.body).app;
+
+    expect(made).toMatchObject({
       name: "Dorks",
       launchUrl: "https://app.dorks.example/wurmhol/launch",
       allowedOrigins: ["https://app.dorks.example"],
       tenantActiveTunnels: 10,
     });
 
-    const changed = await api<{ app: App }>(stack, owner, `/api/apps/${created.body.app.id}`, {
-      method: "PATCH",
-      body: { name: "Dorks Desktop" },
-    });
+    const changed = await api(
+      stack,
+      owner,
+      `/api/apps/${made.id}`,
+      { method: "PATCH", body: { name: "Dorks Desktop" } },
+      appBody,
+    );
+
     expect(changed.body.app.name).toBe("Dorks Desktop");
 
-    const listed = await api<{ apps: App[] }>(stack, owner, "/api/apps");
+    const listed = await api(stack, owner, "/api/apps", {}, z.object({ apps: z.array(appSchema) }));
     expect(listed.body.apps.map((app) => app.name)).toContain("Dorks Desktop");
   });
 
@@ -101,6 +123,7 @@ describe("applications", () => {
       launchUrl: "http://localhost:5173/launch",
       allowedOrigins: ["http://localhost:5173"],
     });
+
     expect(local.status).toBe(201);
   });
 
@@ -113,10 +136,18 @@ describe("applications", () => {
   });
 
   it("hides one org's application from another org's owner", async () => {
-    const app = (await createApp(owner, { name: "Private" })).body.app;
+    const app = await createdApp(owner, { name: "Private" });
     const stranger = await signIn(stack);
     await startPlan(stack, (await me(stack, stranger)).activeOrgId, "business");
-    const theirs = await api<{ apps: App[] }>(stack, stranger, "/api/apps");
+
+    const theirs = await api(
+      stack,
+      stranger,
+      "/api/apps",
+      {},
+      z.object({ apps: z.array(appSchema) }),
+    );
+
     expect(theirs.status).toBe(200);
     expect(theirs.body.apps).toEqual([]);
     expect((await api(stack, stranger, `/api/apps/${app.id}`)).status).toBe(404);
@@ -134,39 +165,51 @@ describe("integration keys", () => {
   let app: App;
 
   beforeAll(async () => {
-    app = (await createApp(owner, { name: "Keys" })).body.app;
+    app = await createdApp(owner, { name: "Keys" });
   });
 
   it("shows a key once, stores only its hash, and lists it without the secret", async () => {
-    const made = await api<{ id: string; key: string; permissions: string[] }>(
+    const made = await api(
       stack,
       owner,
       `/api/apps/${app.id}/keys`,
       { method: "POST", body: { name: "backend", permissions: ["grants:issue", "tunnels:read"] } },
+      z.object({ id: z.string(), key: z.string(), permissions: z.array(z.string()) }),
     );
+
     expect(made.status).toBe(201);
     expect(made.body.key).toMatch(/^whk_[A-Za-z0-9_-]{43}$/);
     expect(made.body.permissions).toEqual(["tunnels:read", "grants:issue"]);
 
     const db = stack.db();
+
     try {
-      const row = db.prepare("select hash from embed_app_keys where id = ?").get(made.body.id) as {
-        hash: string;
-      };
+      const row = z
+        .object({ hash: z.string() })
+        .parse(db.prepare("select hash from embed_app_keys where id = ?").get(made.body.id));
+
       expect(row.hash).toBe(createHash("sha256").update(made.body.key).digest("hex"));
-      const anywhere = db
-        .prepare("select count(*) as n from embed_app_keys where hash = ? or name = ?")
-        .get(made.body.key, made.body.key) as { n: number };
+
+      const anywhere = count.parse(
+        db
+          .prepare("select count(*) as n from embed_app_keys where hash = ? or name = ?")
+          .get(made.body.key, made.body.key),
+      );
+
       expect(anywhere.n).toBe(0);
     } finally {
       db.close();
     }
 
-    const listed = await api<{ keys: Record<string, unknown>[] }>(
+    // Loose throughout: the whole listing is searched for the secret.
+    const listed = await api(
       stack,
       owner,
       `/api/apps/${app.id}/keys`,
+      {},
+      z.looseObject({ keys: z.array(z.looseObject({ name: z.string() })) }),
     );
+
     expect(listed.body.keys).toHaveLength(1);
     expect(JSON.stringify(listed.body)).not.toContain(made.body.key);
     expect(listed.body.keys[0]).toMatchObject({ name: "backend" });
@@ -180,33 +223,48 @@ describe("integration keys", () => {
       method: "POST",
       body: { name: "bad", permissions },
     });
+
     expect(made.status).toBe(400);
   });
 
   it("revokes a key, and deleting the application revokes the rest", async () => {
     const make = () =>
-      api<{ id: string }>(stack, owner, `/api/apps/${app.id}/keys`, {
-        method: "POST",
-        body: { name: "k", permissions: ["tunnels:read"] },
-      });
+      api(
+        stack,
+        owner,
+        `/api/apps/${app.id}/keys`,
+        { method: "POST", body: { name: "k", permissions: ["tunnels:read"] } },
+        z.object({ id: z.string() }),
+      );
+
     const first = (await make()).body.id;
     const second = (await make()).body.id;
+
     const revoke = await api(stack, owner, `/api/apps/${app.id}/keys/${first}`, {
       method: "DELETE",
     });
+
     expect(revoke.status).toBe(200);
+
     const again = await api(stack, owner, `/api/apps/${app.id}/keys/${first}`, {
       method: "DELETE",
     });
+
     expect(again.status).toBe(404);
 
     expect((await api(stack, owner, `/api/apps/${app.id}`, { method: "DELETE" })).status).toBe(200);
     expect((await api(stack, owner, `/api/apps/${app.id}`)).status).toBe(404);
     const db = stack.db();
+
     try {
-      const live = db
-        .prepare("select count(*) as n from embed_app_keys where app_id = ? and revoked_at is null")
-        .get(app.id) as { n: number };
+      const live = count.parse(
+        db
+          .prepare(
+            "select count(*) as n from embed_app_keys where app_id = ? and revoked_at is null",
+          )
+          .get(app.id),
+      );
+
       expect(live.n).toBe(0);
       expect(second).toBeTruthy();
     } finally {

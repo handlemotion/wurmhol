@@ -16,6 +16,9 @@ import { endEmbeddedOfOrg, endShare, revokeTokensOfLeaver } from "../ending.ts";
 import { orgStub } from "../org-do.ts";
 import { limitPerMember } from "../rate-limiter.ts";
 
+/** The message of a plugin refusal's body, when it has one. */
+const pluginRefusalBody = z.object({ message: z.string() });
+
 /** Runs a plugin call, turning its refusals into ours: its 400s (a rule it holds) are 409s. */
 async function plugin<T>(call: Promise<T>): Promise<T> {
   try {
@@ -23,9 +26,9 @@ async function plugin<T>(call: Promise<T>): Promise<T> {
   } catch (error) {
     if (!(error instanceof APIError)) throw error;
     const status = ([401, 403, 404] as const).find((s) => s === error.statusCode) ?? 409;
-    throw new HTTPException(status, {
-      message: (error.body as { message?: string } | undefined)?.message ?? error.message,
-    });
+    const body = pluginRefusalBody.safeParse(error.body);
+
+    throw new HTTPException(status, { message: body.success ? body.data.message : error.message });
   }
 }
 
@@ -52,8 +55,10 @@ export const org = new Hono<AppEnv>()
         body: { name: c.req.valid("json").name, slug: `org-${crypto.randomUUID()}` },
       }),
     );
+
     if (!created) throw new HTTPException(500, { message: "could not create the org" });
     c.var.log.info("org.created", { orgId: created.id });
+
     return c.json({ id: created.id });
   })
   .patch("/org", requireOwner, limitPerMember("manage"), zValidator("json", renameBody), (c) =>
@@ -81,15 +86,18 @@ export const org = new Hono<AppEnv>()
           },
         }),
       );
+
       return c.json({ ok: true });
     },
   )
   /** Hands the org over: they become an owner, then you a member. */
   .post("/members/:id/transfer", requireOwner, limitPerMember("manage"), async (c) => {
     const memberId = c.req.param("id");
+
     if (memberId === c.var.member.id) {
       throw new HTTPException(409, { message: "You already own this org." });
     }
+
     const body = { organizationId: c.var.member.orgId };
     await plugin(
       c.var.auth.api.updateMemberRole({
@@ -104,6 +112,7 @@ export const org = new Hono<AppEnv>()
       }),
     );
     c.var.log.info("org.transferred", { orgId: c.var.member.orgId });
+
     return c.json({ ok: true });
   })
   /**
@@ -120,6 +129,7 @@ export const org = new Hono<AppEnv>()
       }),
     );
     await revokeTokensOfLeaver(c, orgId, c.var.user.id);
+
     return c.json({ ok: true });
   })
   /**
@@ -129,28 +139,34 @@ export const org = new Hono<AppEnv>()
   .delete("/org", requireOwner, limitPerMember("manage"), async (c) => {
     const orgId = c.var.member.orgId;
     await refuseLastOrg(c, "delete");
+
     if (c.var.config.auth.billing && (await orgSubscription(c.var.db, orgId))) {
       throw new HTTPException(409, {
         message: "Cancel the plan in Billing first, then delete the org.",
       });
     }
+
     // Its custom domains leave Cloudflare first (ADR 0033): once the rows go with the org, nothing
     // would find those hostnames again. If Cloudflare does not answer, nothing is deleted yet.
     const domains = domainDeps(c.var.config, c.var.db);
+
     if (domains) {
       try {
         await releaseOrgDomains(domains, orgId);
       } catch (error) {
         if (!(error instanceof DomainRefusal)) throw error;
-        throw new HTTPException(error.status as 502 | 503, {
+        throw new HTTPException(error.status, {
           message: `The org's custom domains could not be removed yet. ${error.fix}`,
         });
       }
     }
+
     const orgObject = orgStub(c.env, orgId);
+
     for (const share of await orgObject.list()) {
       await endShare(c, { id: share.id, orgId }, "terminated", "org deleted");
     }
+
     await endEmbeddedOfOrg(c, orgId, "org deleted");
     await plugin(
       c.var.auth.api.deleteOrganization({
@@ -161,5 +177,6 @@ export const org = new Hono<AppEnv>()
     // After the delete, so a machine that reconnects meanwhile finds its token gone.
     await orgObject.dropAll();
     c.var.log.info("org.deleted", { orgId });
+
     return c.json({ ok: true });
   });

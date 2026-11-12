@@ -22,6 +22,7 @@ export function Network({ shares }: { shares: ShareCard[] }) {
   const [opened, setOpened] = useState<string | null>(null);
   useEffect(() => {
     const share = opened && shares.find((s) => s.url === opened);
+
     if (!share) return;
     setOpened(null);
     setOpen(share.id);
@@ -35,20 +36,25 @@ export function Network({ shares }: { shares: ShareCard[] }) {
     restore.current = current;
     setOpen(null);
   };
+
   const onClosed = () => {
     const id = restore.current;
     restore.current = null;
+
     if (!id) return;
     const selector = id === ANCHOR ? "[data-create]" : `[data-pipe="${CSS.escape(id)}"]`;
+
     // The pill mounts after the card's exit completes, and until then the only match can be the
     // card's inert copy of it, which takes no focus: wait a few frames for the real one.
     const focus = (frames: number) => {
       const pill = [...document.querySelectorAll<HTMLElement>(selector)].find(
         (el) => !el.closest("[inert]"),
       );
+
       if (pill) pill.focus();
       else if (frames > 0) requestAnimationFrame(() => focus(frames - 1));
     };
+
     focus(10);
   };
 
@@ -57,14 +63,17 @@ export function Network({ shares }: { shares: ShareCard[] }) {
   useEffect(() => {
     if (!current) return;
     const onKey = (event: KeyboardEvent) => event.key === "Escape" && close();
+
     const onPress = (event: PointerEvent) => {
-      const target = event.target as Element;
       const keep = "[data-open], [data-pipe], [data-create], [role=dialog], [role=menu]";
-      if (target.closest(keep)) return;
+
+      if (event.target instanceof Element && event.target.closest(keep)) return;
       close();
     };
+
     document.addEventListener("keydown", onKey);
     document.addEventListener("pointerdown", onPress);
+
     return () => {
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("pointerdown", onPress);
@@ -128,8 +137,10 @@ const unfold = (edge: "x" | "y", side: "start" | "end") => {
   const at = `var(--pill-${edge})`;
   const half = `var(--pill-${edge === "x" ? "w" : "h"}) / 2`;
   const inset = side === "start" ? `(${at} - ${half})` : `(100% - ${at} - ${half})`;
+
   return `calc(${inset} * (1 - var(--open)))`;
 };
+
 const TOP = unfold("y", "start");
 const RIGHT = unfold("x", "end");
 const BOTTOM = unfold("y", "end");
@@ -153,6 +164,7 @@ const morph = {
   closed: { "--open": 0 },
   open: { "--open": 1 },
 } as const;
+
 const content = {
   closed: { opacity: 0, transition: { duration: 0.08, ease: "easeIn" } },
   open: { opacity: 1, transition: { duration: 0.18, delay: 0.06, ease: "easeOut" } },
@@ -172,6 +184,7 @@ export function Swap(props: {
   onClosed: () => void;
 }) {
   const reduce = useReducedMotion();
+
   return (
     <AnimatePresence mode="wait" initial={false} onExitComplete={props.onClosed}>
       {props.open ? (

@@ -3,12 +3,14 @@
 // `HostMessage`s and reads `RelayMessage`s; the Worker does the reverse, and pushes
 // `MachinesEvent`s to the owner's open Create pipe cards.
 
+import { isFiniteNumber, isJsonObject, isString, type JsonValue } from "./json.ts";
+
 /** The highest TCP port, for schemas that state the range. */
 export const MAX_PORT = 65_535;
 
 /** A TCP port number: an integer from 1 to `MAX_PORT`. */
 export function isPort(value: unknown): value is number {
-  return Number.isInteger(value) && (value as number) >= 1 && (value as number) <= MAX_PORT;
+  return isFiniteNumber(value) && Number.isInteger(value) && value >= 1 && value <= MAX_PORT;
 }
 
 /** What a computer is called when its CLI sends no usable name. */
@@ -16,9 +18,10 @@ export const DEFAULT_COMPUTER_NAME = "Computer";
 export const COMPUTER_NAME_MAX = 80;
 
 /** `value` as a computer's name, trimmed, or null when it cannot be one. */
-export function computerName(value: unknown): string | null {
-  if (typeof value !== "string") return null;
+export function computerName(value: string | undefined): string | null {
+  if (value === undefined) return null;
   const name = value.trim();
+
   return name && name.length <= COMPUTER_NAME_MAX ? name : null;
 }
 
@@ -52,59 +55,67 @@ export type HostMessage =
   | { type: "opened"; id: string; url: string }
   | { type: "failed"; id: string; message: string };
 
-function boundedString(value: unknown, max: number): value is string {
-  return typeof value === "string" && value.length <= max;
+function boundedString(value: JsonValue | undefined, max: number): value is string {
+  return isString(value) && value.length <= max;
 }
 
 function isMachinePort(value: unknown): value is MachinePort {
-  if (typeof value !== "object" || value === null) return false;
-  const { port, title } = value as Record<string, unknown>;
+  if (!isJsonObject(value)) return false;
+  const { port, title } = value;
+
   return isPort(port) && (title === null || boundedString(title, MACHINE_LIMITS.title));
 }
 
 /** The wall shows the URL as a link, so only http(s). */
-function isHttpUrl(value: unknown): value is string {
+function isHttpUrl(value: JsonValue | undefined): value is string {
   if (!boundedString(value, MACHINE_LIMITS.url)) return false;
+
   try {
     const { protocol } = new URL(value);
+
     return protocol === "https:" || protocol === "http:";
   } catch {
     return false;
   }
 }
 
-function asRecord(raw: unknown): Record<string, unknown> | null {
-  return typeof raw === "object" && raw !== null && !Array.isArray(raw)
-    ? (raw as Record<string, unknown>)
-    : null;
-}
-
 /** A machine's message as the relay accepts it, or null when it is not one. */
-export function parseHostMessage(raw: unknown): HostMessage | null {
-  const m = asRecord(raw);
-  if (!m) return null;
+export function parseHostMessage(raw: JsonValue): HostMessage | null {
+  if (!isJsonObject(raw)) return null;
+  const m = raw;
+
   if (m.type === "ports") {
-    const ports: unknown = m.ports;
+    const { ports } = m;
+
     if (!Array.isArray(ports) || ports.length > MACHINE_LIMITS.ports) return null;
-    if (!ports.every(isMachinePort)) return null;
-    return { type: "ports", ports: ports.map(({ port, title }) => ({ port, title })) };
+    const checked: MachinePort[] = [];
+
+    for (const entry of ports) {
+      if (!isMachinePort(entry)) return null;
+      checked.push({ port: entry.port, title: entry.title });
+    }
+
+    return { type: "ports", ports: checked };
   }
+
   if (!boundedString(m.id, MACHINE_LIMITS.id)) return null;
+
   if (m.type === "opened") {
     return isHttpUrl(m.url) ? { type: "opened", id: m.id, url: m.url } : null;
   }
+
   if (m.type === "failed") {
     return boundedString(m.message, MACHINE_LIMITS.message)
       ? { type: "failed", id: m.id, message: m.message }
       : null;
   }
+
   return null;
 }
 
 /** The relay's message as the machine accepts it, or null when it is not one. */
-export function parseRelayMessage(raw: unknown): RelayMessage | null {
-  const m = asRecord(raw);
-  return m?.type === "open" && typeof m.id === "string" && isPort(m.port)
-    ? { type: "open", id: m.id, port: m.port }
+export function parseRelayMessage(raw: JsonValue): RelayMessage | null {
+  return isJsonObject(raw) && raw.type === "open" && isString(raw.id) && isPort(raw.port)
+    ? { type: "open", id: raw.id, port: raw.port }
     : null;
 }

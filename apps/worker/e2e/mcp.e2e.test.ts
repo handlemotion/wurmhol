@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   alive,
   api,
@@ -13,6 +14,7 @@ import {
   cliEnv,
   cliPath,
   createToken,
+  type JsonValue,
   localServer,
   type Person,
   signIn,
@@ -22,20 +24,29 @@ import {
   waitFor,
 } from "./support.ts";
 
-interface PipeResult {
-  id: string;
-  url: string;
-  port: number;
-  name: string | null;
-  startedAt: string;
-  endsAt: string;
-}
+/** A pipe as the tools return it; loose, so a whole pipe can be compared with another result. */
+const pipeResult = z.looseObject({
+  id: z.string(),
+  url: z.string(),
+  port: z.number(),
+  name: z.string().nullable(),
+  startedAt: z.string(),
+  endsAt: z.string(),
+});
 
-interface ToolResult {
-  content: { type: string; text: string }[];
-  structuredContent?: Record<string, unknown>;
-  isError?: boolean;
-}
+/** open_pipe's answer while the computer waits for its login to be approved. */
+const awaitingApproval = pipeResult.extend({ approval: z.boolean().optional() });
+
+const toolResult = z.object({
+  content: z.array(z.object({ type: z.string(), text: z.string() })),
+  structuredContent: z.record(z.string(), z.json()).optional(),
+  isError: z.boolean().optional(),
+});
+
+type ToolResult = z.infer<typeof toolResult>;
+
+/** The pipe a successful open_pipe returned. */
+const pipeOf = (result: ToolResult) => pipeResult.parse(result.structuredContent);
 
 let stack: Stack;
 let ada: Person;
@@ -57,25 +68,40 @@ async function connect(env: Record<string, string>) {
     env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
     stderr: "pipe",
   });
+
   const client = new Client({ name: "wurmhol-e2e", version: "0" });
   await client.connect(transport);
-  const call = async (name: string, args: Record<string, unknown> = {}) =>
-    (await client.callTool({ name, arguments: args })) as ToolResult;
+
+  const call = async (name: string, args: { [key: string]: JsonValue } = {}) =>
+    toolResult.parse(await client.callTool({ name, arguments: args }));
+
   return { client, transport, call };
 }
 
 const text = (result: ToolResult) => result.content.map((c) => c.text).join("\n");
 
 const wall = async () =>
-  (await api<{ shares: { id: string }[] }>(stack, ada, "/api/shares")).body.shares.map((s) => s.id);
+  (
+    await api(
+      stack,
+      ada,
+      "/api/shares",
+      {},
+      z.object({ shares: z.array(z.object({ id: z.string() })) }),
+    )
+  ).body.shares.map((s) => s.id);
 
 const endReason = (id: string) => {
   const db = stack.db();
+
   try {
     return (
-      (db.prepare("select end_reason from shares where id = ?").get(id) as {
-        end_reason: string | null;
-      }) ?? { end_reason: "missing" }
+      z
+        .object({ end_reason: z.string().nullable() })
+        .optional()
+        .parse(db.prepare("select end_reason from shares where id = ?").get(id)) ?? {
+        end_reason: "missing",
+      }
     );
   } finally {
     db.close();
@@ -87,6 +113,7 @@ describe("wurmhol mcp", () => {
     const local = await localServer((req, res) =>
       res.writeHead(200, { "content-type": "text/plain" }).end(`mcp ${req.url}`),
     );
+
     const { client, call } = await connect(cliEnv(stack, (await createToken(stack, ada)).token));
 
     // Catches a tool missing from tools/list, or one advertised without its output schema.
@@ -101,7 +128,7 @@ describe("wurmhol mcp", () => {
 
     const opened = await call("open_pipe", { port: local.port });
     expect(opened.isError).toBeFalsy();
-    const pipe = opened.structuredContent as unknown as PipeResult;
+    const pipe = pipeOf(opened);
     expect(pipe.url).toBe(stack.shareUrl(pipe.id));
     expect(pipe.port).toBe(local.port);
     // The default lifetime reaches the agent, so it can tell the user when the URL dies.
@@ -138,7 +165,7 @@ describe("wurmhol mcp", () => {
     const before = Date.now();
     const opened = await call("open_pipe", { port: local.port, name: "Mcp-App", ttl: "90m" });
     expect(opened.isError).toBeFalsy();
-    const pipe = opened.structuredContent as unknown as PipeResult;
+    const pipe = pipeOf(opened);
     expect(pipe.url).toBe(stack.shareUrl("mcp-app"));
     expect(pipe.name).toBe("mcp-app");
     expect(Math.abs(Date.parse(pipe.endsAt) - before - 90 * 60_000)).toBeLessThan(60_000);
@@ -178,7 +205,7 @@ describe("wurmhol mcp", () => {
 
     const first = await call("open_pipe", { port: app.port });
     expect({ isError: first.isError, text: text(first) }).toMatchObject({ isError: undefined });
-    const waiting = first.structuredContent as unknown as PipeResult & { approval?: boolean };
+    const waiting = awaitingApproval.parse(first.structuredContent);
     expect(waiting).toMatchObject({ port: app.port, approval: true });
     expect(waiting.url.startsWith(`${stack.url}/device?code=`)).toBe(true);
     expect(text(first).split("\n")[0]).toBe(waiting.url);
@@ -195,7 +222,15 @@ describe("wurmhol mcp", () => {
     expect((await call("list_pipes")).structuredContent).toEqual({ pipes: [] });
 
     const code = new URL(waiting.url).searchParams.get("code")!;
-    const shown = await api<{ port: number | null }>(stack, ada, `/api/device?code=${code}`);
+
+    const shown = await api(
+      stack,
+      ada,
+      `/api/device?code=${code}`,
+      {},
+      z.object({ port: z.number().nullable() }),
+    );
+
     expect(shown.body.port).toBe(app.port);
     expect(
       (await api(stack, ada, "/api/device/approve", { method: "POST", body: { code } })).status,
@@ -203,21 +238,29 @@ describe("wurmhol mcp", () => {
 
     const listed = await waitFor(
       async () => {
-        const pipes = ((await call("list_pipes")).structuredContent as { pipes: PipeResult[] })
-          .pipes;
+        const { pipes } = z
+          .object({ pipes: z.array(pipeResult) })
+          .parse((await call("list_pipes")).structuredContent);
+
         return pipes.length === 2 ? pipes : null;
       },
       { timeoutMs: 20_000, intervalMs: 500, what: "both ports' pipes" },
     );
+
     expect(listed.map((p) => p.port).toSorted()).toEqual([app.port, api2.port].toSorted());
     const byPort = new Map(listed.map((p) => [p.port, p.url]));
+
     // The approval page asked to open the first port: it goes there, not to the newest pipe.
-    const page = await api<{ url: string | null }>(
+    const page = await api(
       stack,
       ada,
       `/api/device/pipe?code=${code}&port=${app.port}`,
+      {},
+      z.object({ url: z.string().nullable() }),
     );
+
     expect(page.body.url).toBe(byPort.get(app.port));
+
     for (const [port, body] of [
       [app.port, "mcp approved"],
       [api2.port, "second port"],
@@ -226,13 +269,13 @@ describe("wurmhol mcp", () => {
       const cookie = await viewerCookie(stack, ada, pipeUrl);
       expect(await (await browserFetch(`${pipeUrl}/`, { cookie })).text()).toBe(body);
     }
+
     // Logged in: the token is saved, and the next pipe opens with no link.
     expect(existsSync(join(home, "credentials.json"))).toBe(true);
     const next = await call("open_pipe", { port: app.port });
     expect(next.structuredContent).not.toHaveProperty("approval");
-    expect((next.structuredContent as unknown as PipeResult).url).toBe(
-      stack.shareUrl((next.structuredContent as unknown as PipeResult).id),
-    );
+    const nextPipe = pipeOf(next);
+    expect(nextPipe.url).toBe(stack.shareUrl(nextPipe.id));
 
     await client.close();
     await Promise.all([app.close(), api2.close()]);
@@ -251,24 +294,24 @@ describe("wurmhol mcp", () => {
   // Catches pipes outliving the agent's session: shares nobody can stop from the agent any more.
   it("ends its pipes and exits when the client disconnects", async () => {
     const local = await localServer((_req, res) => res.end("ok"));
+
     const { client, transport, call } = await connect(
       cliEnv(stack, (await createToken(stack, ada)).token),
     );
+
     const ids = await Promise.all(
-      [0, 1].map(
-        async () =>
-          (
-            (await call("open_pipe", { port: local.port }))
-              .structuredContent as unknown as PipeResult
-          ).id,
-      ),
+      [0, 1].map(async () => pipeOf(await call("open_pipe", { port: local.port })).id),
     );
-    const pid = transport.pid as number;
+
+    const pid = transport.pid;
+
+    if (pid === null) throw new Error("the MCP server has no process");
     expect(pid).toBeGreaterThan(0);
     expect(await wall()).toEqual(expect.arrayContaining(ids));
 
     await client.close();
     await waitFor(() => !alive(pid), { what: "the MCP server to exit" });
+
     for (const id of ids) expect(endReason(id)).toEqual({ end_reason: "stopped" });
     expect((await wall()).filter((id) => ids.includes(id))).toEqual([]);
     await local.close();

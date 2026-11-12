@@ -10,6 +10,7 @@ import {
   connect as netConnect,
   createServer as createNetServer,
   type AddressInfo,
+  type LookupFunction,
   type Socket,
 } from "node:net";
 import { tmpdir } from "node:os";
@@ -20,31 +21,47 @@ import { Readable } from "node:stream";
 import Stripe from "stripe";
 import { Agent, request as undiciRequest } from "undici";
 import WebSocket from "ws";
+import { z } from "zod";
 import { e2eConfig, workerRoot } from "./global-setup.ts";
 
 const run = promisify(execFile);
 export const cliPath = join(workerRoot, "../../packages/cli/dist/cli.js");
 
 /** Every `*.localhost` name is this machine, as browsers treat it. */
-function localLookup(
-  hostname: string,
-  options: unknown,
-  callback: (
-    error: Error | null,
-    address: string | { address: string; family: number }[],
-    family?: number,
-  ) => void,
-) {
+const localLookup: LookupFunction = (hostname, options, callback) => {
   if (hostname === "localhost" || hostname.endsWith(".localhost")) {
-    const all =
-      typeof options === "object" && options !== null && (options as { all?: boolean }).all;
-    if (all) return callback(null, [{ address: "127.0.0.1", family: 4 }]);
+    if (options.all) return callback(null, [{ address: "127.0.0.1", family: 4 }]);
+
     return callback(null, "127.0.0.1", 4);
   }
+
   return callback(new Error(`e2e lookup refused ${hostname}`), "", 4);
+};
+
+const dispatcher = new Agent({ connect: { lookup: localLookup } });
+
+/** Any JSON value, as `JSON.parse` returns it. */
+export type JsonValue = z.infer<ReturnType<typeof z.json>>;
+
+/** Parses JSON text with `schema`; a mismatch fails the test with the text it got. */
+export function parseJson<S extends z.ZodType>(schema: S, text: string): z.output<S> {
+  const result = schema.safeParse(JSON.parse(text));
+
+  if (!result.success)
+    throw new Error(`unexpected JSON: ${z.prettifyError(result.error)}\n${text.slice(0, 2000)}`);
+
+  return result.data;
 }
 
-const dispatcher = new Agent({ connect: { lookup: localLookup as never } });
+/** Reads a response's JSON body with `schema`. */
+export async function readJson<S extends z.ZodType>(schema: S, response: Response) {
+  return parseJson(schema, await response.text());
+}
+
+/** The port a listening server is bound to. */
+export function listeningPort(server: { address(): AddressInfo | string | null }) {
+  return z.object({ port: z.number() }).parse(server.address()).port;
+}
 
 /**
  * A request that resolves `*.localhost` like a browser, sends exactly the headers given (fetch
@@ -59,21 +76,30 @@ export async function browserFetch(
     cookie?: string;
   } = {},
 ): Promise<Response> {
-  const headers: Record<string, string> = { ...init.headers };
+  const headers = { ...init.headers };
+
   if (init.cookie) headers.cookie = init.cookie;
+
   const result = await undiciRequest(url, {
-    method: (init.method ?? "GET") as "GET",
+    method: init.method ?? "GET",
     headers,
     body: init.body,
     dispatcher,
   });
+
   const out = new Headers();
+
   for (const [name, value] of Object.entries(result.headers)) {
     for (const v of Array.isArray(value) ? value : [value])
       if (v !== undefined) out.append(name, v);
   }
+
   const empty = [204, 205, 304].includes(result.statusCode) || init.method === "HEAD";
+
   if (empty) await result.body.dump();
+
+  // SAFETY: `node:stream/web`'s ReadableStream is the global ReadableStream at runtime; only the
+  // two type declarations differ.
   return new Response(empty ? null : (Readable.toWeb(result.body) as ReadableStream), {
     status: result.statusCode,
     headers: out,
@@ -83,8 +109,9 @@ export async function browserFetch(
 async function freePort() {
   const server = createNetServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
+  const port = listeningPort(server);
   await new Promise((resolve) => server.close(resolve));
+
   return port;
 }
 
@@ -93,9 +120,12 @@ export async function waitFor<T>(
   { timeoutMs = 10_000, intervalMs = 50, what = "condition" } = {},
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
+
   for (;;) {
     const value = await check();
+
     if (value) return value;
+
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
@@ -141,7 +171,8 @@ export async function startStack(vars: Record<string, string> = {}): Promise<Sta
       env: { ...process.env, CI: "1" },
     },
   );
-  const allVars: Record<string, string> = {
+
+  const allVars = {
     ENVIRONMENT: "test",
     BETTER_AUTH_URL: url,
     BETTER_AUTH_SECRET: "e2e-auth-secret-e2e-auth-secret-e2e-auth",
@@ -152,6 +183,7 @@ export async function startStack(vars: Record<string, string> = {}): Promise<Sta
     RATE_LIMIT_MANAGE: "off",
     ...vars,
   };
+
   const args = [
     "dev",
     "-c",
@@ -164,23 +196,29 @@ export async function startStack(vars: Record<string, string> = {}): Promise<Sta
     persist,
     "--show-interactive-dev-session=false",
   ];
+
   for (const [key, value] of Object.entries(allVars)) args.push("--var", `${key}:${value}`);
   let output = "";
+
   const launch = async () => {
     const inspector = ["--inspector-port", String(await freePort())];
+
     const child = spawn(wrangler, [...args, ...inspector], {
       cwd: workerRoot,
       env: { ...process.env, CI: "1", NO_COLOR: "1" },
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
     });
+
     child.stdout.on("data", (d: Buffer) => (output += d.toString()));
     child.stderr.on("data", (d: Buffer) => (output += d.toString()));
+
     try {
       await waitFor(
         async () => {
           if (child.exitCode !== null) throw new Error(`wrangler dev exited:\n${output}`);
           const response = await fetch(`${url}/health`).catch(() => null);
+
           return response?.ok;
         },
         { timeoutMs: 60_000, intervalMs: 200, what: "wrangler dev" },
@@ -189,29 +227,39 @@ export async function startStack(vars: Record<string, string> = {}): Promise<Sta
       process.kill(-child.pid!, "SIGKILL");
       throw error;
     }
+
     return child;
   };
+
   const kill = async (child: ChildProcess) => {
     const exited = new Promise((resolve) => child.once("exit", resolve));
+
     try {
       process.kill(-child.pid!, "SIGTERM");
     } catch {
       // Already gone.
     }
+
     await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 2000))]);
+
     try {
       process.kill(-child.pid!, "SIGKILL");
     } catch {
       // Already gone.
     }
   };
+
   let child = await launch();
+
   const dbFile = () => {
     const dir = join(persist, "v3/d1/miniflare-D1DatabaseObject");
     const file = readdirSync(dir).find((f) => f.endsWith(".sqlite") && f !== "metadata.sqlite");
+
     if (!file) throw new Error("no local D1 database");
+
     return join(dir, file);
   };
+
   return {
     url,
     port,
@@ -225,6 +273,7 @@ export async function startStack(vars: Record<string, string> = {}): Promise<Sta
     },
     durableObjects: (className) => {
       const dir = join(persist, "v3/do", `wurmhol-${className}`);
+
       return existsSync(dir)
         ? readdirSync(dir)
             .filter((f) => f.endsWith(".sqlite") && f !== "metadata.sqlite")
@@ -263,15 +312,18 @@ export async function signIn(
     headers: { "content-type": "application/json", origin: stack.url },
     body: JSON.stringify({ email, callbackURL: "/" }),
   });
+
   if (!sent.ok) throw new Error(`magic link: ${sent.status} ${await sent.text()}`);
+
   const token = await waitFor(
     () => {
       const db = stack.db();
+
       try {
-        const rows = db.prepare("select identifier, value from verifications").all() as {
-          identifier: string;
-          value: string;
-        }[];
+        const rows = z
+          .array(z.object({ identifier: z.string(), value: z.string() }))
+          .parse(db.prepare("select identifier, value from verifications").all());
+
         return rows
           .find((r) => r.identifier.startsWith("magic-link:") && r.value.includes(email))
           ?.identifier.slice(11);
@@ -281,34 +333,74 @@ export async function signIn(
     },
     { what: "magic link token" },
   );
+
   const verified = await browserFetch(
     `${stack.url}/api/auth/magic-link/verify?token=${token}&callbackURL=%2F`,
     { headers },
   );
+
   const cookie = cookiesOf(verified).join("; ");
+
   if (!cookie.includes("session_token")) throw new Error(`no session cookie (${verified.status})`);
+
   return { email, cookie };
 }
 
-/** A JSON API call as `person`, from the app's own origin. */
-export async function api<T = unknown>(
+export interface ApiInit {
+  method?: string;
+  body?: JsonValue;
+}
+
+export interface ApiResult<T> {
+  status: number;
+  body: T;
+}
+
+/**
+ * A JSON API call as `person`, from the app's own origin. The body is decoded with `schema`
+ * (an empty body is `null`); without one it is any JSON value.
+ */
+export async function api(
   stack: Stack,
   person: Person | null,
   path: string,
-  init: { method?: string; body?: unknown } = {},
-) {
+  init?: ApiInit,
+): Promise<ApiResult<JsonValue>>;
+export async function api<S extends z.ZodType>(
+  stack: Stack,
+  person: Person | null,
+  path: string,
+  init: ApiInit,
+  schema: S,
+): Promise<ApiResult<z.output<S>>>;
+export async function api<T>(
+  stack: Stack,
+  person: Person | null,
+  path: string,
+  init: ApiInit = {},
+  schema?: z.ZodType<T>,
+): Promise<ApiResult<T | JsonValue>> {
   const response = await browserFetch(`${stack.url}${path}`, {
     method: init.method ?? "GET",
     cookie: person?.cookie,
-    headers: { origin: stack.url, ...(init.body ? { "content-type": "application/json" } : {}) },
+    headers: init.body
+      ? { origin: stack.url, "content-type": "application/json" }
+      : { origin: stack.url },
     body: init.body ? JSON.stringify(init.body) : undefined,
   });
-  const text = await response.text();
-  return { status: response.status, body: (text ? JSON.parse(text) : null) as T };
+
+  const text = (await response.text()) || "null";
+
+  return {
+    status: response.status,
+    body: schema ? parseJson(schema, text) : parseJson(z.json(), text),
+  };
 }
 
 export async function me(stack: Stack, person: Person) {
-  return (await api<{ activeOrgId: string; user: { id: string } }>(stack, person, "/api/me")).body;
+  const body = z.object({ activeOrgId: z.string(), user: z.object({ id: z.string() }) });
+
+  return (await api(stack, person, "/api/me", {}, body)).body;
 }
 
 export async function createToken(
@@ -317,16 +409,16 @@ export async function createToken(
   name = "e2e",
   options: { scope?: "pipes" | "org"; expiresInDays?: 30 | 90 | null } = {},
 ) {
-  const { status, body } = await api<{
-    id: string;
-    token: string;
-    host: string;
-    url: string | null;
-  }>(stack, person, "/api/tokens", {
-    method: "POST",
-    body: { name, ...options },
-  });
+  const { status, body } = await api(
+    stack,
+    person,
+    "/api/tokens",
+    { method: "POST", body: { name, ...options } },
+    z.object({ id: z.string(), token: z.string(), host: z.string(), url: z.string().nullable() }),
+  );
+
   if (status !== 201) throw new Error(`token: ${status}`);
+
   return body;
 }
 
@@ -344,16 +436,19 @@ export async function cli(
   options: { cwd?: string } = {},
 ): Promise<CliRun> {
   const started = Date.now();
+
   const child = spawn(process.execPath, [cliPath, ...args], {
     cwd: options.cwd,
     env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
+
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
   child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
   const code = await new Promise<number | null>((resolve) => child.on("close", resolve));
+
   return { code, stdout, stderr, ms: Date.now() - started };
 }
 
@@ -370,9 +465,14 @@ export function cliEnv(stack: Stack, token: string, extra: Record<string, string
 /** Starts a share of `port` and returns its id and URL. */
 export async function share(stack: Stack, env: Record<string, string>, port: number) {
   const result = await cli([String(port), "--json"], env);
+
   if (result.code !== 0) throw new Error(`wurmhol ${port} failed: ${result.stderr}`);
+
   return {
-    ...(JSON.parse(result.stdout.split("\n")[0]!) as { id: string; url: string; port: number }),
+    ...parseJson(
+      z.object({ id: z.string(), url: z.string(), port: z.number() }),
+      result.stdout.split("\n")[0]!,
+    ),
     ms: result.ms,
   };
 }
@@ -387,16 +487,21 @@ export async function viewerCookie(stack: Stack, person: Person, shareUrl: strin
   const first = await browserFetch(`${shareUrl}/`, {
     headers: { accept: "text/html", "sec-fetch-mode": "navigate" },
   });
+
   const open = first.headers.get("location");
+
   if (first.status !== 302 || !open)
     throw new Error(`share did not send the viewer to sign in: ${first.status}`);
   const back = await browserFetch(open, { cookie: person.cookie });
   const callback = back.headers.get("location") ?? "";
+
   if (!callback.startsWith(shareUrl))
     throw new Error(`/open did not send the viewer back: ${back.status} ${callback}`);
   const set = await browserFetch(callback);
   const cookie = cookiesOf(set).find((c) => c.startsWith("__Host-wurmhol="));
+
   if (!cookie) throw new Error("no share cookie");
+
   return cookie;
 }
 
@@ -404,7 +509,7 @@ export async function viewerCookie(stack: Stack, person: Person, shareUrl: strin
 export function browserSocket(url: string, protocols: string[], headers: Record<string, string>) {
   return new WebSocket(url.replace(/^http/, "ws"), protocols, {
     headers,
-    lookup: localLookup as never,
+    lookup: localLookup,
   });
 }
 
@@ -412,11 +517,13 @@ export function browserSocket(url: string, protocols: string[], headers: Record<
 export async function localServer(handler: Parameters<typeof createServer>[1]) {
   const server = createServer(handler);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  return { server, port: (server.address() as AddressInfo).port, close: () => closeServer(server) };
+
+  return { server, port: listeningPort(server), close: () => closeServer(server) };
 }
 
 function closeServer(server: Server) {
   server.closeAllConnections();
+
   return new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
@@ -432,10 +539,13 @@ export async function connectProxy(allowPorts: number[]) {
     connects++;
     const [host, portText] = (req.url ?? "").split(":");
     const port = Number(portText);
+
     if (!allowPorts.includes(port)) {
       client.end("HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n");
+
       return;
     }
+
     const upstream = netConnect(
       port,
       host === "localhost" || host!.endsWith(".localhost") ? "127.0.0.1" : host!,
@@ -446,22 +556,26 @@ export async function connectProxy(allowPorts: number[]) {
         client.pipe(upstream);
       },
     );
+
     tunnels.add(client);
     tunnels.add(upstream);
+
     const drop = () => {
       client.destroy();
       upstream.destroy();
       tunnels.delete(client);
       tunnels.delete(upstream);
     };
+
     client.on("error", drop);
     upstream.on("error", drop);
     client.on("close", drop);
     upstream.on("close", drop);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
   return {
-    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    url: `http://127.0.0.1:${listeningPort(server)}`,
     get connects() {
       return connects;
     },
@@ -472,6 +586,7 @@ export async function connectProxy(allowPorts: number[]) {
     },
     close: () => {
       for (const socket of tunnels) socket.destroy();
+
       return closeServer(server);
     },
   };
@@ -485,6 +600,7 @@ export function sha256(data: Uint8Array | Buffer) {
 export function alive(pid: number) {
   try {
     process.kill(pid, 0);
+
     return true;
   } catch {
     return false;
@@ -493,12 +609,14 @@ export function alive(pid: number) {
 
 export function shareStates(env: Record<string, string>) {
   const dir = join(env.WURMHOL_HOME!, "shares");
+
   return existsSync(dir) ? readdirSync(dir) : [];
 }
 
 export type { ChildProcess };
 
 const STRIPE_E2E_WEBHOOK_SECRET = "whsec_e2e_wurmhol_webhook_secret";
+
 const STRIPE_E2E_PRICES = {
   friends: "price_e2e_friends",
   business: "price_e2e_business",
@@ -518,7 +636,7 @@ export const STRIPE_E2E_VARS = {
 export async function stripeWebhook(
   stack: Stack,
   type: string,
-  object: Record<string, unknown>,
+  object: { [key: string]: JsonValue },
   secret = STRIPE_E2E_WEBHOOK_SECRET,
 ) {
   const payload = JSON.stringify({
@@ -528,10 +646,12 @@ export async function stripeWebhook(
     created: Math.floor(Date.now() / 1000),
     data: { object },
   });
+
   const signature = new Stripe("sk_test_unused").webhooks.generateTestHeaderString({
     payload,
     secret,
   });
+
   return browserFetch(`${stack.url}/api/auth/stripe/webhook`, {
     method: "POST",
     headers: { "content-type": "application/json", "stripe-signature": signature },
@@ -548,13 +668,21 @@ export function stripeSubscription(
   const now = Math.floor(Date.now() / 1000);
   const trial = status === "trialing";
   const end = now + (plan === "friends" ? 365 : 30) * 86400;
-  const item = (id: string, price: string, interval: string, metered = false) => ({
-    id,
-    price: { id: price, recurring: { interval, usage_type: metered ? "metered" : "licensed" } },
-    ...(metered ? {} : { quantity: 1 }),
-    current_period_start: now,
-    current_period_end: end,
-  });
+
+  const item = (id: string, price: string, interval: string, metered = false) => {
+    const period = { current_period_start: now, current_period_end: end };
+
+    // A metered item has no quantity; a licensed one is a single seat.
+    return metered
+      ? { id, price: { id: price, recurring: { interval, usage_type: "metered" } }, ...period }
+      : {
+          id,
+          price: { id: price, recurring: { interval, usage_type: "licensed" } },
+          quantity: 1,
+          ...period,
+        };
+  };
+
   return {
     id: `sub_e2e_${customer}`,
     object: "subscription",
@@ -588,11 +716,14 @@ export async function startPlan(
 ) {
   const customer = `cus_e2e_${orgId.replaceAll("-", "").slice(0, 16)}`;
   const db = stack.db({ write: true });
+
   try {
     db.prepare("update organizations set stripe_customer_id = ? where id = ?").run(customer, orgId);
   } finally {
     db.close();
   }
+
   const response = await stripeWebhook(stack, event, stripeSubscription(customer, "active", plan));
+
   if (response.status !== 200) throw new Error(`subscription webhook: ${response.status}`);
 }

@@ -9,6 +9,7 @@ interface Props {
 
 const { title, description } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
+
 // The link preview, rendered by scripts/og.mjs from the network-create `og` scene.
 const image = new URL("/og.png", Astro.site);
 const imageAlt = "Wurmhol: a private URL for your agent's dev server.";

@@ -4,17 +4,22 @@
 // sign-in or an access key; and stop, rotate, delete and takedown end it as they say.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   alive,
   api,
+  type ApiResult,
   browserFetch,
   browserSocket,
   cli,
   cliEnv,
   createToken,
+  type JsonValue,
   localServer,
+  parseJson,
   type Person,
+  readJson,
   share,
   signIn,
   type Stack,
@@ -26,16 +31,25 @@ import {
 const OPERATOR_TOKEN = "operator-token-for-e2e-0123456789abcdef";
 const ALL = ["tunnels:read", "tunnels:manage", "subjects:manage", "grants:issue"];
 
-interface Tunnel {
-  id: string;
-  url: string;
-  tenant: string;
-  owner: string;
-  state: string;
-  session: { id: string; bytes: number } | null;
-  lastEnd: { reason: string } | null;
-  access?: string[];
-}
+// Loose: tests match and search the rest of a tunnel's fields as the API returned them.
+const tunnelSchema = z.looseObject({
+  id: z.string(),
+  url: z.string(),
+  state: z.string(),
+  session: z.object({ id: z.string() }).nullish(),
+  lastEnd: z.object({ reason: z.string() }).nullish(),
+  access: z.array(z.string()).optional(),
+});
+
+const madeTunnel = z.object({
+  tunnel: tunnelSchema,
+  connector: z.object({ id: z.string(), connector: z.string() }),
+});
+
+/** The console's list of an app's tunnels, searched whole for anything secret. */
+const consoleTunnels = z.looseObject({
+  tunnels: z.array(z.looseObject({ state: z.string() })),
+});
 
 let stack: Stack;
 let apiHost: string;
@@ -44,62 +58,97 @@ let key: string;
 let local: Awaited<ReturnType<typeof localServer>>;
 const envs: Record<string, string>[] = [];
 
-/** A bearer call to `/v1/embed…` on the CLI's host. */
-async function embed<T = Record<string, unknown>>(
+interface EmbedInit {
+  method?: string;
+  body?: JsonValue;
+  token?: string;
+}
+
+/**
+ * A bearer call to `/v1/embed…` on the CLI's host. The body is decoded with `schema` (an empty
+ * body is `null`); without one it is any JSON value.
+ */
+async function embed(path: string, init?: EmbedInit): Promise<ApiResult<JsonValue>>;
+async function embed<S extends z.ZodType>(
   path: string,
-  init: { method?: string; body?: unknown; token?: string } = {},
-) {
+  init: EmbedInit,
+  schema: S,
+): Promise<ApiResult<z.output<S>>>;
+async function embed<T>(
+  path: string,
+  init: EmbedInit = {},
+  schema?: z.ZodType<T>,
+): Promise<ApiResult<T | JsonValue>> {
+  const authorization = `Bearer ${init.token ?? key}`;
+
   const response = await browserFetch(`${apiHost}/v1/embed${path}`, {
     method: init.method ?? "GET",
-    headers: {
-      authorization: `Bearer ${init.token ?? key}`,
-      ...(init.body ? { "content-type": "application/json" } : {}),
-    },
+    headers: init.body ? { authorization, "content-type": "application/json" } : { authorization },
     body: init.body ? JSON.stringify(init.body) : undefined,
   });
-  const text = await response.text();
-  return { status: response.status, body: (text ? JSON.parse(text) : null) as T };
+
+  const text = (await response.text()) || "null";
+
+  return {
+    status: response.status,
+    body: schema ? parseJson(schema, text) : parseJson(z.json(), text),
+  };
 }
 
 async function makeKey(person: Person, permissions: string[]) {
-  const app = await api<{ app: { id: string } }>(stack, person, "/api/apps", {
-    method: "POST",
-    body: { name: "Dorks" },
-  });
-  const made = await api<{ key: string }>(stack, person, `/api/apps/${app.body.app.id}/keys`, {
-    method: "POST",
-    body: { name: "backend", permissions },
-  });
+  const app = await api(
+    stack,
+    person,
+    "/api/apps",
+    { method: "POST", body: { name: "Dorks" } },
+    z.object({ app: z.object({ id: z.string() }) }),
+  );
+
+  const made = await api(
+    stack,
+    person,
+    `/api/apps/${app.body.app.id}/keys`,
+    { method: "POST", body: { name: "backend", permissions } },
+    z.object({ key: z.string() }),
+  );
+
   return { appId: app.body.app.id, key: made.body.key };
 }
 
 async function subject(tenant: string, id: string) {
   expect((await embed(`/tenants/${tenant}`, { method: "PUT", body: {} })).status).toBe(200);
+
   const put = await embed(`/tenants/${tenant}/subjects/${id}`, {
     method: "PUT",
     body: { kind: "user" },
   });
+
   expect(put.status).toBe(200);
 }
 
 async function newTunnel(tenant: string, ownerId: string, access: string[] = []) {
-  const made = await embed<{ tunnel: Tunnel; connector: { id: string; connector: string } }>(
+  const made = await embed(
     "/tunnels",
     { method: "POST", body: { tenant, owner: ownerId, access } },
+    madeTunnel.partial(),
   );
+
   expect(made.status).toBe(201);
-  return made.body;
+
+  return madeTunnel.parse(made.body);
 }
 
 function agentEnv(connector: string) {
   const env = cliEnv(stack, connector);
   envs.push(env);
+
   return env;
 }
 
 function pidOf(env: Record<string, string>, id: string) {
   const file = join(env.WURMHOL_HOME!, "shares", `${id}.json`);
-  return (JSON.parse(readFileSync(file, "utf8")) as { pid: number }).pid;
+
+  return parseJson(z.object({ pid: z.number() }), readFileSync(file, "utf8")).pid;
 }
 
 /** The status a WebSocket handshake with `token` gets: 101 when it opened. */
@@ -119,7 +168,7 @@ function handshake(url: string, token: string) {
 }
 
 async function tunnel(id: string) {
-  return (await embed<{ tunnel: Tunnel }>(`/tunnels/${id}`)).body.tunnel;
+  return (await embed(`/tunnels/${id}`, {}, z.object({ tunnel: tunnelSchema }))).body.tunnel;
 }
 
 beforeAll(async () => {
@@ -149,6 +198,7 @@ describe("tenants and subjects", () => {
       method: "PUT",
       body: { kind: "service" },
     });
+
     expect(changed.status).toBe(409);
   });
 
@@ -158,6 +208,7 @@ describe("tenants and subjects", () => {
       method: "POST",
       body: { tenant: "acme", owner: "alice", access: ["carol"] },
     });
+
     expect(crossed.status).toBe(404);
     const { tunnel: made } = await newTunnel("acme", "alice");
     expect((await embed(`/tunnels/${made.id}/access/carol`, { method: "PUT" })).status).toBe(404);
@@ -191,22 +242,39 @@ describe("an agent opens its tunnel", () => {
   });
 
   it("is not on the wall, nor in the org's pipes API", async () => {
-    const wall = await api<{ shares: { id: string }[] }>(stack, owner, "/api/shares");
+    const wall = await api(
+      stack,
+      owner,
+      "/api/shares",
+      {},
+      z.object({ shares: z.array(z.object({ id: z.string() })) }),
+    );
+
     expect(wall.body.shares.map((s) => s.id)).not.toContain(opened.id);
+
     const terminate = await api(stack, owner, `/api/shares/${opened.id}/terminate`, {
       method: "POST",
     });
+
     expect(terminate.status).toBe(404);
     const orgToken = (await createToken(stack, owner, "org", { scope: "org" })).token;
+
     const pipes = await browserFetch(`${apiHost}/v1/pipes`, {
       headers: { authorization: `Bearer ${orgToken}` },
     });
-    const listed = (await pipes.json()) as { pipes: { id: string }[] };
+
+    const listed = await readJson(
+      z.object({ pipes: z.array(z.object({ id: z.string() })) }),
+      pipes,
+    );
+
     expect(listed.pipes.map((p) => p.id)).not.toContain(opened.id);
+
     const end = await browserFetch(`${apiHost}/v1/pipes/${opened.id}`, {
       method: "DELETE",
       headers: { authorization: `Bearer ${orgToken}` },
     });
+
     expect(end.status).toBe(404);
   });
 
@@ -215,25 +283,32 @@ describe("an agent opens its tunnel", () => {
     const page = await browserFetch(`${opened.url}/`, {
       headers: { accept: "text/html", "sec-fetch-mode": "navigate" },
     });
+
     expect(page.status).toBe(401);
     expect(page.headers.get("location")).toBeNull();
+
     const open = await browserFetch(`${stack.url}/open?share=${opened.id}&next=%2F`, {
       cookie: owner.cookie,
     });
+
     expect(open.status).toBe(410);
+
     const keyed = await browserFetch(`${opened.url}/`, {
       headers: { "x-wurmhol-key": "k".repeat(40) },
     });
+
     expect(keyed.status).toBe(401);
   });
 
   // Catches: a CLI credential reaching billing, org management or another org API.
   it("lets its connector reach nothing but /connect", async () => {
     const bearer = { authorization: `Bearer ${made.connector.connector}` };
+
     for (const path of ["/v1/pipes", "/v1/embed/tunnels", "/api/me", "/api/billing", "/api/apps"]) {
       const response = await browserFetch(`${apiHost}${path}`, { headers: bearer });
       expect([401, 403, 404]).toContain(response.status);
     }
+
     expect(await handshake(`${apiHost}/host`, made.connector.connector)).toBe(401);
   });
 
@@ -249,10 +324,12 @@ describe("an agent opens its tunnel", () => {
   it("reconnects to no other tunnel's session", async () => {
     const bobs = await newTunnel("acme", "bob");
     const bobOpened = await share(stack, agentEnv(bobs.connector.connector), local.port);
+
     const hijack = await handshake(
       `${stack.url}/connect?share=${bobOpened.id}`,
       made.connector.connector,
     );
+
     expect(hijack).not.toBe(101);
     expect(hijack).toBeGreaterThanOrEqual(400);
     expect((await tunnel(bobs.tunnel.id)).state).toBe("live");
@@ -271,10 +348,13 @@ describe("an agent opens its tunnel", () => {
 
   it("ends when its connector is rotated, and the old one opens nothing", async () => {
     const pid = pidOf(env, opened.id);
-    const rotated = await embed<{ connector: { connector: string } }>(
+
+    const rotated = await embed(
       `/tunnels/${made.tunnel.id}/connectors`,
       { method: "POST", body: { rotate: true } },
+      z.object({ connector: z.object({ connector: z.string() }) }),
     );
+
     expect(rotated.status).toBe(201);
     await waitFor(() => !alive(pid), { what: "the agent to exit" });
     expect((await tunnel(made.tunnel.id)).lastEnd?.reason).toBe("revoked");
@@ -297,11 +377,13 @@ describe("integration keys", () => {
   it("do only what their permissions say", async () => {
     const reader = (await makeKey(owner, ["tunnels:read"])).key;
     expect((await embed("/tunnels", { token: reader })).status).toBe(200);
+
     const create = await embed("/tunnels", {
       token: reader,
       method: "POST",
       body: { tenant: "acme", owner: "alice" },
     });
+
     expect(create.status).toBe(403);
     expect((await embed("/tenants/x", { token: reader, method: "PUT", body: {} })).status).toBe(
       403,
@@ -316,7 +398,13 @@ describe("integration keys", () => {
     expect(
       (await embed(`/tunnels/${made.id}/stop`, { token: theirs, method: "POST" })).status,
     ).toBe(404);
-    const listed = await embed<{ tunnels: Tunnel[] }>("/tunnels", { token: theirs });
+
+    const listed = await embed(
+      "/tunnels",
+      { token: theirs },
+      z.object({ tunnels: z.array(tunnelSchema) }),
+    );
+
     expect(listed.body.tunnels).toEqual([]);
   });
 
@@ -328,11 +416,13 @@ describe("integration keys", () => {
       method: "PUT",
       body: { kind: "user" },
     });
-    const made = await embed<{ tunnel: Tunnel; connector: { connector: string } }>("/tunnels", {
-      token: doomed,
-      method: "POST",
-      body: { tenant: "t1", owner: "u1" },
-    });
+
+    const made = await embed(
+      "/tunnels",
+      { token: doomed, method: "POST", body: { tenant: "t1", owner: "u1" } },
+      madeTunnel,
+    );
+
     const opened = await share(stack, agentEnv(made.body.connector.connector), local.port);
     expect((await api(stack, owner, `/api/apps/${appId}`, { method: "DELETE" })).status).toBe(200);
     expect((await embed("/tunnels", { token: doomed })).status).toBe(401);
@@ -347,13 +437,20 @@ describe("operator takedown", () => {
     const made = await newTunnel("acme", "bob");
     const env = agentEnv(made.connector.connector);
     const opened = await share(stack, env, local.port);
+
     const done = await browserFetch(`${stack.url}/operator/takedown`, {
       method: "POST",
       headers: { authorization: `Bearer ${OPERATOR_TOKEN}`, "content-type": "application/json" },
       body: JSON.stringify({ pipe: new URL(opened.url).host }),
     });
+
     expect(done.status).toBe(200);
-    const body = (await done.json()) as { connectorRevoked: string; endedPipes: string[] };
+
+    const body = await readJson(
+      z.object({ connectorRevoked: z.string(), endedPipes: z.array(z.string()) }),
+      done,
+    );
+
     expect(body.connectorRevoked).toBe(made.connector.id);
     expect(body.endedPipes).toContain(opened.id);
     const again = await cli([String(local.port)], env);
@@ -364,13 +461,22 @@ describe("operator takedown", () => {
 describe("the console", () => {
   // Catches: the Apps link shown to someone who can't use it, or hidden from an owner who can.
   it("offers apps to owners, and to no member", async () => {
-    const me = await api<{ apps: boolean; role: string }>(stack, owner, "/api/me");
+    const seat = z.object({ apps: z.boolean(), role: z.string() });
+    const me = await api(stack, owner, "/api/me", {}, seat);
     expect(me.body).toMatchObject({ apps: true, role: "owner" });
-    const invite = await api<{ url: string }>(stack, owner, "/api/invites", { method: "POST" });
+
+    const invite = await api(
+      stack,
+      owner,
+      "/api/invites",
+      { method: "POST" },
+      z.object({ url: z.string() }),
+    );
+
     const member = await signIn(stack);
     const code = invite.body.url.split("/join/")[1];
     await api(stack, member, `/api/invites/${code}/accept`, { method: "POST" });
-    const theirs = await api<{ apps: boolean; role: string }>(stack, member, "/api/me");
+    const theirs = await api(stack, member, "/api/me", {}, seat);
     expect(theirs.body).toMatchObject({ apps: false, role: "member" });
     expect((await api(stack, member, "/api/apps")).status).toBe(403);
   });
@@ -380,21 +486,30 @@ describe("the console", () => {
     const as = { token: appKey };
     await embed("/tenants/console", { ...as, method: "PUT", body: {} });
     await embed("/tenants/console/subjects/dana", { ...as, method: "PUT", body: { kind: "user" } });
-    const made = await embed<{ tunnel: Tunnel; connector: { connector: string } }>("/tunnels", {
-      ...as,
-      method: "POST",
-      body: { tenant: "console", owner: "dana" },
-    });
+
+    const made = await embed(
+      "/tunnels",
+      { ...as, method: "POST", body: { tenant: "console", owner: "dana" } },
+      madeTunnel,
+    );
+
     const env = agentEnv(made.body.connector.connector);
     const opened = await share(stack, env, local.port);
 
-    const listed = await api<{ apps: { id: string; usage: { openTunnels: number } }[] }>(
+    const listed = await api(
       stack,
       owner,
       "/api/apps",
+      {},
+      z.object({
+        apps: z.array(
+          z.object({ id: z.string(), usage: z.object({ openTunnels: z.number() }).optional() }),
+        ),
+      }),
     );
-    expect(listed.body.apps.find((app) => app.id === appId)?.usage.openTunnels).toBe(1);
-    const tunnels = await api<{ tunnels: Tunnel[] }>(stack, owner, `/api/apps/${appId}/tunnels`);
+
+    expect(listed.body.apps.find((app) => app.id === appId)?.usage?.openTunnels).toBe(1);
+    const tunnels = await api(stack, owner, `/api/apps/${appId}/tunnels`, {}, consoleTunnels);
     expect(tunnels.body.tunnels).toEqual([
       expect.objectContaining({
         id: made.body.tunnel.id,
@@ -406,19 +521,22 @@ describe("the console", () => {
     expect(JSON.stringify(tunnels.body)).not.toMatch(/title|favicon|whc_|whg_/);
 
     const pid = pidOf(env, opened.id);
+
     const stop = await api(stack, owner, `/api/apps/${appId}/tunnels/${made.body.tunnel.id}/stop`, {
       method: "POST",
     });
+
     expect(stop.status).toBe(200);
     await waitFor(() => !alive(pid), { what: "the agent to stop" });
-    const stopped = await api<{ tunnels: Tunnel[] }>(stack, owner, `/api/apps/${appId}/tunnels`);
+    const stopped = await api(stack, owner, `/api/apps/${appId}/tunnels`, {}, consoleTunnels);
     expect(stopped.body.tunnels[0]?.state).toBe("stopped");
 
     const removed = await api(stack, owner, `/api/apps/${appId}/tunnels/${made.body.tunnel.id}`, {
       method: "DELETE",
     });
+
     expect(removed.status).toBe(200);
-    const after = await api<{ tunnels: Tunnel[] }>(stack, owner, `/api/apps/${appId}/tunnels`);
+    const after = await api(stack, owner, `/api/apps/${appId}/tunnels`, {}, consoleTunnels);
     expect(after.body.tunnels).toEqual([]);
     expect((await cli([String(local.port)], env)).code).not.toBe(0);
   });

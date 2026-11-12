@@ -4,11 +4,13 @@
 // pipe ends.
 import { forwardedHeaders, type RequestHead, WAITING_HEADER } from "@wurmhol/protocol";
 import { extractFaviconPath, extractTitle, readStart } from "./html-head.ts";
+import { loggedError } from "./log.ts";
 import type { Meta, ShareState } from "./share-meta.ts";
 
 /** Bytes of an HTML response read for its `<title>`. */
 export const TITLE_SCAN_BYTES = 64 * 1024;
 const FAVICON_MAX_BYTES = 100 * 1024;
+
 /**
  * When a new pipe connects, the relay asks the dev server for `/` itself, so the wall has the
  * favicon (and title) before anyone opens it. A server not listening yet answers with the CLI's
@@ -57,17 +59,22 @@ export class SharePage {
    */
   note(html: string, final: boolean) {
     const title = extractTitle(html);
+
     if (!title && !final) return;
     const meta = this.#share.meta();
+
     if (!meta) return;
     const faviconPath = extractFaviconPath(html) ?? "/favicon.ico";
     const changed = title !== null && title !== meta.title;
+
     if (title) meta.title = title;
     const fetchFavicon = !meta.favicon || meta.faviconPath !== faviconPath;
     meta.faviconPath = faviconPath;
     this.#share.save(meta);
     const { ctx } = this.#share;
+
     if (changed) ctx.waitUntil(this.#share.org(meta.orgId).update(meta.id, { title }));
+
     if (fetchFavicon) ctx.waitUntil(this.fetchFavicon(meta));
   }
 
@@ -77,10 +84,13 @@ export class SharePage {
    */
   async probe(attempt = 0) {
     const meta = this.#share.meta();
+
     // Ended, or a viewer's page got there first.
     if (!meta || meta.favicon) return;
+
     try {
       if (!this.#connected()) throw new Error("the CLI is reconnecting");
+
       const response = await this.#relay(
         {
           method: "GET",
@@ -90,11 +100,14 @@ export class SharePage {
         },
         meta,
       );
+
       if (response.headers.has(WAITING_HEADER)) {
         await response.body?.cancel();
         throw new Error("the dev server is not listening yet");
       }
+
       const isHtml = /^text\/html\b/i.test(response.headers.get("content-type") ?? "");
+
       if (response.ok && isHtml && response.body) {
         this.note(await readStart(response.body, TITLE_SCAN_BYTES), true);
       } else {
@@ -105,10 +118,16 @@ export class SharePage {
     } catch (error) {
       const delay = PROBE_RETRY_MS[attempt];
       const current = this.#share.meta();
+
       if (delay === undefined || !current) {
-        this.#share.log.info("share.probe_gave_up", { shareId: meta.id, error });
+        this.#share.log.info("share.probe_gave_up", {
+          shareId: meta.id,
+          error: loggedError(error),
+        });
+
         return;
       }
+
       current.probe = { at: Date.now() + delay, attempt: attempt + 1 };
       this.#share.save(current);
       this.#armAlarm(current);
@@ -126,22 +145,28 @@ export class SharePage {
         },
         meta,
       );
+
       const type = response.headers.get("content-type") ?? "";
+
       if (!response.ok || !/^image\//i.test(type)) {
         await response.body?.cancel();
+
         return;
       }
+
       const body = await response.arrayBuffer();
+
       if (body.byteLength === 0 || body.byteLength > FAVICON_MAX_BYTES) return;
       // The pipe may have ended while the icon came: never stored next to the tombstone.
       const current = this.#share.meta();
+
       if (!current) return;
       this.#share.ctx.storage.kv.put("favicon", { type, body } satisfies StoredFavicon);
       current.favicon = true;
       this.#share.save(current);
       await this.#share.org(current.orgId).update(current.id, { favicon: true });
     } catch (error) {
-      this.#share.log.warn("share.favicon_failed", { shareId: meta.id, error });
+      this.#share.log.warn("share.favicon_failed", { shareId: meta.id, error: loggedError(error) });
     }
   }
 }

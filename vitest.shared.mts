@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from "vite-plus";
 
 // Unit suites: pure logic, fast, no network. Each package's vitest.config.mts extends this.
 export const unit = defineConfig({

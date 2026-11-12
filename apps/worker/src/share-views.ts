@@ -3,6 +3,7 @@
 // viewer first opens the pipe, then at most every `VIEW_FLUSH_MS`, and once more at the pipe's
 // end; the object keeps none of it after.
 import { createDb, recordShareViews, type ShareView } from "@wurmhol/db";
+import { loggedError } from "./log.ts";
 import type { Meta, ShareState } from "./share-meta.ts";
 
 /** A viewer's counts go to D1 and the wall when they first open the share, then at most this often. */
@@ -32,6 +33,7 @@ export class ViewLog {
         view,
       ]),
     );
+
     return this.#loaded;
   }
 
@@ -42,17 +44,21 @@ export class ViewLog {
     const now = Date.now();
     const views = this.#views();
     const seen = views.get(userId);
+
     const view: View = seen
       ? { ...seen, lastSeenAt: now, requests: seen.requests + 1 }
       : { userId, name: null, firstSeenAt: now, lastSeenAt: now, requests: 1, flushedAt: 0 };
+
     views.set(userId, view);
     const wait = view.flushedAt + VIEW_FLUSH_MS - now;
+
     if (wait <= 0) {
       this.#share.ctx.waitUntil(this.flush(meta));
     } else {
       this.#timer ??= setTimeout(() => {
         this.#timer = null;
         const current = this.#share.meta();
+
         if (current) void this.flush(current);
       }, wait);
     }
@@ -66,24 +72,31 @@ export class ViewLog {
   async flush(meta: Meta, final = false) {
     const { ctx, env } = this.#share;
     const views = this.#views();
+
     try {
       const now = Date.now();
+
       for (const view of views.values()) view.flushedAt = now;
       const db = createDb(env.DB);
-      const unnamed = [...views.values()].filter((v) => v.name === null).map((v) => v.userId);
+      const unnamed = [...views.values()].flatMap((v) => (v.name === null ? [v.userId] : []));
+
       if (unnamed.length) {
         const users = await db.query.users.findMany({
           where: (u, { inArray }) => inArray(u.id, unnamed),
           columns: { id: true, name: true, email: true },
         });
+
         for (const user of users) {
           const view = views.get(user.id);
+
           if (view) view.name = user.name || user.email;
         }
       }
+
       if (!final && this.#share.meta()) {
         for (const view of views.values()) ctx.storage.kv.put(`view:${view.userId}`, view);
       }
+
       const all = [...views.values()];
       await recordShareViews(db, meta, all);
       await this.#share.org(meta.orgId).update(meta.id, {
@@ -92,7 +105,7 @@ export class ViewLog {
           .map((view) => ({ name: view.name ?? "Someone", lastSeenAt: view.lastSeenAt })),
       });
     } catch (error) {
-      this.#share.log.warn("share.views_failed", { shareId: meta.id, error });
+      this.#share.log.warn("share.views_failed", { shareId: meta.id, error: loggedError(error) });
     }
   }
 
@@ -101,9 +114,11 @@ export class ViewLog {
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
     await this.flush(meta, true);
+
     for (const [key] of this.#share.ctx.storage.kv.list({ prefix: "view:" })) {
       this.#share.ctx.storage.kv.delete(key);
     }
+
     this.#loaded = new Map();
   }
 }

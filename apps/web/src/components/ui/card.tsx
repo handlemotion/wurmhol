@@ -1,4 +1,5 @@
 import { cn } from "cn";
+import { plainText } from "@/lib/primitive";
 
 export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
@@ -30,7 +31,7 @@ export function CardHeader({ className, title, description, children, ...props }
     >
       {title && <CardTitle>{title}</CardTitle>}
       {description && <CardDescription>{description}</CardDescription>}
-      {!title && typeof children === "string" ? <CardTitle>{children}</CardTitle> : children}
+      {!title && plainText(children) !== undefined ? <CardTitle>{children}</CardTitle> : children}
     </div>
   );
 }

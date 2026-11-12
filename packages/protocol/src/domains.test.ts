@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it } from "vite-plus/test";
 import { customHostname, nextDomainState } from "./domains.ts";
 
 it("accepts hostnames and normalizes case and a trailing dot", () => {

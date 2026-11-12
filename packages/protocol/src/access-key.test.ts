@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it } from "vite-plus/test";
 import { accessKeyHash, isAccessKey } from "./connect.ts";
 
 // Catches: the CLI and the relay hashing a key differently (case, encoding), so a correct key is

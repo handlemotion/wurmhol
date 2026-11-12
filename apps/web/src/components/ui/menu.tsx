@@ -16,7 +16,7 @@ import {
 } from "react-aria-components/Menu";
 import { cn } from "cn";
 import { tv, type VariantProps } from "tailwind-variants";
-import { cx } from "@/lib/primitive";
+import { cx, plainText, renderChildren } from "@/lib/primitive";
 import {
   DropdownDescription,
   dropdownItemStyles,
@@ -75,6 +75,7 @@ export function Menu<T extends object>({ className, placement, popover, ...props
   // One fill springs between the rows (transitive's magnetic hover); the rows paint none.
   const hover = useMagneticHover({ itemSelector: MENU_ITEM_SELECTOR });
   const { className: popoverClassName, ...popoverProps } = popover ?? {};
+
   return (
     <Popover
       placement={placement}
@@ -101,7 +102,9 @@ export interface MenuItemProps
 const ITEM_END = "pe-6";
 
 export function MenuItem({ className, intent, children, ...props }: MenuItemProps) {
-  const textValue = props.textValue || (typeof children === "string" ? children : undefined);
+  const text = plainText(children);
+  const textValue = props.textValue || text;
+
   return (
     <MenuItemPrimitive
       data-slot="menu-item"
@@ -140,13 +143,7 @@ export function MenuItem({ className, intent, children, ...props }: MenuItemProp
             />
           )}
 
-          {typeof children === "function" ? (
-            children(values)
-          ) : typeof children === "string" ? (
-            <MenuLabel>{children}</MenuLabel>
-          ) : (
-            children
-          )}
+          {text === undefined ? renderChildren(children, values) : <MenuLabel>{text}</MenuLabel>}
 
           {values.hasSubmenu && (
             <ChevronRightIcon
@@ -218,9 +215,12 @@ export function MenuSeparator({
 }: React.ComponentProps<typeof DropdownSeparator>) {
   return <DropdownSeparator className={cn("-mx-1", className)} {...props} />;
 }
+
 export const MenuShortcut = DropdownKeyboard;
+
 /** A row's label: one line, truncated once the menu reaches its max width. */
 export function MenuLabel({ className, ...props }: React.ComponentProps<typeof DropdownLabel>) {
   return <DropdownLabel className={cn("truncate", className)} {...props} />;
 }
+
 export const MenuDescription = DropdownDescription;

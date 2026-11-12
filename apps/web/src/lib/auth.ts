@@ -8,6 +8,7 @@ import {
   multiSessionClient,
   organizationClient,
 } from "better-auth/client/plugins";
+import { z } from "zod/mini";
 
 const client = createAuthClient({
   plugins: [organizationClient(), passkeyClient(), multiSessionClient(), magicLinkClient()],
@@ -31,6 +32,9 @@ export async function signInSocial(
   );
 }
 
+/** A development stack's answer to a magic-link request: the link it did not mail. */
+const devLinkAnswer = z.object({ devLink: z.string() });
+
 /**
  * Sends the sign-in link. A development stack sends no mail and returns the link itself
  * (`devLink`), which this resolves to; otherwise it resolves to null.
@@ -38,8 +42,9 @@ export async function signInSocial(
 export async function signInMagicLink(email: string, callbackURL: string): Promise<string | null> {
   const result = await client.signIn.magicLink({ email, callbackURL });
   check(result, "could not send the link");
-  const data = result.data as { devLink?: unknown } | null;
-  return typeof data?.devLink === "string" ? data.devLink : null;
+  const data = devLinkAnswer.safeParse(result.data);
+
+  return data.success ? data.data.devLink : null;
 }
 
 export async function setActiveOrg(organizationId: string): Promise<void> {

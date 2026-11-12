@@ -19,8 +19,10 @@ export async function shareUrl(
 ) {
   if (share.name && config.customDomains) {
     const host = await primaryDomain(db, share.name);
+
     if (host) return customDomainOrigin(config, host);
   }
+
   return shareOrigin(config, share);
 }
 
@@ -36,6 +38,7 @@ export async function viewerOrigin(
   host: string | null | undefined,
 ) {
   const hostname = host ? customHostname(host) : null;
+
   if (
     hostname &&
     share.name &&
@@ -44,6 +47,7 @@ export async function viewerOrigin(
   ) {
     return customDomainOrigin(config, hostname);
   }
+
   return shareOrigin(config, share);
 }
 
@@ -59,10 +63,13 @@ export async function refreshPipeUrl(
   pipe: { orgId: string; name: string },
 ) {
   const open = await findOpenShareByName(db, pipe.name);
+
   if (!open) return;
   const share = await findShare(db, open.id);
+
   if (!share || share.orgId !== pipe.orgId || share.tunnelId) return;
   const url = await shareUrl(db, config, { id: share.id, name: pipe.name });
+
   if (await shareStub(env, share.id).setUrl(url)) {
     await orgStub(env, pipe.orgId).update(share.id, { url });
   }

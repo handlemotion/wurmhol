@@ -1,7 +1,8 @@
 // How shares start and end: the live wall, Terminate, revoked tokens, and the fair-use limits.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   alive,
   api,
@@ -11,6 +12,7 @@ import {
   cliEnv,
   createToken,
   localServer,
+  parseJson,
   type Person,
   share,
   shareStates,
@@ -23,10 +25,9 @@ import {
 } from "./support.ts";
 
 function pidOf(env: Record<string, string>, id: string) {
-  return (
-    JSON.parse(readFileSync(join(env.WURMHOL_HOME!, "shares", `${id}.json`), "utf8")) as {
-      pid: number;
-    }
+  return parseJson(
+    z.object({ pid: z.number() }),
+    readFileSync(join(env.WURMHOL_HOME!, "shares", `${id}.json`), "utf8"),
   ).pid;
 }
 
@@ -52,10 +53,12 @@ describe("the wall and Terminate", () => {
       id?: string;
       shares?: unknown[];
     }[] = [];
+
     const wall = browserSocket(`${stack.url}/api/live`, [], {
       cookie: ada.cookie,
       origin: stack.url,
     });
+
     wall.on("message", (data) => events.push(JSON.parse(data.toString())));
     await new Promise<void>((resolve, reject) => {
       wall.once("open", () => resolve());
@@ -66,6 +69,7 @@ describe("the wall and Terminate", () => {
     const local = await localServer((_req, res) =>
       res.writeHead(200, { "content-type": "text/html" }).end("<title>Wall test</title>ok"),
     );
+
     const startedAt = Date.now();
     const started = await share(stack, env, local.port);
     await waitFor(
@@ -110,18 +114,24 @@ describe("the wall and Terminate", () => {
     // pipe holds its place until Cloudflare drops the socket.
     const local = await localServer((_req, res) => res.end("x"));
     const started = await share(stack, env, local.port);
+
     const stateOf = async () => {
-      const { body } = await api<{ shares: { id: string; state: string }[] }>(
+      const { body } = await api(
         stack,
         ada,
         "/api/shares",
+        {},
+        z.object({ shares: z.array(z.object({ id: z.string(), state: z.string() })) }),
       );
+
       return body.shares.find((s) => s.id === started.id)?.state;
     };
+
     expect(await stateOf()).toBe("live");
     const pid = pidOf(env, started.id);
     process.kill(pid, "SIGSTOP");
     const frozenAt = Date.now();
+
     try {
       await waitFor(async () => (await stateOf()) === "away", {
         timeoutMs: 75_000,
@@ -133,6 +143,7 @@ describe("the wall and Terminate", () => {
     } finally {
       process.kill(pid, "SIGCONT");
     }
+
     await waitFor(async () => (await stateOf()) === "live", {
       timeoutMs: 20_000,
       what: "the woken CLI to bring its pipe back",
@@ -155,7 +166,8 @@ describe("the wall and Terminate", () => {
     expect(again.code).toBe(1);
     expect(again.stderr).toContain("Create a new token");
     // The list no longer shows it.
-    const { body } = await api<{ tokens: { id: string }[] }>(stack, ada, "/api/tokens");
+    const tokensBody = z.object({ tokens: z.array(z.object({ id: z.string() })) });
+    const { body } = await api(stack, ada, "/api/tokens", {}, tokensBody);
     expect(body.tokens.map((t) => t.id)).not.toContain(second.id);
     await local.close();
   });
@@ -171,6 +183,7 @@ describe("the wall and Terminate", () => {
 describe("fair-use limits", () => {
   it("refuses a share over the org's active limit until one stops", async () => {
     const stack = await startStack({ LIMIT_ACTIVE_SHARES: "2" });
+
     try {
       const ada = await signIn(stack);
       const env = cliEnv(stack, (await createToken(stack, ada)).token);
@@ -191,6 +204,7 @@ describe("fair-use limits", () => {
 
   it("ends shares and refuses new ones once the org's monthly transfer is used", async () => {
     const stack = await startStack({ LIMIT_MONTHLY_BYTES: String(4 * 1024 * 1024) });
+
     try {
       const ada = await signIn(stack);
       const env = cliEnv(stack, (await createToken(stack, ada)).token);
@@ -199,6 +213,7 @@ describe("fair-use limits", () => {
       const started = await share(stack, env, local.port);
       const cookie = await viewerCookie(stack, ada, started.url);
       const pid = pidOf(env, started.id);
+
       for (let i = 0; i < 3 && alive(pid); i++) {
         await (
           await browserFetch(`${started.url}/file`, { cookie })
@@ -206,6 +221,7 @@ describe("fair-use limits", () => {
           .arrayBuffer()
           .catch(() => null);
       }
+
       await waitFor(() => !alive(pid), { what: "the share to end at the limit" });
       const refused = await cli([String(local.port)], env);
       expect(refused.code).toBe(1);
@@ -218,6 +234,7 @@ describe("fair-use limits", () => {
 
   it("ends shares and refuses new ones once the org's monthly requests are used", async () => {
     const stack = await startStack({ LIMIT_MONTHLY_REQUESTS: "3" });
+
     try {
       const ada = await signIn(stack);
       const env = cliEnv(stack, (await createToken(stack, ada)).token);
@@ -229,6 +246,7 @@ describe("fair-use limits", () => {
       await waitFor(
         async () => {
           await browserFetch(`${started.url}/`, { cookie }).catch(() => null);
+
           return !alive(pid);
         },
         { what: "the share to end at the request limit", timeoutMs: 20_000, intervalMs: 250 },
@@ -259,7 +277,11 @@ describe("a pipe's lifetime", () => {
 
   function endsAt(id: string) {
     return cli(["ls", "--json"], env).then((run) => {
-      const pipes = JSON.parse(run.stdout) as { id: string; endsAt: string }[];
+      const pipes = parseJson(
+        z.array(z.object({ id: z.string(), endsAt: z.string() })),
+        run.stdout,
+      );
+
       return Date.parse(pipes.find((p) => p.id === id)!.endsAt);
     });
   }
@@ -282,11 +304,17 @@ describe("a pipe's lifetime", () => {
     const before = Date.now();
     const result = await cli([String(local.port), "--ttl", "2s", "--json"], env);
     expect(result.code).toBe(0);
-    const started = JSON.parse(result.stdout) as { id: string; url: string; endsAt: string };
+
+    const started = parseJson(
+      z.object({ id: z.string(), url: z.string(), endsAt: z.string() }),
+      result.stdout,
+    );
+
     expect(Math.abs(Date.parse(started.endsAt) - before - 2000)).toBeLessThan(2000);
     const pid = pidOf(env, started.id);
     await waitFor(() => !alive(pid), { timeoutMs: 4000, what: "--ttl 2s to end the pipe" });
     const db = stack.db();
+
     try {
       expect(db.prepare("select end_reason from shares where id = ?").get(started.id)).toEqual({
         end_reason: "expired",
@@ -294,6 +322,7 @@ describe("a pipe's lifetime", () => {
     } finally {
       db.close();
     }
+
     const page = await browserFetch(`${started.url}/`);
     expect(page.status).toBe(410);
     expect(await page.text()).toContain("This pipe has ended.");

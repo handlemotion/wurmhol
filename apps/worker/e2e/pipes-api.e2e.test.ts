@@ -1,5 +1,6 @@
 // Token scopes and expiry, and the org pipes API on the CLI's host (ADR 0008).
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   api,
   browserFetch,
@@ -7,6 +8,7 @@ import {
   cliEnv,
   createToken,
   localServer,
+  readJson,
   type Person,
   share,
   signIn,
@@ -43,23 +45,27 @@ async function pipesApi(token: string, path = "", method = "GET") {
     method,
     headers: { authorization: `Bearer ${token}` },
   });
+
   return {
     status: response.status,
-    body: (await response.json()) as {
-      pipes?: { id: string }[];
-      error?: string;
-      fix?: string;
-    },
+    body: await readJson(
+      z.object({
+        pipes: z.array(z.object({ id: z.string() })).optional(),
+        error: z.string().optional(),
+        fix: z.string().optional(),
+      }),
+      response,
+    ),
   };
 }
 
 function shareRow(id: string) {
   const db = stack.db();
+
   try {
-    return db.prepare("select ended_at, end_reason from shares where id = ?").get(id) as {
-      ended_at: number | null;
-      end_reason: string | null;
-    };
+    return z
+      .object({ ended_at: z.number().nullable(), end_reason: z.string().nullable() })
+      .parse(db.prepare("select ended_at, end_reason from shares where id = ?").get(id));
   } finally {
     db.close();
   }
@@ -99,6 +105,7 @@ it("an org token lists and closes a pipe another token of the org opened", async
 it("refuses a pipes token with 403 and the fix", async () => {
   const opened = await share(stack, pipesEnv, local.port);
   const token = pipesEnv.WURMHOL_TOKEN!;
+
   for (const [path, method] of [
     ["", "GET"],
     [`/${opened.id}`, "DELETE"],
@@ -107,6 +114,7 @@ it("refuses a pipes token with 403 and the fix", async () => {
     expect(refused.status).toBe(403);
     expect(refused.body.fix).toContain("list and close every pipe in the org");
   }
+
   expect(shareRow(opened.id).ended_at).toBeNull();
   await stopAll(pipesEnv);
 });
@@ -125,9 +133,18 @@ it("another org's pipe is not found, and not listed", async () => {
 });
 
 it("a token made without options can only open pipes, and expires in 90 days", async () => {
-  const { body } = await api<{
-    tokens: { name: string; scope: string; expiresAt: string | null }[];
-  }>(stack, ada, "/api/tokens");
+  const { body } = await api(
+    stack,
+    ada,
+    "/api/tokens",
+    {},
+    z.object({
+      tokens: z.array(
+        z.object({ name: z.string(), scope: z.string(), expiresAt: z.string().nullable() }),
+      ),
+    }),
+  );
+
   const agent = body.tokens.find((t) => t.name === "agent")!;
   expect(agent.scope).toBe("pipes");
   const days = (new Date(agent.expiresAt!).getTime() - Date.now()) / 86_400_000;

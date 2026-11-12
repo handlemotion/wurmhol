@@ -11,6 +11,7 @@ import { api, ApiError, type Me } from "@/lib/api";
 /** Orgs as one phrase: "Handlemotion and your personal org". */
 function orgList(orgs: Me["orgs"]) {
   const names = orgs.map((o) => (o.personal ? "your personal org" : o.name));
+
   return names.length < 2
     ? (names[0] ?? "")
     : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
@@ -85,6 +86,7 @@ function Review() {
   /** Where the code goes, as the provider checked it against the client's registered URIs. */
   const redirect = search.get("redirect_uri") ?? "";
   const redirectHost = URL.canParse(redirect) ? new URL(redirect).host : null;
+
   const review = useQuery({
     queryKey: ["consent", clientId],
     queryFn: async () => {
@@ -94,10 +96,12 @@ function Review() {
         ),
         api<Me>("/api/me"),
       ]);
+
       return { client, email: me.user.email, orgs: me.orgs };
     },
     retry: false,
   });
+
   const decide = useMutation({
     mutationFn: (accept: boolean) =>
       api<{ url: string }>("/api/auth/oauth2/consent", {
@@ -109,10 +113,13 @@ function Review() {
       if (error instanceof ApiError && error.status === 401) toLogin();
     },
   });
+
   if (review.error instanceof ApiError && review.error.status === 401) {
     toLogin();
+
     return null;
   }
+
   if (review.isError) return <Text>{review.error.message}</Text>;
 
   return (
@@ -130,6 +137,7 @@ function Review() {
         const host = clientHost(client.client_id);
         const name = client.client_name ?? host ?? "This app";
         const reach = orgList(orgs);
+
         return (
           <div className="flex flex-col gap-8">
             <div className="flex flex-col gap-2">

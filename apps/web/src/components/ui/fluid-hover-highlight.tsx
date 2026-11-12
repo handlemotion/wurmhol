@@ -32,6 +32,7 @@ export interface FluidHoverHighlightProps {
 export function FluidHoverHighlight({ rect, session, className, style }: FluidHoverHighlightProps) {
   // Reduced motion keeps the fade and drops the travel: fewer and gentler, not none.
   const reduceMotion = useReducedMotion() ?? false;
+
   return (
     <AnimatePresence>
       {rect && (

@@ -26,6 +26,7 @@ export function envToken() {
 /** The saved login, when it belongs to this install: a token is never sent to another one. */
 export function savedLogin(): Credentials | null {
   const stored = readCredentials();
+
   return stored && stored.server === server() ? stored : null;
 }
 
@@ -46,6 +47,7 @@ export function pipeDomain() {
 export function allowlistLine() {
   const api = new URL(server()).hostname;
   const pipes = pipeDomain();
+
   return pipes
     ? `With Limited network access, allowlist ${api} (the CLI's host) and *.${pipes} (pipe URLs, to open them from the sandbox).`
     : `With Limited network access, allowlist ${api} (the CLI's host), and your pipe domain to open pipe URLs from the sandbox.`;

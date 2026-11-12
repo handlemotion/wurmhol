@@ -18,6 +18,7 @@ export function nextStreamId(id: number): number {
   if (!Number.isInteger(id) || id < FIRST_STREAM_ID || id > MAX_STREAM_ID) {
     throw new ProtocolError("stream ids exhausted");
   }
+
   return id + 1;
 }
 
@@ -43,6 +44,7 @@ export class SendWindow {
   /** Adds credit from the peer's `window` frame and wakes waiting senders. */
   grant(bytes: number) {
     this.#available += bytes;
+
     for (const wake of this.#waiters.splice(0)) wake();
   }
 
@@ -56,6 +58,7 @@ export class SendWindow {
   /** Wakes every waiter, for a stream that is closing; they re-check and see their stream ended. */
   release() {
     this.#available = Number.POSITIVE_INFINITY;
+
     for (const wake of this.#waiters.splice(0)) wake();
   }
 }
@@ -79,6 +82,7 @@ export class ReceiveWindow {
   /** Records bytes that arrived. Throws ProtocolError if the peer sent past its window. */
   received(bytes: number) {
     this.#received += bytes;
+
     if (this.#received > this.#granted) {
       throw new ProtocolError("peer sent past its flow-control window");
     }
@@ -87,10 +91,12 @@ export class ReceiveWindow {
   /** Records bytes handed on. Returns the bytes to grant now in a `window` frame, or 0. */
   consumed(bytes: number): number {
     this.#consumedSinceGrant += bytes;
+
     if (this.#consumedSinceGrant < this.#size / 2) return 0;
     const grant = this.#consumedSinceGrant;
     this.#consumedSinceGrant = 0;
     this.#granted += grant;
+
     return grant;
   }
 }
@@ -119,9 +125,11 @@ export class HttpStreamOrder {
       case this.#head:
         if (this.#phase !== "head") throw new ProtocolError(`second ${this.#head} on a stream`);
         this.#phase = "body";
+
         return;
       case "data":
         if (this.#phase !== "body") throw new ProtocolError(`data outside a body`);
+
         return;
       case "window":
         // Credit for the body flowing the other way: valid whenever that body is still open,
@@ -131,6 +139,7 @@ export class HttpStreamOrder {
         // An `end` before the head is an error report (the request never reached the server).
         if (this.#phase === "done") throw new ProtocolError("second end on a stream");
         this.#phase = "done";
+
         return;
       default:
         throw new ProtocolError(`${frame.type} on an HTTP stream`);
@@ -160,6 +169,7 @@ export class SendBacklog {
     this.#pending = Math.max(0, this.#pending - Math.max(0, now - this.#at) * this.#drainPerMs);
     this.#at = Math.max(this.#at, now);
     this.#pending += bytes;
+
     return this.#pending <= this.#limit;
   }
 

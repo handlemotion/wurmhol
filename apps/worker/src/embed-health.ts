@@ -18,11 +18,13 @@ export async function describeTunnels(
     c.var.db,
     tunnels.map((tunnel) => tunnel.id),
   );
+
   return Promise.all(
     tunnels.map(async (tunnel) => {
       const session = latest.get(tunnel.id);
       const open = session && !session.endedAt;
       const health = open ? await shareStub(c.env, session.id).health() : null;
+
       const state = health
         ? health.state
         : tunnel.stoppedAt
@@ -30,6 +32,7 @@ export async function describeTunnels(
           : session
             ? "ended"
             : "never";
+
       return {
         id: tunnel.id,
         url: shareOrigin(c.var.config, { id: tunnel.id, name: tunnel.name }),

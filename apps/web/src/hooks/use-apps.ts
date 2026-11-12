@@ -27,6 +27,7 @@ export function useApps(enabled: boolean) {
 
 export function useCreateApp() {
   const client = useQueryClient();
+
   return useMutation({
     mutationFn: (body: { name: string }) =>
       api<{ app: App }>("/api/apps", { method: "POST", body }),
@@ -36,6 +37,7 @@ export function useCreateApp() {
 
 export function useUpdateApp(id: string) {
   const client = useQueryClient();
+
   return useMutation({
     mutationFn: (body: Partial<AppSettings>) =>
       api<{ app: App }>(`/api/apps/${id}`, { method: "PATCH", body }),
@@ -45,6 +47,7 @@ export function useUpdateApp(id: string) {
 
 export function useDeleteApp() {
   const client = useQueryClient();
+
   return useMutation({
     mutationFn: (id: string) => api(`/api/apps/${id}`, { method: "DELETE" }),
     onSuccess: () => client.invalidateQueries({ queryKey: keys.apps }),
@@ -61,6 +64,7 @@ export function useAppKeys(app: string, enabled: boolean) {
 
 export function useCreateAppKey(app: string) {
   const client = useQueryClient();
+
   return useMutation({
     mutationFn: (body: {
       name: string;
@@ -77,6 +81,7 @@ export function useCreateAppKey(app: string) {
 
 export function useRevokeAppKey(app: string) {
   const client = useQueryClient();
+
   return useMutation({
     mutationFn: (key: string) => api(`/api/apps/${app}/keys/${key}`, { method: "DELETE" }),
     onSuccess: () => client.invalidateQueries({ queryKey: keys.keys(app) }),
@@ -95,6 +100,7 @@ export function useAppTunnels(app: string, enabled: boolean) {
 /** Stops a pipe (its agent may open it again) or deletes it for good. */
 export function useEndTunnel(app: string) {
   const client = useQueryClient();
+
   return useMutation({
     mutationFn: ({ tunnel, how }: { tunnel: string; how: "stop" | "delete" }) =>
       how === "stop"

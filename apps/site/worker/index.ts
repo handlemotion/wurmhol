@@ -16,6 +16,7 @@ const DOCS_PATH = /^\/(docs(\/|$)|_mintlify\/|mintlify-assets\/|\.well-known\/ve
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
     if (!env.DOCS_HOST || !DOCS_PATH.test(url.pathname)) return env.ASSETS.fetch(request);
 
     const host = url.host;
@@ -23,6 +24,7 @@ export default {
     const proxied = new Request(url, request);
     proxied.headers.set("X-Forwarded-Host", host);
     proxied.headers.set("X-Forwarded-Proto", "https");
+
     return fetch(proxied);
   },
 };

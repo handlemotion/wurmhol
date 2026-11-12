@@ -18,17 +18,25 @@ const PROBE_MS = 1500;
 /** Listening ports in /proc/net/tcp{,6}: state 0A, the local port in hex after the colon. */
 function fromProc(text: string) {
   const ports: number[] = [];
+
   for (const line of text.split("\n").slice(1)) {
     const [, local, , state] = line.trim().split(/\s+/);
+
     if (state !== "0A" || !local) continue;
     ports.push(Number.parseInt(local.slice(local.lastIndexOf(":") + 1), 16));
   }
+
   return ports;
 }
 
 /** `lsof -Fn` names (`n*:5173`, `n[::1]:3000`) or `netstat` rows (`TCP 0.0.0.0:5173 … LISTENING`). */
 function fromAddresses(lines: string[]) {
-  return lines.map((line) => Number(/:(\d+)$/.exec(line.trim())?.[1])).filter(Boolean);
+  return lines.flatMap((line) => {
+    const port = Number(/:(\d+)$/.exec(line.trim())?.[1]);
+
+    // NaN for a line without a port, and 0 is no port either.
+    return port ? [port] : [];
+  });
 }
 
 async function listening(): Promise<number[]> {
@@ -37,14 +45,19 @@ async function listening(): Promise<number[]> {
       const files = await Promise.all(
         ["/proc/net/tcp", "/proc/net/tcp6"].map((f) => readFile(f, "utf8").catch(() => "")),
       );
+
       return files.flatMap(fromProc);
     }
+
     if (process.platform === "win32") {
       const { stdout } = await run("netstat", ["-ano", "-p", "TCP"]);
       const rows = stdout.split("\n").filter((l) => /LISTENING/i.test(l));
+
       return fromAddresses(rows.map((row) => row.trim().split(/\s+/)[1] ?? ""));
     }
+
     const { stdout } = await run("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN", "-Fn"]);
+
     return fromAddresses(stdout.split("\n").filter((l) => l.startsWith("n")));
   } catch {
     return [];
@@ -54,7 +67,9 @@ async function listening(): Promise<number[]> {
 /** The `<title>` of a page, decoded enough to show. */
 function titleOf(html: string) {
   const raw = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1]?.trim();
+
   if (!raw) return null;
+
   const text = raw
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
@@ -63,6 +78,7 @@ function titleOf(html: string) {
     // Last, so `&amp;lt;` reads as `&lt;`, not `<`.
     .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ");
+
   return text.slice(0, MACHINE_LIMITS.title) || null;
 }
 
@@ -90,6 +106,7 @@ export function get(
       },
       resolve,
     );
+
     req.on("socket", (socket) => loopback.watch(port, socket));
     req.on("timeout", () => req.destroy());
     // After a response this is only its body cut short, which `read` ends on.
@@ -104,6 +121,7 @@ function read(res: http.IncomingMessage, enough: (text: string) => boolean = () 
     res.setEncoding("utf8");
     res.on("data", (chunk: string) => {
       text += chunk;
+
       if (text.length > 64 * 1024 || enough(text)) res.destroy();
     });
     res.on("close", () => resolve(text));
@@ -116,7 +134,9 @@ function read(res: http.IncomingMessage, enough: (text: string) => boolean = () 
  */
 async function isDebugger(port: number) {
   const res = await get(port, "/json/version");
+
   if (!res) return false;
+
   try {
     return "Protocol-Version" in JSON.parse(await read(res));
   } catch {
@@ -132,16 +152,20 @@ async function isDebugger(port: number) {
  */
 async function probe(port: number): Promise<MachinePort | null> {
   const res = await get(port, "/");
+
   if (!res) return null;
   const status = res.statusCode ?? 0;
   let title: string | null = null;
+
   if (/text\/html/i.test(res.headers["content-type"] ?? "")) {
     // The title is in the head; no need to read a whole page.
     title = titleOf(await read(res, (text) => /<\/title>/i.test(text)));
   } else {
     res.resume();
   }
+
   if (status < 400 || (status === 404 && !(await isDebugger(port)))) return { port, title };
+
   return null;
 }
 
@@ -152,7 +176,9 @@ async function probe(port: number): Promise<MachinePort | null> {
 function ignored(server: string) {
   const ports = (process.env.WURMHOL_HOST_IGNORE ?? "").split(/[\s,]+/).map(Number);
   const own = new URL(server);
+
   if (["localhost", "127.0.0.1", "[::1]"].includes(own.hostname)) ports.push(Number(own.port));
+
   return ports.filter((port) => Number.isInteger(port) && port > 0);
 }
 
@@ -171,17 +197,21 @@ export class PortScanner {
 
   async scan(): Promise<MachinePort[]> {
     const open = new Set((await listening()).filter((p) => p >= MIN_PORT && !this.#skip.has(p)));
+
     for (const port of this.#known.keys()) if (!open.has(port)) this.#known.delete(port);
     const now = Date.now();
+
     const fresh = [...open].filter((port) => {
       const known = this.#known.get(port);
+
       return !known || (known.answer === null && now - known.at > RETRY_MS);
     });
+
     const answers = await Promise.all(fresh.map((port) => probe(port)));
     fresh.forEach((port, i) => this.#known.set(port, { answer: answers[i] ?? null, at: now }));
+
     return [...this.#known.values()]
-      .map((known) => known.answer)
-      .filter((p): p is MachinePort => p !== null)
+      .flatMap((known) => (known.answer === null ? [] : [known.answer]))
       .toSorted((a, b) => a.port - b.port)
       .slice(0, MACHINE_LIMITS.ports);
   }

@@ -44,6 +44,7 @@ import {
 function thin(Icon: LucideIcon, name: string) {
   const Thin = (props: LucideProps) => <Icon aria-hidden strokeWidth={1.5} {...props} />;
   Thin.displayName = name;
+
   return Thin;
 }
 

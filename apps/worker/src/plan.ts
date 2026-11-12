@@ -19,6 +19,7 @@ export interface OrgPlan {
 export function businessRequests(config: Config, capCents: number) {
   const extraCents = Math.max(0, capCents - config.BUSINESS_BASE_CENTS);
   const extra = Math.floor((extraCents * 1_000_000) / config.BUSINESS_CENTS_PER_MILLION);
+
   return config.BUSINESS_INCLUDED_REQUESTS + extra;
 }
 
@@ -38,11 +39,14 @@ export async function orgPlan(db: Db, config: Config, orgId: string): Promise<Or
       },
     };
   }
+
   const subscription = await orgSubscription(db, orgId);
+
   if (!subscription) return null;
   // A plan this Worker does not know gets Friends' limits, not unlimited ones.
   const plan: PlanName = isPlanName(subscription.plan) ? subscription.plan : "friends";
   const { members, active, monthlyBytes, monthlyRequests, customDomains } = PLAN_LIMITS[plan];
+
   if (plan !== "business") {
     return {
       plan,
@@ -51,9 +55,11 @@ export async function orgPlan(db: Db, config: Config, orgId: string): Promise<Or
       limits: { active, monthlyBytes, monthlyRequests, period: null, meter: null },
     };
   }
+
   // Stripe bills no usage during a trial; the trial still stops at what the base includes.
   const trial = subscription.status === "trialing";
   const cap = (await findSpendCap(db, orgId)) ?? DEFAULT_SPEND_CAP_CENTS;
+
   return {
     plan,
     members,

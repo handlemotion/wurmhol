@@ -13,12 +13,14 @@ import {
 } from "@modelcontextprotocol/client";
 import { Client as LegacyClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport as LegacyTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import {
   api,
   browserFetch,
   cliEnv,
   createToken,
+  type JsonValue,
   localServer,
   type Person,
   share,
@@ -32,20 +34,20 @@ import {
 const CLIENT_ID = "e2e-assistant";
 const REDIRECT = "http://127.0.0.1:9/callback";
 
-interface ToolResult {
-  content: { type: string; text: string }[];
-  structuredContent?: Record<string, unknown>;
-  isError?: boolean;
-}
+const toolResult = z.object({
+  content: z.array(z.object({ type: z.string(), text: z.string() })),
+  structuredContent: z.record(z.string(), z.json()).optional(),
+  isError: z.boolean().optional(),
+});
 
-interface Pipe {
-  id: string;
-  url: string;
-  port: number;
-  org: { id: string; name: string };
-}
+type ToolResult = z.infer<typeof toolResult>;
+
+const pipeList = z.object({
+  pipes: z.array(z.object({ id: z.string(), url: z.string(), port: z.number() })),
+});
 
 let stack: Stack;
+
 /** The MCP server, on the CLI's host (127.0.0.1); the app is on localhost. */
 let mcpUrl: string;
 let ada: Person;
@@ -59,6 +61,7 @@ beforeAll(async () => {
   // The first request to Better Auth seeds the MCP resource; the client links to it.
   await fetch(`${stack.url}/.well-known/oauth-authorization-server`);
   const db = stack.db({ write: true });
+
   try {
     const now = Date.now();
     db.prepare(
@@ -125,13 +128,21 @@ async function authorize(person: Person, url: URL, scope?: string) {
   const toConsent = await browserFetch(url.toString(), { cookie: person.cookie });
   const consent = new URL(toConsent.headers.get("location") ?? "", stack.url);
   expect(consent.pathname).toBe("/oauth/consent");
-  const decided = await api<{ url: string }>(stack, person, "/api/auth/oauth2/consent", {
-    method: "POST",
-    body: { accept: true, oauth_query: consent.search.slice(1), ...(scope ? { scope } : {}) },
-  });
+
+  const decision = { accept: true, oauth_query: consent.search.slice(1) };
+
+  const decided = await api(
+    stack,
+    person,
+    "/api/auth/oauth2/consent",
+    { method: "POST", body: scope ? { ...decision, scope } : decision },
+    z.object({ url: z.string() }),
+  );
+
   expect(decided.status).toBe(200);
   const back = new URL(decided.body.url);
   expect(`${back.origin}${back.pathname}`).toBe(REDIRECT);
+
   return back.searchParams;
 }
 
@@ -148,8 +159,10 @@ async function connectAs(person: Person, scope?: string) {
   await client.connect(
     new StreamableHTTPClientTransport(new URL(mcpUrl), { authProvider: provider }),
   );
-  const call = async (name: string, args: Record<string, unknown> = {}) =>
-    (await client.callTool({ name, arguments: args })) as ToolResult;
+
+  const call = async (name: string, args: { [key: string]: JsonValue } = {}) =>
+    toolResult.parse(await client.callTool({ name, arguments: args }));
+
   return { client, call, provider };
 }
 
@@ -158,19 +171,19 @@ async function openPipe(person: Person) {
   const local = await localServer((_req, res) => res.end("hello"));
   const env = cliEnv(stack, (await createToken(stack, person)).token);
   envs.push(env);
+
   return { ...(await share(stack, env, local.port)), local };
 }
 
-const pipesOf = (result: ToolResult) => (result.structuredContent as { pipes: Pipe[] }).pipes;
+const pipesOf = (result: ToolResult) => pipeList.parse(result.structuredContent).pipes;
 
 const endReason = (id: string) => {
   const db = stack.db();
+
   try {
-    return (
-      db.prepare("select end_reason from shares where id = ?").get(id) as {
-        end_reason: string | null;
-      }
-    ).end_reason;
+    return z
+      .object({ end_reason: z.string().nullable() })
+      .parse(db.prepare("select end_reason from shares where id = ?").get(id)).end_reason;
   } finally {
     db.close();
   }
@@ -179,9 +192,11 @@ const endReason = (id: string) => {
 describe("hosted MCP server", () => {
   it("sends a signed-out person through the login page and back to authorize", async () => {
     const provider = new Assistant();
+
     const transport = new StreamableHTTPClientTransport(new URL(mcpUrl), {
       authProvider: provider,
     });
+
     await expect(new Client({ name: "e2e", version: "0" }).connect(transport)).rejects.toThrow(
       UnauthorizedError,
     );
@@ -219,9 +234,10 @@ describe("hosted MCP server", () => {
     // Catches a destructive tool a host would call without asking the person first.
     expect(tools.find((t) => t.name === "stop_pipe")?.annotations?.destructiveHint).toBe(true);
 
-    const orgs = (await call("list_orgs")).structuredContent as {
-      orgs: { id: string; openPipes: number }[];
-    };
+    const orgs = z
+      .object({ orgs: z.array(z.object({ id: z.string(), openPipes: z.number() })) })
+      .parse((await call("list_orgs")).structuredContent);
+
     expect(orgs.orgs).toHaveLength(1);
     expect(orgs.orgs[0]!.openPipes).toBe(1);
 
@@ -254,9 +270,14 @@ describe("hosted MCP server", () => {
     expect(pipesOf(await call("list_pipes")).map((p) => p.id)).not.toContain(bobs.id);
 
     // Ada joins Bob's org: the same access token now reaches it.
-    const { body: invite } = await api<{ url: string }>(stack, bob, "/api/invites", {
-      method: "POST",
-    });
+    const { body: invite } = await api(
+      stack,
+      bob,
+      "/api/invites",
+      { method: "POST" },
+      z.object({ url: z.string() }),
+    );
+
     const code = invite.url.split("/join/")[1]!;
     expect((await api(stack, ada, `/api/invites/${code}/accept`, { method: "POST" })).status).toBe(
       200,
@@ -264,11 +285,14 @@ describe("hosted MCP server", () => {
     expect(pipesOf(await call("list_pipes")).map((p) => p.id)).toContain(bobs.id);
 
     // Bob removes her. Catches memberships baked into the token: it is still valid for an hour.
-    const { body: members } = await api<{ members: { id: string; email: string }[] }>(
+    const { body: members } = await api(
       stack,
       bob,
       "/api/members",
+      {},
+      z.object({ members: z.array(z.object({ id: z.string(), email: z.string() })) }),
     );
+
     const member = members.members.find((m) => m.email === ada.email)!;
     expect((await api(stack, bob, `/api/members/${member.id}`, { method: "DELETE" })).status).toBe(
       200,
@@ -297,6 +321,7 @@ describe("hosted MCP server", () => {
 
   it("takes an org token as a fixed header, from a 2025-era client", async () => {
     const pipe = await openPipe(ada);
+
     const connect = async (token: string) => {
       const client = new LegacyClient({ name: "e2e-legacy", version: "0" });
       await client.connect(
@@ -304,10 +329,12 @@ describe("hosted MCP server", () => {
           requestInit: { headers: { authorization: `Bearer ${token}` } },
         }),
       );
+
       return client;
     };
+
     const org = await connect((await createToken(stack, ada, "mcp", { scope: "org" })).token);
-    const listed = (await org.callTool({ name: "list_pipes", arguments: {} })) as ToolResult;
+    const listed = toolResult.parse(await org.callTool({ name: "list_pipes", arguments: {} }));
     expect(pipesOf(listed).map((p) => p.id)).toContain(pipe.id);
     await org.close();
 
@@ -321,6 +348,7 @@ describe("hosted MCP server", () => {
     const cy = await signIn(stack);
     const cyToken = (await createToken(stack, cy, "mcp", { scope: "org" })).token;
     const db = stack.db({ write: true });
+
     try {
       db.prepare("delete from members where user_id = (select id from users where email = ?)").run(
         cy.email,
@@ -328,27 +356,33 @@ describe("hosted MCP server", () => {
     } finally {
       db.close();
     }
+
     await expect(connect(cyToken)).rejects.toThrow("no longer in its org");
   });
 
   it("lives on the CLI's host only, and keeps Better Auth's other OAuth routes closed", async () => {
     const onApp = await fetch(`${stack.url}/mcp`, { method: "POST", body: "{}" });
     expect(onApp.status).toBe(404);
+
     const metadata = await fetch(
       `http://127.0.0.1:${stack.port}/.well-known/oauth-protected-resource/mcp`,
     );
+
     expect(await metadata.json()).toMatchObject({
       resource: mcpUrl,
       authorization_servers: [stack.url],
     });
+
     // Catches client management or session JWTs reachable by any signed-in person.
     for (const path of ["/api/auth/oauth2/get-clients", "/api/auth/token"]) {
       expect((await browserFetch(`${stack.url}${path}`, { cookie: ada.cookie })).status).toBe(404);
     }
+
     const created = await api(stack, ada, "/api/auth/oauth2/create-client", {
       method: "POST",
       body: { redirect_uris: ["https://evil.example/cb"] },
     });
+
     expect(created.status).toBe(404);
   });
 });

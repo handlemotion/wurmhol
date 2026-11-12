@@ -19,6 +19,7 @@ export async function orgStanding(
 ): Promise<Standing> {
   if (!billing.enabled) return { ok: true, reason: "billing_off" };
   const subscription = await orgSubscription(db, orgId);
+
   return subscription
     ? { ok: true, reason: "subscribed", plan: subscription.plan }
     : { ok: false, reason: "no_subscription" };
@@ -38,6 +39,7 @@ export async function orgSubscription(db: Db, orgId: string) {
     .from(subscriptions)
     .where(and(eq(subscriptions.orgId, orgId), inArray(subscriptions.status, [...PAID_STATUSES])))
     .limit(1);
+
   return row ?? null;
 }
 
@@ -48,6 +50,7 @@ export async function findSpendCap(db: Db, orgId: string) {
     .from(spendCaps)
     .where(eq(spendCaps.orgId, orgId))
     .limit(1);
+
   return row?.cents ?? null;
 }
 

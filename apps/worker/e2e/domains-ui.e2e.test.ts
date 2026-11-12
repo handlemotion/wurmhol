@@ -1,9 +1,12 @@
 // The console's Domains dialog in a real browser (ADR 0033): shown only where the install has
 // custom domains on, and it walks an owner from adding a hostname to seeing it active.
 import { type Browser, type BrowserContext, chromium, type Page } from "playwright";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
+import { z } from "zod";
 import { fakeCloudflare, fakeResolver, TOKEN, ZONE } from "./domain-fakes.ts";
 import { type Person, signIn, type Stack, startStack } from "./support.ts";
+
+const challengeRow = z.object({ challenge: z.string() });
 
 let stack: Stack;
 let cloudflare: Awaited<ReturnType<typeof fakeCloudflare>>;
@@ -32,6 +35,7 @@ beforeAll(async () => {
   await context.addCookies(
     ada.cookie.split("; ").map((pair) => {
       const at = pair.indexOf("=");
+
       return {
         name: pair.slice(0, at),
         value: pair.slice(at + 1),
@@ -71,14 +75,19 @@ it("walks from adding a hostname to seeing it active", async () => {
 
   // The owner publishes both; Check now moves it to Active.
   const added = stack.db();
+
   try {
-    const row = added
-      .prepare("select challenge from custom_domains where hostname = ?")
-      .get("preview.acme-ui.test") as { challenge: string };
+    const row = challengeRow.parse(
+      added
+        .prepare("select challenge from custom_domains where hostname = ?")
+        .get("preview.acme-ui.test"),
+    );
+
     resolver.publish("_wurmhol.preview.acme-ui.test", `wurmhol-verify=${row.challenge}`);
   } finally {
     added.close();
   }
+
   cloudflare.set("preview.acme-ui.test", { status: "active", sslStatus: "active" });
   await dialog.getByRole("button", { name: "Check now" }).click();
   await expect.poll(() => dialog.getByText("Active", { exact: true }).count()).toBe(1);
@@ -96,14 +105,19 @@ it("moves a domain to active by itself once its records are out, and says when r
     .poll(() => dialog.getByText("_wurmhol.later.acme-ui.test").count())
     .toBeGreaterThan(0);
   const db = stack.db();
+
   try {
-    const row = db
-      .prepare("select challenge from custom_domains where hostname = ?")
-      .get("later.acme-ui.test") as { challenge: string };
+    const row = challengeRow.parse(
+      db
+        .prepare("select challenge from custom_domains where hostname = ?")
+        .get("later.acme-ui.test"),
+    );
+
     resolver.publish("_wurmhol.later.acme-ui.test", `wurmhol-verify=${row.challenge}`);
   } finally {
     db.close();
   }
+
   cloudflare.set("later.acme-ui.test", { status: "active", sslStatus: "active" });
   // Catches: a dialog that only re-reads the stored list, which never moves until the daily job
   // or a click on Check now.
@@ -112,6 +126,7 @@ it("moves a domain to active by itself once its records are out, and says when r
     .toBe(2);
 
   cloudflare.setDown(true);
+
   try {
     const row = dialog.getByRole("listitem").filter({ hasText: "later.acme-ui.test" });
     await row.getByRole("button", { name: "Remove" }).click();

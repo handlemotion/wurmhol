@@ -11,11 +11,14 @@
 //   await pipe.ready();
 //   pipe.url; // stable for a named pipe
 export { Wurmhol } from "./client.ts";
+
 export type { KeepOpenOptions, PipeInfo, PipeOptions, WurmholOptions } from "./client.ts";
 
 export { openPipe } from "./pipe.ts";
+
 export type {
   CloseReason,
+  LogFields,
   OpenPipeOptions,
   Pipe,
   PipeEvents,
@@ -25,6 +28,7 @@ export type {
 } from "./pipe.ts";
 
 export { keepOpen } from "./managed.ts";
+
 export type {
   ManagedCloseReason,
   ManagedPipe,
@@ -35,6 +39,7 @@ export type {
 } from "./managed.ts";
 
 export { awaitLogin, login, redeem, startLogin } from "./auth.ts";
+
 export type { DeviceCode, Granted, LoginOptions, RedeemOptions } from "./auth.ts";
 
 export {
@@ -44,9 +49,11 @@ export {
   removeTokenFile,
   writeTokenFile,
 } from "./store.ts";
+
 export type { StoredToken, TokenStore } from "./store.ts";
 
 export { grantHeaders, WurmholEmbed } from "./embed.ts";
+
 export type {
   EmbedConnector,
   EmbedCounts,
@@ -63,12 +70,15 @@ export type {
 } from "./embed.ts";
 
 export { GRANT_CLOSE_CODES, GRANT_PROTOCOL, grantProtocols, tunnelSocket } from "./browser.ts";
+
 export type { SocketLike, TunnelSocket, TunnelSocketOptions } from "./browser.ts";
 
 export { FixError } from "./errors.ts";
+
 export type { ErrorCode } from "./errors.ts";
 
 export { DomainError, domains } from "./domains.ts";
+
 export type {
   CallOptions,
   Domain,
@@ -79,4 +89,5 @@ export type {
 } from "./domains.ts";
 
 export { runtime, selectTransport } from "./transport/index.ts";
+
 export type { Runtime, TransportChoice } from "./transport/index.ts";

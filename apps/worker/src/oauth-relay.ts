@@ -18,23 +18,28 @@ import { errorPage } from "./pages.ts";
 
 /** How long a pipe's viewer has to come back from the provider. */
 const STATE_TTL_MS = 10 * 60 * 1000;
+
 /** Longer states are not OAuth states worth keeping. */
 const MAX_STATE_LENGTH = 1024;
 
 /** The `state` of a redirect to an OAuth provider that will call back on the relay, or null. */
 export function relayedState(config: Config, location: string | null, base: string) {
   const relay = relayOrigin(config);
+
   if (!relay || !location) return null;
   let target: URL;
   let callback: URL;
+
   try {
     target = new URL(location, base);
     callback = new URL(target.searchParams.get("redirect_uri") ?? "");
   } catch {
     return null;
   }
+
   if (callback.origin !== relay) return null;
   const state = target.searchParams.get("state");
+
   return state && state.length <= MAX_STATE_LENGTH ? state : null;
 }
 
@@ -52,6 +57,7 @@ export async function noteOAuthRedirect(
   host: string | null = null,
 ) {
   const state = relayedState(config, response.headers.get("location"), request.url);
+
   if (!state) return;
   await recordOAuthState(createDb(env.DB), {
     state,
@@ -69,27 +75,35 @@ export async function noteOAuthRedirect(
 /** Step 2: a request to the relay's host, the provider's callback. */
 export async function handleRelay(request: Request, env: Env, config: Config) {
   const log = createLogger({ component: "oauth" });
+
   if (request.method !== "GET") {
     // `response_mode=form_post` is out of scope: a cross-site POST arrives at the pipe without
     // its SameSite=Lax share cookie, so the pipe could not let it through.
     return errorPage(405, "This sign-in relay takes the provider's redirect only (GET).");
   }
+
   const url = new URL(request.url);
   const state = url.searchParams.get("state");
   const db = createDb(env.DB);
   const share = state && state.length <= MAX_STATE_LENGTH ? await takeOAuthState(db, state) : null;
+
   if (!share) {
     log.info("oauth.unknown");
+
     return errorPage(
       404,
       "This sign-in has expired or was already used. Start signing in again from the app.",
     );
   }
+
   if (share.endedAt) {
     log.info("oauth.ended", { shareId: share.id });
+
     return errorPage(410, "This pipe has ended.");
   }
+
   log.info("oauth.relayed", { shareId: share.id });
+
   // Concatenated, never resolved against the origin: a path like `//evil.example` stays a path
   // on the pipe's host.
   return new Response(null, {

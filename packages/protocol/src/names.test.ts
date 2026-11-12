@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it } from "vite-plus/test";
 import { pipeName } from "./names.ts";
 
 it("accepts DNS labels and lowercases them", () => {
