@@ -1,5 +1,12 @@
 # wurmhol
 
+## 0.9.1
+
+### Patch Changes
+
+- d279749: Local state files, logs and server answers are now checked when read: a malformed share file is removed instead of half-trusted, and a non-JSON success answer from a proxy or portal page fails with an error naming it instead of returning nothing.
+- f33f893: Require ws 8.22.2 or later.
+
 ## 0.9.0
 
 ### Minor Changes
