@@ -19,7 +19,9 @@ drives the real `SendWindow` and `ReceiveWindow` through every interleaving of t
 every way of cutting the body into pieces:
 
 - the sender cuts the next piece (1 up to the largest piece, like `chunk()` over reads of any size);
-- the sender waits on the real `ready(piece)`, then calls `take(piece)` and sends a `data` frame;
+- the sender starts the real `await ready(piece)` as it cuts the piece, keeps that one wait across
+  every later step so only a real `grant()` can wake it, then calls `take(piece)` and sends a
+  `data` frame;
 - the receiver gets the next `data` frame in order and calls `received(bytes)`;
 - the receiver hands on one piece and calls `consumed(bytes)`, sending back any grant it returns;
 - the sender gets the next `window` frame in order and calls `grant(bytes)`.
@@ -34,7 +36,7 @@ In every reachable state it checks four properties:
 - **no stall:** a state with nothing left to do has the whole body handed on.
 
 Bounds: windows of 6, 7 and 8 units, largest pieces of 2, 3 and 4, bodies of 24, 17 and 20 units
-(about 14,000 to 96,000 distinct states each, under a second in all). One more test pins the
+(about 14,000 to 96,000 distinct states each, a few seconds in all). One more test pins the
 precondition that ties the model to the real sizes: `MAX_CHUNK_BYTES` (64 KiB) is at most
 `INITIAL_WINDOW / 2` (512 KiB). The last test shows the checker finding a stall when a piece can
 be larger than half the window: then a sender can wait for credit the receiver only grants after
@@ -86,10 +88,19 @@ the code at the new commit.
 - **A precondition test fails** (`MAX_CHUNK_BYTES` grew past half of `INITIAL_WINDOW`): that is a
   real stall risk, not a modeling error. The last test shows the schedule.
 
-Before trusting a pass after editing the checker, break the real code once and watch it fail. For
-example, change `this.#size / 2` to `this.#size` in `ReceiveWindow.consumed` (it should report a
-stall), or make `SendWindow.ready` return at once (it should report credit). Then restore the
-file with `git checkout -- packages/protocol/src/mux.ts`.
+Before trusting a pass after editing the checker, break the real code once and watch it fail.
+`mux.ts` may hold uncommitted work that is not yours, so save its exact contents first and put
+them back afterwards; never restore it from Git:
+
+```bash
+before=$(mktemp) && cp packages/protocol/src/mux.ts "$before"
+# Break one thing, run the check, read the failure.
+cp "$before" packages/protocol/src/mux.ts && rm "$before"
+```
+
+Breaks worth trying: change `this.#size / 2` to `this.#size` in `ReceiveWindow.consumed` (it
+should report a stall), drop the wake loop from `SendWindow.grant` (a stall: the sender keeps
+waiting with enough credit), or make `SendWindow.ready` return at once (it should report credit).
 
 ## Not covered
 

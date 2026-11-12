@@ -40,6 +40,9 @@ interface World {
   receive: ReceiveWindow;
   cut: number;
   pending: number | null;
+  /** The sender's `await send.ready(pending)`, started when the piece was cut and kept across
+   * steps, so only the real `grant()` can wake it. */
+  waiting: { resumed: boolean } | null;
   sent: number;
   toReceiver: number[];
   buffered: number[];
@@ -75,10 +78,18 @@ function take(queue: number[]): number {
 
 function apply(world: World, step: Step): string | null {
   switch (step.kind) {
-    case "cut":
+    case "cut": {
       world.pending = step.bytes;
       world.cut += step.bytes;
+      const waiting = { resumed: false };
+      const { send } = world;
+      void (async () => {
+        await send.ready(step.bytes);
+        waiting.resumed = true;
+      })();
+      world.waiting = waiting;
       return null;
+    }
     case "send": {
       const bytes = world.pending ?? 0;
       try {
@@ -88,6 +99,7 @@ function apply(world: World, step: Step): string | null {
       }
       world.sent += bytes;
       world.pending = null;
+      world.waiting = null;
       world.toReceiver.push(bytes);
       return null;
     }
@@ -120,41 +132,35 @@ function apply(world: World, step: Step): string | null {
   }
 }
 
-/** Whether `await window.ready(bytes)` would resume now, asked of the real method. */
-async function readyNow(window: SendWindow, bytes: number): Promise<boolean> {
-  let resumed = false;
-  void (async () => {
-    await window.ready(bytes);
-    resumed = true;
-  })();
-  for (let tick = 0; tick < 4; tick++) await Promise.resolve();
-  return resumed;
-}
-
-async function enabled(world: World, bounds: Bounds): Promise<Step[]> {
+function enabled(world: World, bounds: Bounds): Step[] {
   const steps: Step[] = [];
   if (world.pending === null && world.cut < bounds.body) {
     for (let bytes = 1; bytes <= Math.min(bounds.piece, bounds.body - world.cut); bytes++) {
       steps.push({ kind: "cut", bytes });
     }
   }
-  // The pumps `await stream.send.ready(piece.byteLength)` before every `take`. Probing it leaves a
-  // waiter on this world's window, which is never stepped again: successors are replayed afresh.
-  if (world.pending !== null && (await readyNow(world.send, world.pending))) {
-    steps.push({ kind: "send" });
-  }
+  // The pumps `await stream.send.ready(piece.byteLength)` before every `take`.
+  if (world.waiting?.resumed) steps.push({ kind: "send" });
   if (world.toReceiver.length) steps.push({ kind: "deliver" });
   if (world.buffered.length) steps.push({ kind: "consume" });
   if (world.toSender.length) steps.push({ kind: "grant" });
   return steps;
 }
 
-function replay(path: Step[], bounds: Bounds): Outcome {
+/** Lets a resolved `ready()` run on to the line after its `await`. */
+async function settle() {
+  for (let tick = 0; tick < 8; tick++) await Promise.resolve();
+}
+
+/** Replays `path` on fresh real windows, settling the sender's wait after each step that can
+ * start or wake it, as the event loop would before the next frame arrives. */
+async function replay(path: Step[], bounds: Bounds): Promise<Outcome> {
   const world: World = {
     send: new SendWindow(bounds.window),
     receive: new ReceiveWindow(bounds.window),
     cut: 0,
     pending: null,
+    waiting: null,
     sent: 0,
     toReceiver: [],
     buffered: [],
@@ -166,6 +172,7 @@ function replay(path: Step[], bounds: Bounds): Outcome {
   for (const step of path) {
     const violation = apply(world, step);
     if (violation) return { ok: false, violation };
+    if (step.kind === "cut" || step.kind === "grant") await settle();
   }
   return { ok: true, world };
 }
@@ -186,6 +193,7 @@ function key(world: World): string {
   return [
     world.cut,
     world.pending,
+    world.waiting?.resumed,
     world.sent,
     world.send.available,
     world.toReceiver.join("."),
@@ -205,36 +213,39 @@ interface Report {
 async function checkFlowControl(bounds: Bounds): Promise<Report> {
   const seen = new Set<string>();
   let frontier: Step[][] = [[]];
-  const start = replay([], bounds);
+  const start = await replay([], bounds);
   if (start.ok) seen.add(key(start.world));
 
-  const story = (path: Step[]) =>
-    path.map((step, i) => {
-      const before = replay(path.slice(0, i), bounds);
-      return before.ok ? describeStep(step, before.world) : step.kind;
-    });
+  const story = async (path: Step[]) => {
+    const lines: string[] = [];
+    for (const [i, step] of path.entries()) {
+      const before = await replay(path.slice(0, i), bounds);
+      lines.push(before.ok ? describeStep(step, before.world) : step.kind);
+    }
+    return lines;
+  };
 
   while (frontier.length) {
     const next: Step[][] = [];
     for (const path of frontier) {
-      const here = replay(path, bounds);
+      const here = await replay(path, bounds);
       if (!here.ok) continue;
-      const steps = await enabled(here.world, bounds);
+      const steps = enabled(here.world, bounds);
       if (!steps.length && here.world.consumed !== bounds.body) {
         return {
           states: seen.size,
           counterexample: {
             violation: `stall: ${here.world.consumed} of ${bounds.body} units handed on, the sender waits for ${here.world.pending} with credit ${here.world.send.available}, and nothing else can happen`,
-            steps: story(path),
+            steps: await story(path),
           },
         };
       }
       for (const step of steps) {
         const child = [...path, step];
-        const after = replay(child, bounds);
+        const after = await replay(child, bounds);
         const violation = after.ok ? invariant(after.world, bounds) : after.violation;
         if (violation) {
-          return { states: seen.size, counterexample: { violation, steps: story(child) } };
+          return { states: seen.size, counterexample: { violation, steps: await story(child) } };
         }
         if (!after.ok) continue;
         const k = key(after.world);
