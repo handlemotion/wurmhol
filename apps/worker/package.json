@@ -27,12 +27,12 @@
     "@types/node": "^26.6.6",
     "@types/ws": "^8.18.2",
     "bun": "1.4.4",
-    "playwright": "1.65.0",
+    "playwright": "1.65.1",
     "stripe": "^23.1.0",
     "undici": "^8.12.4",
     "vite": "catalog:",
     "vite-plus": "catalog:",
-    "wrangler": "^4.160.0",
+    "wrangler": "^4.165.0",
     "ws": "^8.22.2",
     "wurmhol": "workspace:*"
   }
