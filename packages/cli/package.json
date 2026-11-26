@@ -44,7 +44,7 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
-    "@types/node": "^26.6.6",
+    "@types/node": "^26.6.10",
     "@types/ws": "^8.18.2",
     "@wurmhol/protocol": "workspace:*",
     "@wurmhol/sdk": "workspace:*",

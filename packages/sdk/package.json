@@ -51,7 +51,7 @@
     "ws": "^8.22.2"
   },
   "devDependencies": {
-    "@types/node": "^26.6.6",
+    "@types/node": "^26.6.10",
     "@types/ws": "^8.18.2",
     "@wurmhol/protocol": "workspace:*",
     "vite-plus": "catalog:"
