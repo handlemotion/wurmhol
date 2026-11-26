@@ -17,7 +17,7 @@
     "@wurmhol/db": "workspace:*",
     "@wurmhol/protocol": "workspace:*",
     "drizzle-orm": "^0.45.4",
-    "hono": "^4.13.17",
+    "hono": "^4.13.22",
     "universal-github-app-jwt": "^2.2.2",
     "zod": "4.6.7"
   },
@@ -28,12 +28,12 @@
     "@types/ws": "^8.18.2",
     "bun": "1.4.4",
     "playwright": "1.65.0",
-    "stripe": "^23.1.0",
+    "stripe": "^23.2.0",
     "undici": "^8.12.4",
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "wrangler": "^4.160.0",
-    "ws": "^8.22.2",
+    "ws": "^8.23.0",
     "wurmhol": "workspace:*"
   }
 }
